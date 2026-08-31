@@ -3,6 +3,7 @@ import { BrowserMultiFormatReader, type IScannerControls } from '@zxing/browser'
 import { pantryApi, flaggedAllergens, ALLERGEN_LABELS, productSourceLabel, type OffProduct, type PantryItemInput } from '../../lib/api'
 import { AllergenBadge } from './Allergens'
 import { LocationField } from './LocationField'
+import { useI18n } from '../../lib/locale-provider'
 
 // Barcode scan-into-pantry. Uses the device camera (zxing decoder, which works in
 // Chrome/Edge/Android and Safari/iOS) to read a barcode, looks it up via Open Food
@@ -19,6 +20,7 @@ export function ScanModal({ locations, avoidAllergens, allergenPeople, onClose, 
   onAdded: () => void
   onLocationsChanged: () => void
 }) {
+  const { t } = useI18n()
   const videoRef = useRef<HTMLVideoElement>(null)
   const controlsRef = useRef<IScannerControls | null>(null)
   const acceptRef = useRef(true) // gate: stop accepting scans while a result is shown
@@ -105,7 +107,7 @@ export function ScanModal({ locations, avoidAllergens, allergenPeople, onClose, 
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-card pl-scan" onClick={(e) => e.stopPropagation()}>
         <div className="pl-scan-head">
-          <span className="wf-serif pl-scan-title">Scan into pantry</span>
+          <span className="wf-serif pl-scan-title">{t('pantry.scanInto')}</span>
           {added > 0 && <span className="pl-scan-count">✓ {added} added</span>}
           <button type="button" className="modal-close" aria-label="Close" onClick={onClose}>×</button>
         </div>
@@ -133,7 +135,7 @@ export function ScanModal({ locations, avoidAllergens, allergenPeople, onClose, 
               <input value={manual} placeholder="Type a barcode" inputMode="numeric"
                 onChange={(e) => setManual(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); lookupManual() } }} />
-              <button type="button" className="pill" disabled={!manual.trim()} onClick={lookupManual}>Look up</button>
+              <button type="button" className="pill" disabled={!manual.trim()} onClick={lookupManual}>{t('pantry.lookUp')}</button>
             </div>
           </div>
 
@@ -168,7 +170,7 @@ export function ScanModal({ locations, avoidAllergens, allergenPeople, onClose, 
                       })()}
                       {found.traces.length > 0 && (
                         <div className="pl-scan-allergens">
-                          <span className="pl-contains-l">May contain</span>
+                          <span className="pl-contains-l">{t('pantry.mayContain')}</span>
                           {found.traces.map((a) => <span key={a} className="pl-contains-item"><AllergenBadge allergen={a} trace avoid={avoidAllergens.includes(a) || !!allergenPeople[a]} /> {ALLERGEN_LABELS[a] ?? a}</span>)}
                         </div>
                       )}
@@ -177,34 +179,34 @@ export function ScanModal({ locations, avoidAllergens, allergenPeople, onClose, 
                 ) : (
                   <div className="pl-scan-prod">
                     <span className="pl-scan-prodemoji">📦</span>
-                    <div className="pl-scan-prodname">Not found in a product database</div>
-                    <div className="pl-scan-prodbrand">Barcode {code} — name it and add manually.</div>
-                    <input className="pl-scan-nameinput" value={name} autoFocus placeholder="Item name" onChange={(e) => setName(e.target.value)} />
+                    <div className="pl-scan-prodname">{t('pantry.notFound')}</div>
+                    <div className="pl-scan-prodbrand">{t('pantry.barcodeManual', { code: code ?? '' })}</div>
+                    <input className="pl-scan-nameinput" value={name} autoFocus placeholder={t('pantry.itemName')} onChange={(e) => setName(e.target.value)} />
                   </div>
                 )}
 
                 <div className="pl-scan-fields">
-                  <label><span>Where</span>
+                  <label><span>{t('pantry.where')}</span>
                     <LocationField value={location} locations={locations} onChange={setLocation} onLocationsChanged={onLocationsChanged} />
                   </label>
-                  <label><span>Amount</span>
+                  <label><span>{t('pantry.amount')}</span>
                     <input value={amount} onChange={(e) => setAmount(e.target.value)} />
                   </label>
                 </div>
 
                 {!showMore ? (
-                  <button type="button" className="pl-scan-more" onClick={() => setShowMore(true)}>+ Unit, expiry, note, warn-below</button>
+                  <button type="button" className="pl-scan-more" onClick={() => setShowMore(true)}>{t('pantry.moreFields')}</button>
                 ) : (
                   <div className="pl-scan-more-grid">
-                    <label><span>Unit</span><input value={unit} placeholder="bag / lbs" onChange={(e) => setUnit(e.target.value)} /></label>
-                    <label><span>Expires</span><input type="date" value={expiresOn} onChange={(e) => setExpiresOn(e.target.value)} /></label>
-                    <label><span>Warn below</span><input type="number" min="0" step="any" value={lowAt} placeholder="default" onChange={(e) => setLowAt(e.target.value)} /></label>
-                    <label className="pl-scan-more-note"><span>Note</span><input value={note} onChange={(e) => setNote(e.target.value)} /></label>
+                    <label><span>{t('pantry.unit')}</span><input value={unit} placeholder="Beutel / kg" onChange={(e) => setUnit(e.target.value)} /></label>
+                    <label><span>{t('pantry.expires')}</span><input type="date" value={expiresOn} onChange={(e) => setExpiresOn(e.target.value)} /></label>
+                    <label><span>{t('pantry.warnBelowShort')}</span><input type="number" min="0" step="any" value={lowAt} placeholder={t('pantry.default')} onChange={(e) => setLowAt(e.target.value)} /></label>
+                    <label className="pl-scan-more-note"><span>{t('event.notes')}</span><input value={note} onChange={(e) => setNote(e.target.value)} /></label>
                   </div>
                 )}
 
                 <div className="pl-scan-acts">
-                  <button type="button" className="pill" disabled={busy} onClick={resume}>Cancel</button>
+                  <button type="button" className="pill" disabled={busy} onClick={resume}>{t('common.cancel')}</button>
                   <button type="button" className="pill btn-primary" style={{ color: 'var(--on-accent)', border: 0 }} disabled={busy || (!found && !name.trim())} onClick={add}>
                     {busy ? 'Adding…' : 'Add & scan next'}
                   </button>
@@ -215,7 +217,7 @@ export function ScanModal({ locations, avoidAllergens, allergenPeople, onClose, 
         </div>
 
         <div className="pl-scan-foot">
-          <button type="button" className="pill" onClick={onClose}>Done</button>
+          <button type="button" className="pill" onClick={onClose}>{t('common.done')}</button>
         </div>
       </div>
     </div>

@@ -5,6 +5,7 @@ import { suggestGoalForEvent } from '../../lib/goal-match'
 import { Icon } from '../icons'
 import { createEventLocal, updateEventLocal, deleteEventLocal, tombstoneEvent } from '../../lib/powersync/events-local'
 import { parseRepeat, buildRrule, describeRrule, weekdayCode, nthWeekdayOfMonth, WEEKDAYS, type RepeatFreq, type CustomUnit, type MonthlyMode } from './recurrence'
+import { useI18n } from '../../lib/locale-provider'
 
 // Scope of an edit/delete to a recurring event, surfaced via a small chooser.
 type EditScope = 'this' | 'following' | 'all'
@@ -168,6 +169,7 @@ export function EventModal({
   onClose: () => void
   onSaved: () => void
 }) {
+  const { t } = useI18n()
   const editing = !!event
   const navigate = useNavigate()
   const { persons } = usePersons()
@@ -658,11 +660,11 @@ export function EventModal({
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 420 }}>
-        <button type="button" className="modal-close" aria-label="Close" onClick={onClose}>
+        <button type="button" className="modal-close" aria-label={t('common.close')} onClick={onClose}>
           ×
         </button>
         <div className="wf-serif" style={{ fontSize: 22, fontWeight: 600, marginBottom: 14 }}>
-          {editing ? (isMeal ? 'Planned meal' : 'Edit event') : 'New event'}
+          {editing ? (isMeal ? t('event.plannedMeal') : t('event.edit')) : t('event.new')}
         </div>
 
         {saveError && (
@@ -684,22 +686,22 @@ export function EventModal({
 
         <form onSubmit={submit}>
           <label className="field">
-            <span>Title</span>
+            <span>{t('event.title')}</span>
             <input value={form.title} onChange={(e) => set('title', e.target.value)} placeholder="Soccer practice" autoFocus />
           </label>
 
           <label className="field">
-            <span>Date</span>
+            <span>{t('event.date')}</span>
             <input type="date" value={form.day} onChange={(e) => set('day', e.target.value)} />
           </label>
           {!form.allDay && (
             <div className="field-row">
               <label className="field">
-                <span>Time</span>
+                <span>{t('event.time')}</span>
                 <input type="time" value={form.time} onChange={(e) => set('time', e.target.value)} />
               </label>
               <label className="field">
-                <span>Duration</span>
+                <span>{t('event.duration')}</span>
                 <select value={form.durationMin} onChange={(e) => set('durationMin', Number(e.target.value))}>
                   {DURATIONS.map((d) => (
                     <option key={d.min} value={d.min}>
@@ -713,7 +715,7 @@ export function EventModal({
 
           <label className="field" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <input type="checkbox" checked={form.allDay} onChange={(e) => set('allDay', e.target.checked)} style={{ width: 'auto' }} />
-            <span style={{ margin: 0 }}>All day</span>
+            <span style={{ margin: 0 }}>{t('calendar.allDay')}</span>
           </label>
 
           <label className="field" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -725,7 +727,7 @@ export function EventModal({
               the end condition are all facets of the same thing, so they live
               together rather than in separate cards. */}
           <div className="field">
-            <span>Repeats</span>
+            <span>{t('event.repeat')}</span>
             <select
               value={repeat.freq}
               onChange={(e) => setRepeat((r) => ({ ...r, freq: e.target.value as RepeatFreq }))}
@@ -733,7 +735,7 @@ export function EventModal({
             >
               {REPEAT_OPTIONS.map((o) => (
                 <option key={o.value} value={o.value}>
-                  {o.label}
+                  {t(`event.repeat.${o.value}`)}
                 </option>
               ))}
             </select>
@@ -741,7 +743,7 @@ export function EventModal({
             {/* Weekly preset → which days (defaults to the event's own weekday). */}
             {repeat.freq === 'weekly' && (
               <div className="rep-grp">
-                <span className="rep-sub">On days</span>
+                <span className="rep-sub">{t('event.onDays')}</span>
                 <WeekdayChips value={repeat.byday} weekday={weekday} onChange={(next) => setRepeat((r) => ({ ...r, byday: next }))} />
               </div>
             )}
@@ -751,7 +753,7 @@ export function EventModal({
                 The raw rule stays under Advanced for power users / imports. */}
             {repeat.freq === 'custom' && (
               <div className="rep-grp">
-                <span className="rep-sub">Repeat every</span>
+                <span className="rep-sub">{t('event.every')}</span>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                   <input
                     type="number"
@@ -795,7 +797,7 @@ export function EventModal({
                 )}
 
                 <details style={{ marginTop: 10 }}>
-                  <summary style={{ cursor: 'pointer', fontSize: 13, color: 'var(--ink-2)' }}>Advanced (raw RRULE)</summary>
+                  <summary style={{ cursor: 'pointer', fontSize: 13, color: 'var(--ink-2)' }}>{t('event.advanced')}</summary>
                   <input
                     style={{ marginTop: 8 }}
                     value={repeat.custom}
@@ -810,11 +812,11 @@ export function EventModal({
             {/* End condition — COUNT rides in the rule, a date in recurrenceEndAt. */}
             {repeat.freq !== 'none' && (
               <div className="rep-grp">
-                <span className="rep-sub">Ends</span>
+                <span className="rep-sub">{t('event.ends')}</span>
                 <select value={endMode} onChange={(e) => setEndMode(e.target.value as 'never' | 'on' | 'after')} style={{ width: '100%' }}>
-                  <option value="never">Never</option>
-                  <option value="on">On a date</option>
-                  <option value="after">After a number of times</option>
+                  <option value="never">{t('event.never')}</option>
+                  <option value="on">{t('event.onDate')}</option>
+                  <option value="after">{t('event.afterTimes')}</option>
                 </select>
                 {endMode === 'on' && (
                   <input type="date" value={until} onChange={(e) => setUntil(e.target.value)} style={{ marginTop: 8 }} />
@@ -830,7 +832,7 @@ export function EventModal({
                       aria-label="Number of occurrences"
                       style={{ width: 76 }}
                     />
-                    <span className="muted">times</span>
+                    <span className="muted">{t('event.times')}</span>
                   </div>
                 )}
               </div>
@@ -841,7 +843,7 @@ export function EventModal({
           </div>
 
           <div className="field">
-            <span>Who</span>
+            <span>{t('event.who')}</span>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
               {persons.map((p) => {
                 const on = form.participantIds.includes(p.id)
@@ -883,7 +885,7 @@ export function EventModal({
               a single one we just use it. */}
           {!editing && ownerCals.length > 1 && (
             <label className="field">
-              <span>Calendar</span>
+              <span>{t('event.calendar')}</span>
               <select
                 value={calendarId}
                 onChange={(e) => {
@@ -903,7 +905,7 @@ export function EventModal({
           )}
 
           <label className="field">
-            <span>Location (optional)</span>
+            <span>{t('event.locationOptional')}</span>
             <input value={form.location} onChange={(e) => set('location', e.target.value)} placeholder="Field 3" />
           </label>
 
@@ -913,14 +915,14 @@ export function EventModal({
           {!shownSuggestion && llmThinking && (
             <div className="ev-suggest ev-suggest-thinking">
               <span className="ai-spark thinking"><Icon name="spark" /></span>
-              <span className="ev-suggest-txt">Looking for a goal this counts toward…</span>
+              <span className="ev-suggest-txt">{t('event.findingGoal')}</span>
             </div>
           )}
           {/* Searched, nothing fit — say so (and let them pick below) instead of
               the spinner just disappearing. Only when there were goals to match. */}
           {!shownSuggestion && !autoLinkedGoal && !llmThinking && searchedEmpty && relevantGoals.length > 0 && (
             <div className="ev-suggest ev-suggest-none">
-              <span className="ev-suggest-txt muted">No matching goal — pick one below if it counts.</span>
+              <span className="ev-suggest-txt muted">{t('event.noMatchingGoal')}</span>
             </div>
           )}
           {shownSuggestion && (
@@ -961,7 +963,7 @@ export function EventModal({
 
           {relevantGoals.length > 0 && (
             <label className="field">
-              <span>Counts toward (optional)</span>
+              <span>{t('event.countsToward')}</span>
               <select
                 value={form.goalId}
                 onChange={(e) => {
@@ -971,7 +973,7 @@ export function EventModal({
                 }}
                 style={{ width: '100%' }}
               >
-                <option value="">No goal</option>
+                <option value="">{t('event.noGoal')}</option>
                 {relevantGoals.map((g) => (
                   <option key={g.id} value={g.id}>
                     {g.emoji ? `${g.emoji} ` : ''}
@@ -986,9 +988,9 @@ export function EventModal({
               post-event recap ticks it. Hidden once every step is already done. */}
           {isChecklistGoal && steps.length > 0 && (
             <label className="field">
-              <span>Completes step</span>
+              <span>{t('event.completesStep')}</span>
               <select value={form.goalStepId} onChange={(e) => set('goalStepId', e.target.value)} style={{ width: '100%' }}>
-                <option value="">No specific step</option>
+                <option value="">{t('event.noStep')}</option>
                 {steps.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.done ? '✓ ' : ''}
@@ -1016,7 +1018,7 @@ export function EventModal({
                   padding: '10px 4px',
                 }}
               >
-                {confirmDelete ? 'Tap again to delete' : 'Delete'}
+                {confirmDelete ? t('event.tapDelete') : t('common.delete')}
               </button>
             )}
             <button
@@ -1025,7 +1027,7 @@ export function EventModal({
               disabled={!form.title.trim() || saving || (wasRecurring && !seriesReady)}
               style={{ flex: 1, justifyContent: 'center' }}
             >
-              {saving ? 'Saving…' : editing ? 'Save' : 'Add event'}
+              {saving ? t('common.saving') : editing ? t('common.save') : t('event.add')}
             </button>
           </div>
         </form>
@@ -1036,13 +1038,12 @@ export function EventModal({
           <div className="modal-overlay" onClick={() => { setScopePrompt(null); setSaving(false) }}>
             <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 360 }}>
               <div className="wf-serif" style={{ fontSize: 19, fontWeight: 600, marginBottom: 14 }}>
-                {scopePrompt === 'delete' ? 'Delete recurring event' : 'Edit recurring event'}
+                {scopePrompt === 'delete' ? t('event.deleteRecurring') : t('event.editRecurring')}
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
                 {scopePrompt === 'save' && hasSeriesOnlyChanges && (
                   <div style={{ color: 'var(--ink-2)', fontSize: 13, lineHeight: 1.45, marginBottom: 2 }}>
-                    Changes to all-day, countdown, people, goal, or repeat settings cannot apply to one event.
-                    Choose “This and following events” or “All events”.
+                    {t('event.seriesOnly')} {t('event.chooseScope')}
                   </div>
                 )}
                 <button
@@ -1052,13 +1053,13 @@ export function EventModal({
                   disabled={scopePrompt === 'save' && hasSeriesOnlyChanges}
                   onClick={() => onScopeChosen('this')}
                 >
-                  This event
+                  {t('event.thisOne')}
                 </button>
                 <button type="button" className="btn btn-ghost" style={{ justifyContent: 'center' }} onClick={() => onScopeChosen('following')}>
-                  This and following events
+                  {t('event.thisFollowing')}
                 </button>
                 <button type="button" className="btn btn-primary" style={{ justifyContent: 'center' }} onClick={() => onScopeChosen('all')}>
-                  All events
+                  {t('event.allEvents')}
                 </button>
               </div>
             </div>

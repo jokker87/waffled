@@ -10,7 +10,8 @@ import { AgendaView } from './components/AgendaView'
 import { PeopleView } from './components/PeopleView'
 import { useTopbarRight } from './topbar-slot'
 import { useEventsRange, useHousehold, useCountdowns, usePersons, type AgendaEvent, type Countdown } from '../lib/api'
-import { MONTHS, MONTHS_SHORT, DOW_FULL, ymd, addDays, startOfWeek, eventDetailPath } from './components/cal-utils'
+import { ymd, addDays, startOfWeek, eventDetailPath } from './components/cal-utils'
+import { useI18n } from '../lib/locale-provider'
 
 type View = 'month' | 'week' | 'day' | 'people' | 'agenda'
 
@@ -54,14 +55,13 @@ function rangeFor(view: View, anchor: Date): { from: string; to: string } {
 }
 
 // The label between the nav arrows for the current view.
-function periodLabel(view: View, anchor: Date): string {
-  if (view === 'month') return `${MONTHS[anchor.getMonth()]} ${anchor.getFullYear()}`
-  if (view === 'day' || view === 'people')
-    return `${DOW_FULL[anchor.getDay()]}, ${MONTHS[anchor.getMonth()]} ${anchor.getDate()}`
+function periodLabel(view: View, anchor: Date, locale: string): string {
+  if (view === 'month') return anchor.toLocaleDateString(locale, { month: 'long', year: 'numeric' })
+  if (view === 'day' || view === 'people') return anchor.toLocaleDateString(locale, { weekday: 'long', month: 'long', day: 'numeric' })
   const ws = startOfWeek(anchor)
   const we = addDays(ws, 6)
-  const start = `${MONTHS_SHORT[ws.getMonth()]} ${ws.getDate()}`
-  const end = ws.getMonth() === we.getMonth() ? `${we.getDate()}` : `${MONTHS_SHORT[we.getMonth()]} ${we.getDate()}`
+  const start = ws.toLocaleDateString(locale, { month: 'short', day: 'numeric' })
+  const end = we.toLocaleDateString(locale, ws.getMonth() === we.getMonth() ? { day: 'numeric' } : { month: 'short', day: 'numeric' })
   return `${start} – ${end}`
 }
 
@@ -70,6 +70,7 @@ function periodLabel(view: View, anchor: Date): string {
 const VIEWS: View[] = ['month', 'week', 'day', 'people', 'agenda']
 
 export function Calendar() {
+  const { t, locale } = useI18n()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const paramDate = searchParams.get('date')
@@ -144,7 +145,7 @@ export function Calendar() {
     setAnchor(d)
     setView('day')
   }
-  const navLabel = view === 'month' ? 'month' : view === 'day' || view === 'people' ? 'day' : 'week'
+  const navLabel = t(`calendar.${view === 'month' ? 'month' : view === 'day' || view === 'people' ? 'day' : 'week'}`)
 
   // The view toggle + period nav live in the topbar's right slot (replacing the
   // capture bar on this screen), matching the per-screen-topbar pattern.
@@ -154,26 +155,26 @@ export function Calendar() {
         <div className="seg">
           {VIEWS.map((v) => (
             <button key={v} type="button" className={view === v ? 'on' : ''} onClick={() => setView(v)}>
-              {v[0].toUpperCase() + v.slice(1)}
+              {t(`calendar.${v}`)}
             </button>
           ))}
         </div>
         {view !== 'agenda' && (
           <div className="cal-nav">
-            <button type="button" className="icon-btn" aria-label={`Previous ${navLabel}`} onClick={() => shift(-1)}>
+            <button type="button" className="icon-btn" aria-label={t('calendar.previous', { period: navLabel })} onClick={() => shift(-1)}>
               <Icon name="cl" />
             </button>
             <button type="button" className="pill cal-period" onClick={goToday}>
-              {periodLabel(view, anchor)}
+              {periodLabel(view, anchor, locale)}
             </button>
-            <button type="button" className="icon-btn" aria-label={`Next ${navLabel}`} onClick={() => shift(1)}>
+            <button type="button" className="icon-btn" aria-label={t('calendar.next', { period: navLabel })} onClick={() => shift(1)}>
               <Icon name="cr" />
             </button>
           </div>
         )}
       </div>
     ),
-    [view, anchor.getTime()]
+    [view, anchor.getTime(), locale, t]
   )
 
   // Is the anchor inside the period the user is actually living in? Drives the
@@ -193,11 +194,11 @@ export function Calendar() {
       {view !== 'agenda' && (
         <div className="cal-period-head">
           <h2 className="wf-serif cal-period-title" data-testid="cal-period-heading">
-            {periodLabel(view, anchor)}
+            {periodLabel(view, anchor, locale)}
           </h2>
           {!isCurrentPeriod && (
             <button type="button" className="pill cal-period-back" onClick={goToday}>
-              Back to today
+              {t('calendar.backToday')}
             </button>
           )}
         </div>

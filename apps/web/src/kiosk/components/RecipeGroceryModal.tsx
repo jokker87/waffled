@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { groceryApi, type RecipeIngredient } from '../../lib/api'
 import { fmtAmt } from '../../lib/amount'
+import { useI18n } from '../../lib/locale-provider'
 
 // "Add all, or pick specific ingredients" — the shopper may already have some on hand.
 //
@@ -33,6 +34,7 @@ export function RecipeGroceryModal({
   onClose: () => void
   onAdded: (added: number) => void
 }) {
+  const { t } = useI18n()
   const [selected, setSelected] = useState<Set<string>>(
     () => new Set(ingredients.filter((i) => !i.inPantry).map((i) => i.id))
   )
@@ -68,16 +70,16 @@ export function RecipeGroceryModal({
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 460 }}>
-        <button type="button" className="modal-close" aria-label="Close" onClick={onClose}>×</button>
-        <div className="wf-serif" style={{ fontSize: 20, fontWeight: 600, marginBottom: 4 }}>Add to grocery list</div>
+        <button type="button" className="modal-close" aria-label={t('common.close')} onClick={onClose}>×</button>
+        <div className="wf-serif" style={{ fontSize: 20, fontWeight: 600, marginBottom: 4 }}>{t('grocery.modalTitle')}</div>
         <div className="tiny muted" style={{ fontWeight: 600, marginBottom: 12 }}>
           {pantryCount > 0
-            ? `Choose what to add from “${title}” — we’ve already unchecked ${pantryCount} item${pantryCount === 1 ? '' : 's'} your pantry says you have.`
-            : `Choose what to add from “${title}” — uncheck anything you already have.`}
+            ? t('grocery.choosePantry', { title, count: pantryCount })
+            : t('grocery.choose', { title })}
         </div>
 
         <button type="button" className="pill" style={{ cursor: 'pointer', marginBottom: 10 }} onClick={toggleAll}>
-          {allOn ? 'Select none' : 'Select all'}
+          {allOn ? t('common.selectNone') : t('common.selectAll')}
         </button>
 
         <div style={{ maxHeight: '48vh', overflowY: 'auto', margin: '0 -4px' }}>
@@ -102,9 +104,9 @@ export function RecipeGroceryModal({
                   {/* The real match wins the hint slot: "in your pantry" is something we
                       observed, "likely on hand" only something we assumed. */}
                   {ing.inPantry ? (
-                    <span className="ring-was ring-inpantry">🥫 in your pantry</span>
+                    <span className="ring-was ring-inpantry">{t('grocery.inPantry')}</span>
                   ) : (
-                    ing.isStaple && <span className="ring-was">pantry staple — likely on hand</span>
+                    ing.isStaple && <span className="ring-was">{t('grocery.staple')}</span>
                   )}
                 </span>
               </div>
@@ -113,12 +115,12 @@ export function RecipeGroceryModal({
         </div>
 
         <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
-          <button type="button" className="btn btn-ghost" style={{ cursor: 'pointer' }} onClick={onClose}>Cancel</button>
+          <button type="button" className="btn btn-ghost" style={{ cursor: 'pointer' }} onClick={onClose}>{t('common.cancel')}</button>
           <button type="button" className="btn btn-primary" style={{ cursor: 'pointer', marginLeft: 'auto' }} disabled={saving || selected.size === 0} onClick={add}>
             {/* Pre-unchecking can empty the selection outright when the pantry covers the
                 whole recipe. "Add 0 items" on a dead button explains nothing; name the
                 state instead, and leave "Select all" as the way out. */}
-            {saving ? 'Adding…' : selected.size === 0 ? 'Nothing to add' : `Add ${selected.size} item${selected.size === 1 ? '' : 's'}`}
+            {saving ? t('common.adding') : selected.size === 0 ? t('grocery.nothing') : selected.size === 1 ? t('grocery.addOne') : t('grocery.addCount', { count: selected.size })}
           </button>
         </div>
       </div>

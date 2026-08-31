@@ -5,6 +5,7 @@ import { usePersons, useHousehold, api, countdownsApi, pantryApi, can, localToda
 import { parseCapture, intentSummary, looksConfident, memberTypeLabel, MEMBER_TYPES, goalTypeLabel, GOAL_TYPES, mutateTargetLabel, type ParsedIntent } from '../../lib/capture/parse'
 import { moduleEnabled, rewardsEnabled } from '../../lib/modules'
 import { describeRrule } from './recurrence'
+import { useI18n } from '../../lib/locale-provider'
 
 const BYDAY = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA']
 const freqOf = (r: string | null): string =>
@@ -536,6 +537,7 @@ function CandidatePicker({ intent, state, chosenId, onPick, onCommit, busy }: {
 }
 
 export function CaptureBar() {
+  const { locale, t } = useI18n()
   const { persons } = usePersons()
   // The current viewer's admin state gates the `person` (add-a-member) commit —
   // creating a household member is an adminRoute, so non-admins get a graceful
@@ -596,7 +598,7 @@ export function CaptureBar() {
     const mine = ++seq.current
     setThinking(true)
     const id = setTimeout(async () => {
-      const r = await api.resolve(text, names, listNames)
+      const r = await api.resolve(text, names, listNames, locale)
       if (mine === seq.current) {
         // Be defensive: a server goal intent may arrive without participantIds/audience —
         // normalize so the goal preview + picker never read an undefined array.
@@ -609,7 +611,7 @@ export function CaptureBar() {
       }
     }, 800)
     return () => clearTimeout(id)
-  }, [text, names, listNames])
+  }, [text, names, listNames, locale])
 
   useEffect(() => { setDraft(null); setPreferLlm(false) }, [text])
 
@@ -893,7 +895,7 @@ export function CaptureBar() {
         <div className="ai-spark">
           <Icon name="spark" />
         </div>
-        <span className={`cap-trigger-text ${text ? '' : 'ph'}`}>{text || 'Add anything… “Soccer Tue 4pm for Wally”'}</span>
+        <span className={`cap-trigger-text ${text ? '' : 'ph'}`}>{text || t('capture.trigger')}</span>
       </button>
 
       {expanded &&
@@ -910,8 +912,8 @@ export function CaptureBar() {
                     value={text}
                     onChange={(e) => setText(e.target.value)}
                     onKeyDown={onKey}
-                    placeholder={'Add anything…  “fish for dinner next Friday”'}
-                    aria-label="Add anything"
+                    placeholder={t('capture.placeholder')}
+                    aria-label={t('capture.label')}
                     rows={1}
                     disabled={busy}
                   />
@@ -989,7 +991,7 @@ export function CaptureBar() {
                   <div className="cap-hint">{editing ? 'editing' : canCommit ? 'press ↵' : ''}</div>
                 </div>
               ) : (
-                <div className="cap-empty-hint tiny muted">Type an event, list item, chore, grocery, or meal — I’ll sort it out.</div>
+                <div className="cap-empty-hint tiny muted">{t('capture.hint')}</div>
               )}
             </div>
           </div>,

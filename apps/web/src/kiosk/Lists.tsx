@@ -18,6 +18,7 @@ import {
 } from '../lib/api'
 import { useTopbarRight } from './topbar-slot'
 import '../styles/lists.css'
+import { useI18n } from '../lib/locale-provider'
 
 // "Waffled suggests" chips are static in the handoff (no suggestion engine yet) —
 // they add their label to the list when tapped. Called out in the summary.
@@ -31,11 +32,11 @@ const CHECK = (
 
 // Pluralized summary line under the list name: "12 items · 2 done". The headline
 // count is the active (unchecked) items only — completed items don't pad the total.
-function summaryLine(items: ListItem[]): string {
+function summaryLine(items: ListItem[], t: (key: string, vars?: Record<string, string | number>) => string): string {
   const active = items.filter((i) => !i.checked).length
   const done = items.length - active
-  const head = `${active} item${active === 1 ? '' : 's'}`
-  return done > 0 ? `${head} · ${done} done` : head
+  const head = `${active} ${t(active === 1 ? 'lists.item' : 'lists.items')}`
+  return done > 0 ? `${head} · ${t('lists.doneCount', { count: done })}` : head
 }
 
 // Person avatar (color-tinted bubble + emoji), matching the handoff `av()`.
@@ -86,6 +87,7 @@ function ItemRow({
   selected?: boolean
   onSelect?: (item: ListItem) => void
 }) {
+  const { t } = useI18n()
   const [menuOpen, setMenuOpen] = useState(false)
   const a = item.assignee
   // Lists are hand-built, so attribution is "added by {name}" only; guard on
@@ -188,7 +190,7 @@ function ItemRow({
                   setMenuOpen(false)
                 }}
               >
-                <span>✕</span> Unassign
+                <span>✕</span> {t('lists.unassign')}
               </button>
             )}
           </div>
@@ -197,7 +199,7 @@ function ItemRow({
       {/* × delete on the far right — hidden while selecting so a stray tap can't
           delete an item the user meant to pick. */}
       {!selecting && (
-        <button type="button" className="litem-act litem-del" aria-label={`Delete ${item.name}`} onClick={() => onDelete(item)}>×</button>
+        <button type="button" className="litem-act litem-del" aria-label={t('common.remove', { name: item.name })} onClick={() => onDelete(item)}>×</button>
       )}
     </div>
   )
@@ -285,6 +287,7 @@ function SectionPicker({
   className?: string
   disabled?: boolean
 }) {
+  const { t } = useI18n()
   const [creating, setCreating] = useState(false)
   const [draft, setDraft] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
@@ -304,8 +307,8 @@ function SectionPicker({
           ref={inputRef}
           className="lists-secpick-input"
           value={draft}
-          placeholder="New section"
-          aria-label="New section name"
+          placeholder={t('lists.newSection')}
+          aria-label={t('lists.newSectionName')}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
             // Guard against the enclosing add-bar <form> submitting on Enter.
@@ -313,7 +316,7 @@ function SectionPicker({
             else if (e.key === 'Escape') { e.preventDefault(); cancel() }
           }}
         />
-        <button type="button" className="linkbtn" onClick={confirm}>Add</button>
+        <button type="button" className="linkbtn" onClick={confirm}>{t('common.add')}</button>
         <button type="button" className="linkbtn" aria-label="Cancel new section" onClick={cancel}>×</button>
       </span>
     )
@@ -341,12 +344,13 @@ function SectionPicker({
       {typeof value === 'string' && value && !sections.includes(value) && (
         <option value={value}>{value}</option>
       )}
-      <option value="__new__">+ New section…</option>
+      <option value="__new__">{t('lists.addSection')}</option>
     </select>
   )
 }
 
 export function Lists() {
+  const { t } = useI18n()
   const { lists, loading: listsLoading, error: listsError, refetch: refetchLists } = useLists()
   const { templates } = useTemplates()
   const { persons } = usePersons()
@@ -469,7 +473,7 @@ export function Lists() {
       <>
         <button type="button" className="pill btn-primary topbar-new" onClick={() => setItemModal({ item: null })}>
           <Icon name="plus" />
-          <span>Add item</span>
+          <span>{t('grocery.addItem')}</span>
         </button>
       </>
     ),
@@ -665,7 +669,7 @@ export function Lists() {
   }
 
   if (listsError) {
-    return <div className="muted" style={{ padding: 30 }}>Couldn't load your lists — try reloading or signing in again.</div>
+    return <div className="muted" style={{ padding: 30 }}>{t('lists.loadError')}</div>
   }
 
   // The grocery list opens its dedicated auto-built board (takes over the screen).
@@ -685,7 +689,7 @@ export function Lists() {
   return (
     <div className="lists-home">
       <div className="lists-rail">
-        <div className="lists-rail-label">YOUR LISTS</div>
+        <div className="lists-rail-label">{t('lists.yours')}</div>
         <div className="lists-rail-items">
           {lists.map((l) => {
             const on = l.id === selected?.id
@@ -710,7 +714,7 @@ export function Lists() {
             )
           })}
           {!listsLoading && lists.length === 0 && (
-            <div className="tiny muted" style={{ padding: '4px 8px', fontWeight: 600 }}>No lists yet.</div>
+            <div className="tiny muted" style={{ padding: '4px 8px', fontWeight: 600 }}>{t('lists.none')}</div>
           )}
         </div>
         <button type="button" className="btn btn-ghost lists-new" onClick={() => setCreating(true)}>
@@ -720,7 +724,7 @@ export function Lists() {
 
         {templates.length > 0 && (
           <>
-            <div className="lists-rail-label lists-rail-tpl">TEMPLATES</div>
+            <div className="lists-rail-label lists-rail-tpl">{t('lists.templates')}</div>
             <div className="lists-rail-items">
               {templates.map((t) => {
                 const on = t.id === selected?.id
@@ -753,10 +757,10 @@ export function Lists() {
               <div className="lists-head-emoji">{selected.emoji ?? (isTemplate ? '📑' : '📝')}</div>
               <div className="card-h wf-serif lists-head-name">
                 {selected.name}
-                {isTemplate && <span className="lists-tpl-badge">TEMPLATE</span>}
+                {isTemplate && <span className="lists-tpl-badge">{t('lists.template')}</span>}
               </div>
               <div className="muted" style={{ fontWeight: 600 }}>
-                {isTemplate ? `${items.length} item${items.length === 1 ? '' : 's'}` : summaryLine(items)}
+                {isTemplate ? `${items.length} ${t(items.length === 1 ? 'lists.item' : 'lists.items')}` : summaryLine(items, t)}
               </div>
               <div className="lists-head-actions">
               <div className="filter-wrap" onClick={(e) => e.stopPropagation()}>
@@ -784,7 +788,7 @@ export function Lists() {
                 title="Sort this list by priority (highest first)"
                 onClick={() => setSortByPriority((v) => !v)}
               >
-                <Icon name="filter" /> {sortByPriority ? 'By priority' : 'Sort: manual'}
+                <Icon name="filter" /> {sortByPriority ? t('lists.byPriority') : t('lists.sortManual')}
               </button>
               {!selecting && (
                 <button
@@ -871,7 +875,7 @@ export function Lists() {
             </form>
 
             <div className="lists-suggest">
-              <span className="tiny lists-suggest-label">Waffled suggests:</span>
+              <span className="tiny lists-suggest-label">{t('lists.suggests')}</span>
               {SUGGESTIONS.map((s) => (
                 <button key={s} type="button" className="sug-chip" onClick={() => addItem(s)}>
                   <svg viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: '<path d="M12 5v14M5 12h14"/>' }} />
@@ -898,8 +902,8 @@ export function Lists() {
                   disabled={selectedItems.size === 0}
                   onChange={(e) => { const v = e.target.value; if (v) setBulkStaged((s) => ({ ...s, assignedTo: v === '__none__' ? null : v })) }}
                 >
-                  <option value="">Assign…</option>
-                  <option value="__none__">Unassign</option>
+                  <option value="">{t('lists.assign')}</option>
+                  <option value="__none__">{t('lists.unassign')}</option>
                   {persons.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                 </select>
                 <select
@@ -909,7 +913,7 @@ export function Lists() {
                   disabled={selectedItems.size === 0}
                   onChange={(e) => { const v = e.target.value; if (v) setBulkStaged((s) => ({ ...s, priority: Number(v) })) }}
                 >
-                  <option value="">Priority…</option>
+                  <option value="">{t('lists.priority')}</option>
                   <option value="5">5 · urgent</option>
                   <option value="4">4</option>
                   <option value="3">3 · normal</option>
@@ -928,14 +932,14 @@ export function Lists() {
             )}
 
             {items.length === 0 && !itemsLoading ? (
-              <div className="lists-empty">This list is empty — add something above.</div>
+              <div className="lists-empty">{t('lists.empty')}</div>
             ) : visibleItems.length === 0 ? (
-              <div className="lists-empty">Nothing assigned to {persons.find((p) => p.id === filterPerson)?.name ?? 'them'} here.</div>
+              <div className="lists-empty">{t('lists.noneAssigned', { name: persons.find((p) => p.id === filterPerson)?.name ?? '' })}</div>
             ) : (
               <>
                 {activeItems.length > 0 && sortByPriority && (
                   <div className="lists-section">
-                    <div className="lists-section-title">By priority</div>
+                    <div className="lists-section-title">{t('lists.byPriority')}</div>
                     {prioritySorted.map((it) => (
                       <ItemRow
                         key={it.id}
@@ -1002,7 +1006,7 @@ export function Lists() {
                   </div>
                 )}
                 {activeItems.length === 0 && completedItems.length > 0 && (
-                  <div className="lists-empty">All done — everything’s checked off. 🎉</div>
+                  <div className="lists-empty">{t('lists.allDone')}</div>
                 )}
                 {/* Completed — checked items tuck here; collapsible, un-check to restore. */}
                 {completedItems.length > 0 && (
@@ -1015,7 +1019,7 @@ export function Lists() {
                       onClick={() => setShowDone((v) => !v)}
                     >
                       <span className={`cal-chev ${showDone ? 'open' : ''}`} aria-hidden>›</span>
-                      <span>Completed</span>
+                      <span>{t('lists.completed')}</span>
                       <span className="ga-n">{completedItems.length}</span>
                       {!isTemplate && (
                         <button
@@ -1041,7 +1045,7 @@ export function Lists() {
           </>
         )}
         {!selected && !listsLoading && (
-          <div className="lists-empty">No list selected. Create one with “New list”.</div>
+          <div className="lists-empty">{t('lists.noSelected')}</div>
         )}
       </div>
 

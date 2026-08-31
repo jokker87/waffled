@@ -5,6 +5,7 @@ import { eventPeople } from './cal-utils'
 import { isPastEvent } from './AgendaView'
 import { useEventsToday, usePersons, type AgendaEvent } from '../../lib/api'
 import { evVars, useEventColor } from '../../lib/event-color'
+import { useI18n } from '../../lib/locale-provider'
 
 function formatTime(e: AgendaEvent): string {
   if (e.allDay) return 'all day'
@@ -13,6 +14,7 @@ function formatTime(e: AgendaEvent): string {
 }
 
 function AgendaRow({ event, past = false, color: colorProp, onClick }: { event: AgendaEvent; past?: boolean; color?: string; onClick: () => void }) {
+  const { t } = useI18n()
   const color = colorProp ?? event.personColor ?? '#A6A29B'
   return (
     <div
@@ -28,7 +30,7 @@ function AgendaRow({ event, past = false, color: colorProp, onClick }: { event: 
       }}
     >
       <div style={{ width: 62, fontSize: 14, fontWeight: 700, color: 'var(--ink-2)', textAlign: 'right' }}>
-        {formatTime(event)}
+        {event.allDay ? t('calendar.allDayLong').toLocaleLowerCase() : formatTime(event)}
       </div>
       <div style={{ width: 4, height: 34, borderRadius: 99, background: color }} />
       <div style={{ flex: 1 }}>
@@ -43,10 +45,11 @@ function AgendaRow({ event, past = false, color: colorProp, onClick }: { event: 
 // When the day is light (≤3 events), show roomier square-ish cards instead of
 // tight rows so the calendar doesn't look sparse.
 function AgendaBigCard({ event, past = false, color: colorProp, onClick }: { event: AgendaEvent; past?: boolean; color?: string; onClick: () => void }) {
+  const { t } = useI18n()
   const color = colorProp ?? event.personColor ?? '#A6A29B'
   return (
     <div className={`agenda-bigcard${past ? ' past' : ''}`} onClick={onClick} role="button" tabIndex={0} style={{ borderTop: `3px solid ${color}`, ...evVars(color) }}>
-      <div className="ab-time ev-ink">{formatTime(event)}</div>
+      <div className="ab-time ev-ink">{event.allDay ? t('calendar.allDayLong').toLocaleLowerCase() : formatTime(event)}</div>
       <div className="ab-title">{event.title}</div>
       {event.location && <div className="tiny muted ab-loc">📍 {event.location}</div>}
       <div className="ab-foot">
@@ -81,6 +84,7 @@ function Avatars({ event }: { event: AgendaEvent }) {
 }
 
 export function AgendaCard() {
+  const { t } = useI18n()
   const { events, loading, error, refetch } = useEventsToday()
   const { persons = [] } = usePersons()
   const colorOf = useEventColor('#A6A29B')
@@ -100,21 +104,21 @@ export function AgendaCard() {
     <div className="card" style={{ padding: '22px 22px 8px', display: 'flex', flexDirection: 'column' }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 6 }}>
         <div className="card-h" style={{ fontSize: 23 }}>
-          Today
+          {t('nav.today')}
         </div>
         <div className="muted" style={{ fontWeight: 600 }}>
-          {shown.length} {shown.length === 1 ? 'event' : 'events'}
+          {shown.length} {t(shown.length === 1 ? 'calendar.event' : 'calendar.events')}
         </div>
         <div style={{ marginLeft: 'auto', position: 'relative' }}>
           <button type="button" className="pill" onClick={() => setMenuOpen((o) => !o)} style={{ cursor: 'pointer' }}>
             <Icon name="filter" />
-            <span>{activePerson ? activePerson.name : 'All'}</span>
+            <span>{activePerson ? activePerson.name : t('calendar.all')}</span>
           </button>
           {menuOpen && (
             <>
               <div onClick={() => setMenuOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 40 }} />
               <div className="agenda-filter-menu" style={{ position: 'absolute', right: 0, top: 'calc(100% + 6px)', zIndex: 41, background: 'var(--card)', border: '1px solid var(--hair)', borderRadius: 'var(--r-md)', boxShadow: 'var(--sh-2)', padding: 6, minWidth: 160 }}>
-                <FilterOption label="Everyone" on={!filterId} onClick={() => { setFilterId(null); setMenuOpen(false) }} />
+                <FilterOption label={t('calendar.everyone')} on={!filterId} onClick={() => { setFilterId(null); setMenuOpen(false) }} />
                 {persons.map((p) => (
                   <FilterOption
                     key={p.id}
@@ -131,11 +135,11 @@ export function AgendaCard() {
         </div>
       </div>
 
-      {loading && <div className="muted" style={{ padding: '14px 4px' }}>Loading…</div>}
-      {error && <div className="muted" style={{ padding: '14px 4px' }}>Couldn't load the calendar — try reloading or signing in again.</div>}
+      {loading && <div className="muted" style={{ padding: '14px 4px' }}>{t('common.loading')}</div>}
+      {error && <div className="muted" style={{ padding: '14px 4px' }}>{t('calendar.loadError')}</div>}
       {!loading && !error && shown.length === 0 && (
         <div className="muted" style={{ padding: '14px 4px' }}>
-          {filterId ? `Nothing on ${activePerson?.name ?? 'their'} calendar today.` : 'Nothing on the calendar today.'}
+          {filterId ? t('calendar.emptyPerson', { name: activePerson?.name ?? '' }) : t('calendar.emptyToday')}
         </div>
       )}
       {!loading && !error && shown.length > 0 && shown.length <= 3 ? (

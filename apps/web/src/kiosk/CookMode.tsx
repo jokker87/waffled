@@ -14,6 +14,7 @@ import { CookTabs, type CookTabInfo } from './components/CookTabs'
 import { useCookPlate } from './components/CookDishes'
 import { fmt, useCookTimers, type CookTimer } from './components/CookTimers'
 import './../styles/cookmode.css'
+import { useI18n } from '../lib/locale-provider'
 
 // Full-screen, step-by-step cooking view for the kiosk — large type for across-the-
 // kitchen reading, one step at a time, the step's ingredients pulled out, and a
@@ -32,6 +33,7 @@ export function CookMode() {
 
 // ── one recipe ────────────────────────────────────────────────────────────────
 function CookRecipe({ recipeId }: { recipeId: string | null }) {
+  const { t } = useI18n()
   const navigate = useNavigate()
   const { recipe, ingredients, steps, loading, error } = useRecipe(recipeId)
   const [i, setI] = useState(0)
@@ -59,18 +61,18 @@ function CookRecipe({ recipeId }: { recipeId: string | null }) {
   useTopbarFull(
     () => (
       <div style={{ display: 'flex', alignItems: 'center', width: '100%', gap: 14 }}>
-        <button className="pill" style={{ cursor: 'pointer' }} onClick={exit}>✕ Exit cook mode</button>
+        <button className="pill" style={{ cursor: 'pointer' }} onClick={exit}>✕ {t('cook.exit')}</button>
         <div className="cm-top-title wf-serif">{recipe?.title ?? ''}</div>
         <div style={{ marginLeft: 'auto' }} className="cm-top-prog tiny muted">
-          {total > 0 && !done ? `Step ${i + 1} of ${total}` : ''}
+          {total > 0 && !done ? t('cook.stepOf', { step: i + 1, total }) : ''}
         </div>
       </div>
     ),
     [recipe?.title, i, total, done, recipeId]
   )
 
-  if (loading) return <div className="muted" style={{ padding: 30 }}>Loading…</div>
-  if (error || !recipe) return <div className="muted" style={{ padding: 30 }}>This recipe isn’t available.</div>
+  if (loading) return <div className="muted" style={{ padding: 30 }}>{t('common.loading')}</div>
+  if (error || !recipe) return <div className="muted" style={{ padding: 30 }}>{t('cook.recipeUnavailable')}</div>
 
   return (
     <>
@@ -84,7 +86,7 @@ function CookRecipe({ recipeId }: { recipeId: string | null }) {
         done={done}
         setDone={setDone}
         onExit={exit}
-        exitLabel="Back to recipe"
+        exitLabel={t('cook.backRecipe')}
         onStartTimer={(stepIndex, totalSeconds) =>
           timers.start({ recipeId: recipe.id, dishLabel: recipe.title, dishEmoji: null, stepIndex, totalSeconds })
         }
@@ -103,6 +105,7 @@ function CookRecipe({ recipeId }: { recipeId: string | null }) {
 // lives at this level: the chicken's timer keeps counting down while you're making
 // the potato salad.
 function CookPlate({ mealId }: { mealId: string | null }) {
+  const { t } = useI18n()
   const navigate = useNavigate()
   const { name, dishes, loading, error } = useCookPlate(mealId)
   const [active, setActive] = useState(0)
@@ -162,22 +165,22 @@ function CookPlate({ mealId }: { mealId: string | null }) {
   useTopbarFull(
     () => (
       <div style={{ display: 'flex', alignItems: 'center', width: '100%', gap: 14 }}>
-        <button className="pill" style={{ cursor: 'pointer' }} onClick={exit}>✕ Exit cook mode</button>
+        <button className="pill" style={{ cursor: 'pointer' }} onClick={exit}>✕ {t('cook.exit')}</button>
         <div className="cm-top-title wf-serif">{name ?? ''}</div>
         <div style={{ marginLeft: 'auto' }} className="cm-top-prog tiny muted">
-          {dish && total > 0 && !done ? `${dish.title} · Step ${i + 1} of ${total}` : ''}
+          {dish && total > 0 && !done ? `${dish.title} · ${t('cook.stepOf', { step: i + 1, total })}` : ''}
         </div>
       </div>
     ),
     [name, dish?.title, i, total, done, mealId]
   )
 
-  if (loading) return <div className="muted" style={{ padding: 30 }}>Loading…</div>
-  if (error) return <div className="muted" style={{ padding: 30 }}>This meal isn’t available.</div>
+  if (loading) return <div className="muted" style={{ padding: 30 }}>{t('common.loading')}</div>
+  if (error) return <div className="muted" style={{ padding: 30 }}>{t('cook.mealUnavailable')}</div>
   if (!dish) {
     return (
       <div className="muted" style={{ padding: 30 }}>
-        Nothing on this plate yet — add a dish to it and there’ll be something to cook.
+        {t('cook.emptyPlate')}
       </div>
     )
   }
@@ -204,7 +207,7 @@ function CookPlate({ mealId }: { mealId: string | null }) {
         done={done}
         setDone={setDone}
         onExit={exit}
-        exitLabel="Back to the plate"
+        exitLabel={t('cook.backPlate')}
         header={<CookTabs tabs={tabs} activeIndex={index} onSelect={setActive} />}
         onStartTimer={(stepIndex, totalSeconds) =>
           timers.start({ recipeId: dish.recipeId, dishLabel: dish.title, dishEmoji: dish.emoji, stepIndex, totalSeconds })
@@ -249,6 +252,7 @@ function CookSession({
   header?: ReactNode
   onStartTimer: (stepIndex: number, totalSeconds: number) => void
 }) {
+  const { t } = useI18n()
   const [showAll, setShowAll] = useState(false)
   const [usedMatches, setUsedMatches] = useState<RecipeMatch[]>([])
   const [sheetOpen, setSheetOpen] = useState(false)
@@ -271,7 +275,7 @@ function CookSession({
   const total = steps.length
 
   if (total === 0) {
-    const empty = <div className="muted" style={{ padding: 30 }}>No steps recorded for this recipe — nothing to cook through.</div>
+    const empty = <div className="muted" style={{ padding: 30 }}>{t('cook.noSteps')}</div>
     return header ? <div className="cookmode">{header}{empty}</div> : empty
   }
 
@@ -287,12 +291,12 @@ function CookSession({
       <div className="cookmode cm-done">
         {header}
         <div className="cm-done-emoji">🎉</div>
-        <div className="wf-serif cm-done-h">Nicely done.</div>
-        <div className="muted cm-done-sub">“{title}” is marked as cooked.</div>
+        <div className="wf-serif cm-done-h">{t('cook.success')}</div>
+        <div className="muted cm-done-sub">{t('cook.marked', { title })}</div>
         <div className="cm-done-actions">
-          <button className="btn btn-ghost" onClick={() => { setDone(false); setI(0) }}>↻ Start over</button>
+          <button className="btn btn-ghost" onClick={() => { setDone(false); setI(0) }}>↻ {t('cook.startOver')}</button>
           {usedMatches.length > 0 && (
-            <button className="btn btn-ghost" onClick={() => setSheetOpen(true)}>🧺 Update pantry</button>
+            <button className="btn btn-ghost" onClick={() => setSheetOpen(true)}>🧺 {t('cook.updatePantry')}</button>
           )}
           <button className="btn btn-primary" onClick={onExit}>{exitLabel}</button>
         </div>
@@ -313,12 +317,12 @@ function CookSession({
       <div className="cm-progress"><span style={{ width: `${pct}%` }} /></div>
 
       <div className="cm-stage">
-        <div className="cm-step-n">Step {at + 1}</div>
+        <div className="cm-step-n">{t('cook.step', { step: at + 1 })}</div>
         <div className="cm-instruction wf-serif">{step.instruction}</div>
 
         {step.ingredients.length > 0 && (
           <div className="cm-ings">
-            <div className="cm-ings-label">For this step</div>
+            <div className="cm-ings-label">{t('cook.forStep')}</div>
             <div className="cm-ings-row">
               {step.ingredients.map((ig, k) => (
                 <span key={k} className="cm-ing-chip">{ig}</span>
@@ -334,7 +338,7 @@ function CookSession({
             className="cm-timer-start"
             onClick={() => onStartTimer(at, step.timerSeconds!)}
           >
-            ⏱ Start {fmt(step.timerSeconds)}
+            ⏱ {t('cook.start', { time: fmt(step.timerSeconds) })}
           </button>
         ) : (
           <AddTimer key={at} onStart={(secs) => onStartTimer(at, secs)} />
@@ -342,20 +346,20 @@ function CookSession({
       </div>
 
       <div className="cm-controls">
-        <button className="cm-nav" disabled={at === 0} onClick={() => setI((n) => Math.max(0, n - 1))}>‹ Back</button>
-        <button className="cm-allbtn" onClick={() => setShowAll(true)}>All ingredients</button>
+        <button className="cm-nav" disabled={at === 0} onClick={() => setI((n) => Math.max(0, n - 1))}>‹ {t('common.back')}</button>
+        <button className="cm-allbtn" onClick={() => setShowAll(true)}>{t('cook.allIngredients')}</button>
         {at < total - 1 ? (
-          <button className="cm-nav cm-next" onClick={() => setI((n) => Math.min(total - 1, n + 1))}>Next ›</button>
+          <button className="cm-nav cm-next" onClick={() => setI((n) => Math.min(total - 1, n + 1))}>{t('cook.next')} ›</button>
         ) : (
-          <button className="cm-nav cm-finish" onClick={finish}>✓ Finish &amp; mark cooked</button>
+          <button className="cm-nav cm-finish" onClick={finish}>✓ {t('cook.finish')}</button>
         )}
       </div>
 
       {showAll && (
         <div className="modal-overlay" onClick={() => setShowAll(false)}>
           <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 460 }}>
-            <button type="button" className="modal-close" aria-label="Close" onClick={() => setShowAll(false)}>×</button>
-            <div className="wf-serif" style={{ fontSize: 20, fontWeight: 600, marginBottom: 12 }}>All ingredients</div>
+            <button type="button" className="modal-close" aria-label={t('common.close')} onClick={() => setShowAll(false)}>×</button>
+            <div className="wf-serif" style={{ fontSize: 20, fontWeight: 600, marginBottom: 12 }}>{t('cook.allIngredients')}</div>
             <div className="cm-all-list">
               {ingredients.map((ing) => (
                 <div key={ing.id} className="cm-all-row">
@@ -378,6 +382,7 @@ function CookSession({
 // so it lives in the dock, chimes, and stays tied to its step. `key={i}` resets it
 // per step. No backend: the added timer is never persisted to step.timerSeconds.
 function AddTimer({ onStart }: { onStart: (secs: number) => void }) {
+  const { t } = useI18n()
   const [open, setOpen] = useState(false)
   const [min, setMin] = useState('')
   const [sec, setSec] = useState('')
@@ -385,7 +390,7 @@ function AddTimer({ onStart }: { onStart: (secs: number) => void }) {
   if (!open) {
     return (
       <button type="button" className="re-timer-add cm-timer-add" onClick={() => setOpen(true)}>
-        ⏱ Add timer
+        ⏱ {t('cook.addTimer')}
       </button>
     )
   }
@@ -409,7 +414,7 @@ function AddTimer({ onStart }: { onStart: (secs: number) => void }) {
         min={0}
         inputMode="numeric"
         className="re-timer-num"
-        aria-label="Minutes"
+        aria-label={t('cook.minutes')}
         placeholder="0"
         value={min}
         autoFocus
@@ -423,15 +428,15 @@ function AddTimer({ onStart }: { onStart: (secs: number) => void }) {
         max={59}
         inputMode="numeric"
         className="re-timer-num"
-        aria-label="Seconds"
+        aria-label={t('cook.seconds')}
         placeholder="0"
         value={sec}
         onChange={(e) => setSec(e.target.value)}
         onKeyDown={(e) => e.key === 'Enter' && start()}
       />
       <span className="re-timer-unit">sec</span>
-      <button type="button" className="re-timer-done" aria-label="Start timer" disabled={secs <= 0} onClick={start}>✓</button>
-      <button type="button" className="re-timer-cancel" aria-label="Cancel" onClick={() => setOpen(false)}>×</button>
+      <button type="button" className="re-timer-done" aria-label={t('cook.startTimer')} disabled={secs <= 0} onClick={start}>✓</button>
+      <button type="button" className="re-timer-cancel" aria-label={t('common.cancel')} onClick={() => setOpen(false)}>×</button>
     </span>
   )
 }
@@ -454,12 +459,13 @@ function TimerAlarm({
   onSnooze: (id: number, secs: number) => void
   onJump: (t: CookTimer) => void
 }) {
+  const { t: tr } = useI18n()
   if (firing.length === 0) return null
   return (
-    <div className="cm-alarm" role="alertdialog" aria-label="Timer finished">
+    <div className="cm-alarm" role="alertdialog" aria-label={tr('cook.timerFinished')}>
       <div className="cm-alarm-card">
         <div className="cm-alarm-ic" aria-hidden>⏱</div>
-        <div className="cm-alarm-h wf-serif">{firing.length > 1 ? `${firing.length} timers done` : 'Timer done'}</div>
+        <div className="cm-alarm-h wf-serif">{firing.length > 1 ? tr('cook.timersDone', { count: firing.length }) : tr('cook.timerDone')}</div>
         <div className="cm-alarm-list">
           {firing.map((t) => (
             <div key={t.id} className="cm-alarm-row">
@@ -472,9 +478,9 @@ function TimerAlarm({
                 {t.label} · {fmt(t.totalSeconds)}
               </span>
               <div className="cm-alarm-actions">
-                <button className="cm-alarm-jump" onClick={() => onJump(t)}>Jump to step</button>
+                <button className="cm-alarm-jump" onClick={() => onJump(t)}>{tr('cook.jumpStep')}</button>
                 <button className="cm-alarm-snooze" onClick={() => onSnooze(t.id, 60)}>+1:00</button>
-                <button className="cm-alarm-dismiss" onClick={() => onDismiss(t.id)}>Dismiss</button>
+                <button className="cm-alarm-dismiss" onClick={() => onDismiss(t.id)}>{tr('tasks.dismiss')}</button>
               </div>
             </div>
           ))}
@@ -501,6 +507,7 @@ function TimerDock({
   onDismiss: (id: number) => void
   onJump: (t: CookTimer) => void
 }) {
+  const { t: tr } = useI18n()
   if (timers.length === 0) return null
   return (
     <div className="cm-timers" role="status" aria-live="polite">
@@ -510,8 +517,8 @@ function TimerDock({
             className="cm-timer-info"
             role="button"
             tabIndex={0}
-            title={showDish ? `Jump to ${t.dishLabel} — ${t.label}` : 'Jump to this step'}
-            aria-label={`Jump to this step — ${showDish ? `${t.dishLabel} · ` : ''}${t.label}`}
+            title={showDish ? tr('cook.jumpDish', { dish: t.dishLabel, label: t.label }) : tr('cook.jumpThisStep')}
+            aria-label={`${tr('cook.jumpThisStep')} — ${showDish ? `${t.dishLabel} · ` : ''}${t.label}`}
             onClick={() => onJump(t)}
             onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && onJump(t)}
           >
@@ -521,18 +528,18 @@ function TimerDock({
               </div>
             )}
             <div className="cm-timer-label">{t.label}</div>
-            <div className="cm-timer-time">{t.firing ? 'Done!' : fmt(t.remainingSeconds)}</div>
+            <div className="cm-timer-time">{t.firing ? tr('cook.done') : fmt(t.remainingSeconds)}</div>
           </div>
           {!t.firing && (
             <button
               className="cm-timer-btn"
-              aria-label={t.running ? 'Pause timer' : 'Resume timer'}
+              aria-label={t.running ? tr('cook.pauseTimer') : tr('cook.resumeTimer')}
               onClick={() => onToggle(t.id)}
             >
               {t.running ? '❚❚' : '►'}
             </button>
           )}
-          <button className="cm-timer-btn cm-timer-x" aria-label="Dismiss timer" onClick={() => onDismiss(t.id)}>×</button>
+          <button className="cm-timer-btn cm-timer-x" aria-label={tr('cook.dismissTimer')} onClick={() => onDismiss(t.id)}>×</button>
         </div>
       ))}
     </div>

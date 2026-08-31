@@ -17,8 +17,7 @@ import {
 } from '../lib/api'
 import { isEatingOut, isLeftovers, isTryNew } from './components/MealsColumn'
 import '../styles/meals.css'
-
-const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+import { useI18n } from '../lib/locale-provider'
 
 // Local YYYY-MM-DD (kiosk timezone).
 function ymd(d: Date): string {
@@ -154,6 +153,8 @@ function monthStartOf(d: Date): Date {
 }
 
 export function Meals() {
+  const { t, locale } = useI18n()
+  const dayNames = useMemo(() => Array.from({ length: 7 }, (_, day) => new Date(2026, 7, 30 + day).toLocaleDateString(locale, { weekday: 'short' })), [locale])
   const navigate = useNavigate()
   const [view, setView] = useState<'week' | 'month'>('week')
   // One anchor date; the week view reads its week, the month view its month.
@@ -244,7 +245,7 @@ export function Meals() {
     setPicking({
       date: ymd(d),
       mealType,
-      dayLabel: `${DOW[d.getDay()]} ${d.toLocaleDateString('en-US', { month: 'short' })} ${d.getDate()}`,
+      dayLabel: d.toLocaleDateString(locale, { weekday: 'short', month: 'short', day: 'numeric' }),
     })
   }
 
@@ -419,35 +420,35 @@ export function Meals() {
     )
   }
 
-  const monthLabel = monthStartD.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+  const monthLabel = monthStartD.toLocaleDateString(locale, { month: 'long', year: 'numeric' })
 
   return (
     <div className="meals-screen">
       <div className="meals-head">
-        <div className="card-h wf-serif" style={{ fontSize: 20 }}>{view === 'month' ? monthLabel : 'Meal plan'}</div>
+        <div className="card-h wf-serif" style={{ fontSize: 20 }}>{view === 'month' ? monthLabel : t('meals.plan')}</div>
         <div className="seg">
-          <button className={view === 'week' ? 'on' : ''} onClick={() => setView('week')}>Week</button>
-          <button className={view === 'month' ? 'on' : ''} onClick={() => setView('month')}>Month</button>
+          <button className={view === 'week' ? 'on' : ''} onClick={() => setView('week')}>{t('meals.week')}</button>
+          <button className={view === 'month' ? 'on' : ''} onClick={() => setView('month')}>{t('meals.month')}</button>
         </div>
         {view === 'week' && (
           <div className="seg">
-            <button className={filter === 'all' ? 'on' : ''} onClick={() => setFilter('all')}>All meals</button>
-            <button className={filter === 'dinner' ? 'on' : ''} onClick={() => setFilter('dinner')}>Dinners</button>
+            <button className={filter === 'all' ? 'on' : ''} onClick={() => setFilter('all')}>{t('meals.all')}</button>
+            <button className={filter === 'dinner' ? 'on' : ''} onClick={() => setFilter('dinner')}>{t('meals.dinners')}</button>
           </div>
         )}
         <button type="button" className="pill" style={{ cursor: 'pointer' }} onClick={() => navigate('/meals/recipes')}>
           <Icon name="recipes" />
-          <span>Explore recipes</span>
+          <span>{t('meals.explore')}</span>
         </button>
         <button type="button" className="btn btn-ai" style={{ fontSize: 14, padding: '10px 18px' }} onClick={() => (view === 'month' ? setPlanningMonth(true) : setPlanning(true))}>
           <Icon name="spark" />
-          {view === 'month' ? 'Plan my month' : 'Plan my week'}
+          {view === 'month' ? t('meals.planMonth') : t('meals.planWeek')}
         </button>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 10, alignItems: 'center' }}>
           <button type="button" className="pill meals-nav" aria-label={view === 'month' ? 'Previous month' : 'Previous week'} onClick={() => step(-1)}>
             <Icon name="cl" />
           </button>
-          <button type="button" className="pill" onClick={() => setAnchor(new Date())}>{view === 'month' ? 'This month' : 'This week'}</button>
+          <button type="button" className="pill" onClick={() => setAnchor(new Date())}>{view === 'month' ? t('meals.thisMonth') : t('meals.thisWeek')}</button>
           <button type="button" className="pill meals-nav" aria-label={view === 'month' ? 'Next month' : 'Next week'} onClick={() => step(1)}>
             <Icon name="cr" />
           </button>
@@ -459,7 +460,7 @@ export function Meals() {
 
       {view === 'month' ? (
         <div className="meals-month" onPointerDown={gridPointerDown} onClickCapture={gridClickCapture}>
-          {DOW.map((d) => (
+          {dayNames.map((d) => (
             <div key={d} className="mm-dow">{d}</div>
           ))}
           {monthCells.map((d) => {
@@ -493,7 +494,7 @@ export function Meals() {
           <div />
           {days.map((d) => (
             <div key={d.toISOString()} className="meals-dow">
-              <div className="dow">{DOW[d.getDay()]}</div>
+              <div className="dow">{dayNames[d.getDay()]}</div>
               <div className="date">{d.getDate()}</div>
             </div>
           ))}
@@ -593,6 +594,7 @@ function Row({
   onAdd: (d: Date) => void
   onRemove: (date: string, mealType: MealType) => void
 }) {
+  const { locale } = useI18n()
   return (
     <>
       <div className="meals-rowlabel">
@@ -620,7 +622,7 @@ function Row({
             key={dateStr}
             slotKey={`${dateStr}|${mealType}`}
             onAdd={() => onAdd(d)}
-            label={`Add ${MEAL_LABEL[mealType].toLowerCase()} for ${DOW[d.getDay()]} ${d.getDate()}`}
+            label={`Add ${MEAL_LABEL[mealType].toLowerCase()} for ${d.toLocaleDateString(locale, { weekday: 'short', day: 'numeric' })}`}
           />
         )
       })}

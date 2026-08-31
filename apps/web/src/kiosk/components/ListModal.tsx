@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { api, usePersons, type GoalList } from '../../lib/api'
+import { useI18n } from '../../lib/locale-provider'
 
 // Create OR edit a goal list (membership group) — name, emoji, members, privacy.
 // Pass `list` to edit an existing one; omit it to create a new one.
@@ -14,6 +15,7 @@ export function ListModal({
   onCreated?: (id: string) => void
   onSaved?: () => void
 }) {
+  const { t } = useI18n()
   const { persons } = usePersons()
   const editing = !!list
   const [name, setName] = useState(list?.name ?? '')
@@ -50,17 +52,17 @@ export function ListModal({
         <form onSubmit={submit}>
           <div className="field-row">
             <label className="field" style={{ flex: 3 }}>
-              <span>List name</span>
-              <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Mom & Dad" autoFocus />
+              <span>{t('lists.listName')}</span>
+              <input value={name} onChange={(e) => setName(e.target.value)} placeholder={t('lists.listExample')} autoFocus />
             </label>
             <label className="field" style={{ flex: 1 }}>
-              <span>Emoji</span>
+              <span>{t('tasks.emoji')}</span>
               <input value={emoji} onChange={(e) => setEmoji(e.target.value)} placeholder="💑" maxLength={4} />
             </label>
           </div>
 
           <div className="field">
-            <span>Who’s on this list?</span>
+            <span>{t('lists.whoOn')}</span>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
               {persons.map((p) => {
                 const on = memberIds.includes(p.id)
@@ -81,7 +83,7 @@ export function ListModal({
 
           <label className="field" style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 10 }}>
             <input type="checkbox" checked={isPrivate} onChange={(e) => setIsPrivate(e.target.checked)} style={{ width: 'auto' }} />
-            <span style={{ margin: 0 }}>Private — only these members see it</span>
+            <span style={{ margin: 0 }}>{t('lists.private')}</span>
           </label>
 
           <button type="submit" className="btn btn-primary" disabled={!name.trim() || saving} style={{ width: '100%', justifyContent: 'center', marginTop: 6 }}>

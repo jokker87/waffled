@@ -53,10 +53,10 @@ export const eventsApi = {
   // AI cards (honor the household's provider via the server; both fall back to a
   // deterministic summary server-side, so they always return something useful).
   // Cached briefly so leaving and returning to a screen doesn't re-run the model.
-  headsUp: (from: string, to: string) =>
-    apiGetCached<{ headline: string; body: string; via: string }>(`/api/calendar/heads-up?from=${from}&to=${to}`, 5 * 60_000),
-  eventInsight: (id: string) =>
-    apiGetCached<{ headline: string; body: string; leaveBy: string | null; reminder: string; via: string }>(`/api/events/${id}/insight`, 5 * 60_000),
+  headsUp: (from: string, to: string, locale?: string) =>
+    apiGetCached<{ headline: string; body: string; via: string }>(`/api/calendar/heads-up?from=${from}&to=${to}${locale ? `&locale=${encodeURIComponent(locale)}` : ''}`, 5 * 60_000),
+  eventInsight: (id: string, locale?: string) =>
+    apiGetCached<{ headline: string; body: string; leaveBy: string | null; reminder: string; via: string }>(`/api/events/${id}/insight${locale ? `?locale=${encodeURIComponent(locale)}` : ''}`, 5 * 60_000),
   createEvent: (input: {
     title: string
     startsAt: string

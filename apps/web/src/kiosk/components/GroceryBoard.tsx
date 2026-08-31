@@ -9,6 +9,7 @@ import { ShareListModal } from './ShareListModal'
 // the same order to group the shared text the way the board reads top-to-bottom.
 import { AISLE_ORDER } from './share-list'
 import '../../styles/grocery.css'
+import { useI18n } from '../../lib/locale-provider'
 
 // Aisles offered in the "move to section" picker. 'Other' is omitted — the board
 // treats an 'Other' category as auto-filed anyway, so "Auto (by name)" covers it.
@@ -49,6 +50,7 @@ const MEAL_TYPES = ['breakfast', 'lunch', 'dinner', 'snack'] as const
 // why the badge shows the pantry item's OWN amount instead of a yes/no — the shopper is
 // the one who can actually judge, and giving them the number is what lets them.
 function PantryBadge({ item }: { item: GroceryBoardItem }) {
+  const { t } = useI18n()
   const hit = item.pantry
   if (!hit) return null
   const amount = [hit.amount, hit.unit].map((s) => s?.trim()).filter(Boolean).join(' ')
@@ -69,17 +71,18 @@ function PantryBadge({ item }: { item: GroceryBoardItem }) {
       {/* The 🥫 is decoration, so the badge has to name itself in text — otherwise an
           exact match reaches a screen reader as a naked "2 cups" right next to the row's
           own quantity, two unlabeled numbers with nothing saying which is the shelf. */}
-      <span aria-hidden>🥫</span> {detail ? <><span className="sr-only">In pantry: </span>{detail}</> : 'in pantry'}
+      <span aria-hidden>🥫</span> {detail ? <><span className="sr-only">{t('grocery.inPantryShort')}: </span>{detail}</> : t('grocery.inPantryShort')}
     </span>
   )
 }
 
 function ItemAttribution({ item }: { item: GroceryBoardItem }) {
+  const { t } = useI18n()
   const fromMeal = item.source === 'auto' || (item.sourceRecipeIds?.length ?? 0) > 0
   if (fromMeal) {
     return (
       <span className="gattr gattr-meal">
-        <span aria-hidden>🍽</span> from meal plan
+        <span aria-hidden>🍽</span> {t('grocery.fromMeal')}
       </span>
     )
   }
@@ -96,7 +99,7 @@ function ItemAttribution({ item }: { item: GroceryBoardItem }) {
             {by.avatarEmoji}
           </span>
         )}
-        added by {by.name}
+        {t('grocery.addedBy', { name: by.name })}
       </span>
     )
   }
@@ -127,6 +130,7 @@ function PlateRow({
   // being unscheduled, so a × here would be a second, contradicting way to do it.
   onRemove?: () => void
 }) {
+  const { t } = useI18n()
   return (
     <Fragment>
       <div
@@ -139,7 +143,7 @@ function PlateRow({
         <span className="gdinner-c" style={{ background: color }} />
         {day && <span className="gdinner-day">{day}</span>}
         <span className="gdinner-t">{name}</span>
-        <span className="gplate-n">Meal · {dishes.length}</span>
+        <span className="gplate-n">{t('grocery.meal', { count: dishes.length })}</span>
         {onRemove && (
           <button
             type="button"
@@ -190,6 +194,7 @@ function ItemRow({
   onSave: (patch: { name: string; quantity: string | null; section: string | null; store: string | null }) => void
   onDelete: () => void
 }) {
+  const { t } = useI18n()
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(item.name)
   // Seed from the typable form ("1 1/2 lb"), not the displayed "1½ lb" — a glyph in a
@@ -206,15 +211,15 @@ function ItemRow({
     return (
       <div className="gitem editing">
         <div className="gedit-line">
-          <input className="gedit-name" value={name} autoFocus onChange={(e) => setName(e.target.value)} placeholder="item" />
-          <input className="gedit-qty" value={qty} onChange={(e) => setQty(e.target.value)} placeholder="qty" />
+          <input className="gedit-name" value={name} autoFocus onChange={(e) => setName(e.target.value)} placeholder={t('grocery.itemPlaceholder')} />
+          <input className="gedit-qty" value={qty} onChange={(e) => setQty(e.target.value)} placeholder={t('grocery.qty')} />
         </div>
         <div className="gedit-line">
-          <select className="gedit-sec" value={sec} onChange={(e) => setSec(e.target.value)} aria-label="Aisle">
-            <option value="">Auto (by name)</option>
+          <select className="gedit-sec" value={sec} onChange={(e) => setSec(e.target.value)} aria-label={t('grocery.aisle')}>
+            <option value="">{t('grocery.autoName')}</option>
             {AISLE_PICKER.map((a) => <option key={a} value={a}>{AISLE_EMOJI[a] ? `${AISLE_EMOJI[a]} ` : ''}{a}</option>)}
           </select>
-          <input className="gedit-store" value={store} onChange={(e) => setStore(e.target.value)} placeholder="store" aria-label="Store" list="grocery-stores" />
+          <input className="gedit-store" value={store} onChange={(e) => setStore(e.target.value)} placeholder={t('grocery.store')} aria-label={t('grocery.store')} list="grocery-stores" />
           <datalist id="grocery-stores">{storeOptions.map((s) => <option key={s} value={s} />)}</datalist>
           <button type="button" className="gact ok" title="Save" onClick={() => { onSave({ name: name.trim() || item.name, quantity: qty.trim() || null, section: sec || null, store: store.trim() || null }); setEditing(false) }}>✓</button>
           <button type="button" className="gact" title="Cancel" onClick={() => setEditing(false)}>×</button>
@@ -325,6 +330,7 @@ function addDaysISO(iso: string, n: number): string {
 }
 
 export function GroceryBoard({ onBack }: { onBack: () => void }) {
+  const { t } = useI18n()
   // null = the current week (server default); a date pins a specific week so you can
   // shop ahead without touching this week's list.
   const [weekStart, setWeekStart] = useState<string | null>(null)
@@ -439,8 +445,8 @@ export function GroceryBoard({ onBack }: { onBack: () => void }) {
     return [...byKey.values()]
   }, [storeSuggestions, board])
 
-  if (loading && !board) return <div className="muted" style={{ padding: 30 }}>Loading…</div>
-  if (error || !board) return <div className="muted" style={{ padding: 30 }}>Couldn’t load the grocery list.</div>
+  if (loading && !board) return <div className="muted" style={{ padding: 30 }}>{t('common.loading')}</div>
+  if (error || !board) return <div className="muted" style={{ padding: 30 }}>{t('grocery.error')}</div>
 
   // Active = unchecked, or checked within the grace window (still shown in place).
   // Completed = checked and past the grace window (tucked into the Completed section).
@@ -640,7 +646,7 @@ export function GroceryBoard({ onBack }: { onBack: () => void }) {
             {view === 'aisle' && AISLE_EMOJI[sec.aisle] && <span className="ga-emo">{AISLE_EMOJI[sec.aisle]}</span>}
             {view === 'store' && <span className="ga-emo">{sec.store ? '🏬' : '🛒'}</span>}
             {view === 'meal' && sec.mealType && <span className={`meal-badge mt-${sec.mealType}`}>{MEAL_EMOJI[sec.mealType]} {MEAL_LABEL[sec.mealType]}</span>}
-            {view === 'meal' && sec.unscheduled && <span className="meal-badge mt-unscheduled">Unscheduled</span>}
+            {view === 'meal' && sec.unscheduled && <span className="meal-badge mt-unscheduled">{t('grocery.unscheduled')}</span>}
             {sec.aisle}
             <span className="ga-n">{sec.items.length}</span>
             {/* Take an off-plan recipe back off the list (undo "add to grocery"). */}
@@ -705,14 +711,14 @@ export function GroceryBoard({ onBack }: { onBack: () => void }) {
     <div className="grocery-board">
       <div className="grocery-main">
         <div className="grocery-head">
-          <div className="card-h wf-serif grocery-title">Grocery list</div>
+          <div className="card-h wf-serif grocery-title">{t('grocery.list')}</div>
           <div className="muted grocery-count" style={{ fontWeight: 600 }}>
             {activeItems.length} to get{completedItems.length > 0 ? ` · ${completedItems.length} done` : ''}
           </div>
           <div className="seg" style={{ marginLeft: 'auto' }}>
-            <button className={view === 'aisle' ? 'on' : ''} onClick={() => setView('aisle')}>By aisle</button>
-            <button className={view === 'store' ? 'on' : ''} onClick={() => setView('store')}>By store</button>
-            <button className={view === 'meal' ? 'on' : ''} onClick={() => setView('meal')}>By meal</button>
+            <button className={view === 'aisle' ? 'on' : ''} onClick={() => setView('aisle')}>{t('grocery.byAisle')}</button>
+            <button className={view === 'store' ? 'on' : ''} onClick={() => setView('store')}>{t('grocery.byStore')}</button>
+            <button className={view === 'meal' ? 'on' : ''} onClick={() => setView('meal')}>{t('grocery.byMeal')}</button>
           </div>
         </div>
 
@@ -733,7 +739,7 @@ export function GroceryBoard({ onBack }: { onBack: () => void }) {
 
         <form className="ai-bar grocery-add" onSubmit={onAdd}>
           <div className="ai-spark" aria-hidden><Icon name="spark" /></div>
-          <input ref={addRef} value={draft} onChange={(e) => setDraft(e.target.value)} placeholder={'Add to groceries… “bananas and oat milk”'} aria-label="Add to groceries" />
+          <input ref={addRef} value={draft} onChange={(e) => setDraft(e.target.value)} placeholder={t('grocery.addPlaceholder')} aria-label={t('grocery.addLabel')} />
           <div className="mic" aria-hidden><Icon name="mic" /></div>
         </form>
 
@@ -760,7 +766,7 @@ export function GroceryBoard({ onBack }: { onBack: () => void }) {
               <div className="grocery-done">
                 <div className="grocery-done-h" role="button" tabIndex={0} onClick={() => setShowDone((v) => !v)}>
                   <span className={`cal-chev ${showDone ? 'open' : ''}`}>›</span>
-                  <span>Completed</span>
+                  <span>{t('grocery.completed')}</span>
                   <span className="ga-n">{completedItems.length}</span>
                   <button type="button" className="linkbtn" style={{ marginLeft: 'auto' }} onClick={(e) => { e.stopPropagation(); clearCompleted() }}>
                     Clear
@@ -800,7 +806,7 @@ export function GroceryBoard({ onBack }: { onBack: () => void }) {
               )}
             </div>
           </div>
-          {board.meals.length === 0 && <div className="tiny muted" style={{ fontWeight: 600 }}>No meals planned yet.</div>}
+          {board.meals.length === 0 && <div className="tiny muted" style={{ fontWeight: 600 }}>{t('grocery.noMeals')}</div>}
           {availableMealTypes.length > 0 && (
             <div className="seg rail-seg" style={{ marginBottom: 12 }}>
               {availableMealTypes.map((t) => (
@@ -808,7 +814,7 @@ export function GroceryBoard({ onBack }: { onBack: () => void }) {
               ))}
             </div>
           )}
-          {railMeals.length > 0 && <div className="grocery-rail-sub">Scheduled</div>}
+          {railMeals.length > 0 && <div className="grocery-rail-sub">{t('grocery.scheduled')}</div>}
           {/* A plate is ONE row that expands into its dishes; a plain single-recipe
               slot keeps drilling straight into its recipe (parity with the iOS rail). */}
           {railMeals.map((d) =>
@@ -843,7 +849,7 @@ export function GroceryBoard({ onBack }: { onBack: () => void }) {
           {(unscheduledMeals.length > 0 || looseUnscheduled.length > 0) && (
             <>
               <div className="grocery-rail-div" />
-              <div className="grocery-rail-sub">Unscheduled</div>
+              <div className="grocery-rail-sub">{t('grocery.unscheduled')}</div>
               {unscheduledMeals.map((m) => (
                 <PlateRow
                   key={`plate|${m.mealId}`}
@@ -877,8 +883,8 @@ export function GroceryBoard({ onBack }: { onBack: () => void }) {
 
         <div className="card grocery-railcard">
           <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
-            <div className="card-h">Pantry check</div>
-            <button type="button" className="pill" style={{ marginLeft: 'auto', cursor: 'pointer' }} onClick={() => setEditStaples(true)}>☼ Edit staples</button>
+            <div className="card-h">{t('grocery.pantryCheck')}</div>
+            <button type="button" className="pill" style={{ marginLeft: 'auto', cursor: 'pointer' }} onClick={() => setEditStaples(true)}>{t('grocery.editStaples')}</button>
           </div>
           <div className="tiny muted" style={{ fontWeight: 600, marginBottom: 10 }}>
             These staples are assumed in the house, so they’re left off the list. Tap one to add it anyway.

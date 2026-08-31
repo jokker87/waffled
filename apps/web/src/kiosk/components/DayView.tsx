@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { type AgendaEvent, type Countdown } from '../../lib/api'
 import { evVars, useEventColor } from '../../lib/event-color'
-import { DOW_FULL, MONTHS, ymd, localDate, fmtHour, fmtTime, minutesOfDay, durationMin, packLanes } from './cal-utils'
+import { ymd, localDate, fmtHour, fmtTime, minutesOfDay, durationMin, packLanes } from './cal-utils'
 import { CountdownChip } from './CountdownChip'
+import { useI18n } from '../../lib/locale-provider'
 
 const DAY_START = 0 // midnight — top of the grid (full day so early events are reachable)
 const DAY_END = 23 // 11 PM — bottom
@@ -27,6 +28,7 @@ export function DayView({
   onOpenCountdown?: (c: Countdown) => void
   onCreate: (date: string, time?: string) => void
 }) {
+  const { t, formatDate } = useI18n()
   const colorOf = useEventColor()
   const key = ymd(day)
   const hours = useMemo(() => Array.from({ length: DAY_END - DAY_START + 1 }, (_, i) => DAY_START + i), [])
@@ -57,18 +59,18 @@ export function DayView({
     <div className="dv-screen">
       <div className="dv-bar">
         <div className="dv-heading">
-          <span className="wf-serif dv-dow">{DOW_FULL[day.getDay()]}</span>
-          <span className="muted dv-date">{MONTHS[day.getMonth()]} {day.getDate()}</span>
+          <span className="wf-serif dv-dow">{formatDate(day, { weekday: 'long' })}</span>
+          <span className="muted dv-date">{formatDate(day, { month: 'long', day: 'numeric' })}</span>
         </div>
         <button type="button" className="wk-add dv-add" onClick={() => onCreate(key)}>
           <span className="wk-add-plus">＋</span>
-          <span className="wk-add-ph">Add an event…</span>
+          <span className="wk-add-ph">{t('calendar.addEvent')}</span>
         </button>
       </div>
 
       {(allDay.length > 0 || dayCountdowns.length > 0) && (
         <div className="dv-allday">
-          <div className="dv-rail-lbl">ALL-DAY</div>
+          <div className="dv-rail-lbl">{t('calendar.allDay')}</div>
           <div className="dv-allday-cell">
             {allDay.map((e) => {
               const color = colorOf(e)
@@ -114,11 +116,11 @@ export function DayView({
                   key={e.id}
                   className={`dv-ev ev-tint ${isMeal ? 'ev-meal' : ''}`}
                   style={{ top, height, left, width, ...evVars(color), borderLeft: `3px solid ${color}` }}
-                  title={isMeal ? 'Planned meal' : undefined}
+                  title={isMeal ? t('calendar.plannedMeal') : undefined}
                   onClick={(ev) => { ev.stopPropagation(); onOpenEvent(e) }}
                 >
                   <div className="dv-ev-t">{fmtTime(e)}</div>
-                  <div className="dv-ev-title">{e.occurrenceStart && <span className="ev-rep" title="Repeats">↻ </span>}{e.title}</div>
+                  <div className="dv-ev-title">{e.occurrenceStart && <span className="ev-rep" title={t('calendar.repeats')}>↻ </span>}{e.title}</div>
                   {e.location && <div className="dv-ev-loc">📍 {e.location}</div>}
                 </div>
               )

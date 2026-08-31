@@ -6,6 +6,7 @@ import { ListModal } from './components/ListModal'
 import { api, useGoalLists, useGoals, useHousehold, can, goalDisplayProgress as dispProgress, goalDisplayTarget as dispTarget, fmtGoalNum, type Goal, type GoalList, type GoalListMember, type GoalParticipant } from '../lib/api'
 import { CATEGORIES } from './categories'
 import '../styles/goals.css'
+import { useI18n } from '../lib/locale-provider'
 
 const TYPE_LABEL: Record<string, string> = { count: 'Count', total: 'Total', habit: 'Habit', checklist: 'Checklist' }
 
@@ -142,6 +143,7 @@ function SharedHero({ goal, onLog, onOpen }: { goal: Goal; onLog: (g: Goal) => v
 
 // Featured goal, orange "each tracks their own" hero.
 function EachHero({ goal, onOpen }: { goal: Goal; onOpen: () => void }) {
+  const { t } = useI18n()
   const summedTarget = goal.participants.reduce((s, p) => s + (p.target ?? 0), 0) || goal.target || 0
   const sub = [
     goal.target ? `${fmtNum(goal.target)} ${goal.unit ?? ''} each`.trim() : null,
@@ -160,11 +162,11 @@ function EachHero({ goal, onOpen }: { goal: Goal; onOpen: () => void }) {
           <div className="hero-sub">{sub}</div>
         </div>
         <div className="ch-side hero-each-side">
-          <div className="hero-together-l">TOGETHER</div>
+          <div className="hero-together-l">{t('goals.together')}</div>
           <div className="hero-together-n">
             {fmtNum(goal.totalProgress)}/{fmtNum(summedTarget)}
           </div>
-          <div className="hero-open">tap to open ›</div>
+          <div className="hero-open">{t('goals.tapOpen')}</div>
         </div>
       </div>
     </div>
@@ -253,6 +255,7 @@ function GlistItem({ list, on, onClick }: { list: GoalList; on: boolean; onClick
 
 // Goals home — the goal-lists membership model (matches "Home / Family list").
 export function Goals() {
+  const { t } = useI18n()
   const navigate = useNavigate()
   // The selected list lives in the URL (?list=<id>) so leaving for a goal and
   // coming back (browser back) keeps you on the same person/list, not the default.
@@ -299,31 +302,31 @@ export function Goals() {
   const maxGoalStreak = isIndividual ? Math.max(0, ...visible.map((g) => g.streakDays)) : 0
 
   if (listsError) {
-    return <div className="muted" style={{ padding: 30 }}>Couldn't load goals — try reloading or signing in again.</div>
+    return <div className="muted" style={{ padding: 30 }}>{t('goals.error')}</div>
   }
 
   return (
     <div className="goals-home">
       <div className="goal-listrail">
-        {shared.length > 0 && <div className="flabel">SHARED LISTS</div>}
+        {shared.length > 0 && <div className="flabel">{t('goals.sharedLists').toUpperCase()}</div>}
         {shared.map((l) => (
           <GlistItem key={l.id} list={l} on={l.id === selected?.id} onClick={() => selectList(l.id)} />
         ))}
         {individual.length > 0 && (
           <>
             <div className="rail-div" />
-            <div className="flabel">INDIVIDUAL</div>
+            <div className="flabel">{t('goals.individual').toUpperCase()}</div>
           </>
         )}
         {individual.map((l) => (
           <GlistItem key={l.id} list={l} on={l.id === selected?.id} onClick={() => selectList(l.id)} />
         ))}
         {!listsLoading && lists.length === 0 && (
-          <div className="tiny muted" style={{ padding: '4px 8px', fontWeight: 600 }}>No goal lists yet.</div>
+          <div className="tiny muted" style={{ padding: '4px 8px', fontWeight: 600 }}>{t('goals.none')}</div>
         )}
         <button type="button" className="btn btn-ghost rail-new-list" onClick={() => setCreatingList(true)}>
           <Icon name="plus" />
-          New goal list
+          {t('goals.newList')}
         </button>
       </div>
 
@@ -342,7 +345,7 @@ export function Goals() {
                 {selected.name}
               </button>
             ) : (
-              <div className="wf-serif goal-listhead-t">{selected?.name ?? 'All goals'}</div>
+              <div className="wf-serif goal-listhead-t">{selected?.name ?? t('goals.all')}</div>
             )}
             <div className="tiny muted" style={{ fontWeight: 600 }}>
               {selected ? `${selected.goalCount} goals · ${listSub(selected)}` : `${goals.length} goals`}
@@ -353,16 +356,16 @@ export function Goals() {
             {/* All/Shared/Each only makes sense for multi-person lists */}
             {(selected?.members.length ?? 0) !== 1 && (
               <div className="seg">
-                <button className={filter === 'all' ? 'on' : ''} onClick={() => setFilter('all')}>All</button>
-                <button className={filter === 'shared' ? 'on' : ''} onClick={() => setFilter('shared')}>Shared</button>
-                <button className={filter === 'each' ? 'on' : ''} onClick={() => setFilter('each')}>Each</button>
+                <button className={filter === 'all' ? 'on' : ''} onClick={() => setFilter('all')}>{t('photos.all')}</button>
+                <button className={filter === 'shared' ? 'on' : ''} onClick={() => setFilter('shared')}>{t('goals.shared')}</button>
+                <button className={filter === 'each' ? 'on' : ''} onClick={() => setFilter('each')}>{t('goals.each')}</button>
               </div>
             )}
             {/* "Edit group" only makes sense for multi-person lists — an
                 individual isn't a group. */}
             {selected && !isIndividual && canManageGoals && (
               <button type="button" className="pill" style={{ cursor: 'pointer' }} title="Edit group" onClick={() => setEditingList(selected)}>
-                ✎ Edit group
+                ✎ {t('goals.editGroup')}
               </button>
             )}
             {/* Carry the list prefill only when the user can actually target it —
@@ -380,21 +383,21 @@ export function Goals() {
               }}
             >
               <Icon name="plus" />
-              <span>New goal</span>
+              <span>{t('goals.new')}</span>
             </button>
           </div>
         </div>
 
         {spotlight && (
           <>
-            <div className="flabel more-label">SPOTLIGHT</div>
+            <div className="flabel more-label">{t('goals.spotlight').toUpperCase()}</div>
             <Hero goal={spotlight} onLog={setLogging} onOpen={() => navigate(`/goals/${spotlight.id}`)} />
           </>
         )}
 
         {pinned.length > 0 && (
           <>
-            <div className="flabel more-label">PINNED</div>
+            <div className="flabel more-label">{t('goals.pinned')}</div>
             <div className="more-grid">
               {pinned.map((g) => (
                 <PinnedCard key={g.id} goal={g} onClick={() => navigate(`/goals/${g.id}`)} onPin={() => togglePin(g)} canPin={canEditGoal(g)} />

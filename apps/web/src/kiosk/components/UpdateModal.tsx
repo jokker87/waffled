@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { updatesApi, useHousehold, type UpdateInfo } from '../../lib/api'
 import '../../styles/update.css'
+import { useI18n } from '../../lib/locale-provider'
 
 // Once an admin dismisses a version, remember it so the modal never nags again
 // until an even newer version ships. (Keyed by the release tag.)
@@ -10,6 +11,7 @@ const DISMISS_KEY = 'waffled.update.dismissed'
 // (only an admin can run the upgrade on the server, and the /api/updates endpoint
 // is admin-gated). Mounted in KioskLayout so it can appear over any screen.
 export function UpdateModal() {
+  const { t } = useI18n()
   const { person } = useHousehold()
   const isAdmin = person?.isAdmin ?? false
   const [info, setInfo] = useState<UpdateInfo | null>(null)
@@ -55,22 +57,22 @@ export function UpdateModal() {
   return (
     <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) snooze() }}>
       <div className="modal-card upd-card">
-        <button type="button" className="modal-close" aria-label="Dismiss this version" onClick={dismiss}>×</button>
+        <button type="button" className="modal-close" aria-label={t('update.dismiss')} onClick={dismiss}>×</button>
         <div className="upd-badge">🧇</div>
-        <div className="upd-eyebrow">Update available</div>
-        <h2 className="upd-title wf-serif">Waffled {display} is here</h2>
-        <div className="upd-ver">You’re on {info.current.version}</div>
+        <div className="upd-eyebrow">{t('update.available')}</div>
+        <h2 className="upd-title wf-serif">{t('update.here', { version: display })}</h2>
+        <div className="upd-ver">{t('update.current', { version: info.current.version })}</div>
 
         <div className="upd-cmd">
-          <div className="upd-cmd-l">To update, run this on the server that hosts Waffled:</div>
+          <div className="upd-cmd-l">{t('update.command')}</div>
           <code>./waffled upgrade</code>
         </div>
 
         <div className="upd-actions">
-          <a className="btn btn-ghost" href={url} target="_blank" rel="noopener noreferrer">View changelog</a>
-          <a className="btn btn-primary" href={upgradeUrl} target="_blank" rel="noopener noreferrer">How to upgrade</a>
+          <a className="btn btn-ghost" href={url} target="_blank" rel="noopener noreferrer">{t('update.changelog')}</a>
+          <a className="btn btn-primary" href={upgradeUrl} target="_blank" rel="noopener noreferrer">{t('update.how')}</a>
         </div>
-        <button type="button" className="upd-later" onClick={snooze}>Remind me later</button>
+        <button type="button" className="upd-later" onClick={snooze}>{t('update.later')}</button>
       </div>
     </div>
   )

@@ -98,7 +98,16 @@ function weekFacts(events: EventRow[], tz: string): WeekFacts {
 }
 
 // Deterministic digest — the always-available fallback and the AI's grounding.
-function headsUpFallback(f: WeekFacts): { headline: string; body: string } {
+function headsUpFallback(f: WeekFacts, locale?: string): { headline: string; body: string } {
+  if (locale?.toLowerCase().startsWith('de')) {
+    if (f.total === 0) return { headline: 'Ruhige Woche', body: 'Noch nichts im Kalender — eine gute Gelegenheit, die Woche zu planen.' }
+    if (f.conflicts.length > 0) {
+      const c = f.conflicts[0]
+      return { headline: 'Überschneidung klären', body: `„${c.a}“ und „${c.b}“ überschneiden sich am ${c.weekday}. ${f.busiest ? `${f.busiest.weekday} ist mit ${f.busiest.count} Terminen der vollste Tag.` : ''}`.trim() }
+    }
+    if (f.busiest && f.busiest.count >= 3) return { headline: 'Ein voller Tag', body: `${f.busiest.weekday} ist mit ${f.busiest.count} Terminen gut gefüllt — der Rest der Woche ist ruhiger. Es gibt keine Doppelbelegung.` }
+    return { headline: 'Entspannte Woche', body: `${f.total} Termine im Kalender und keine Doppelbelegung. Tippe auf einen Tag, um vorauszuplanen.` }
+  }
   if (f.total === 0) return { headline: 'Clear week', body: 'Nothing on the calendar yet — a good week to plan ahead.' }
   if (f.conflicts.length > 0) {
     const c = f.conflicts[0]
@@ -123,16 +132,17 @@ const HEADS_UP_SCHEMA = {
   required: ['headline', 'body'],
 }
 
-export async function weekHeadsUp(householdId: string, from: string, to: string, viewerPersonId: string | null): Promise<{ headline: string; body: string; via: string }> {
+export async function weekHeadsUp(householdId: string, from: string, to: string, viewerPersonId: string | null, locale?: string): Promise<{ headline: string; body: string; via: string }> {
   const tz = await householdTz(householdId)
   const events = await rangeEvents(householdId, from, to, viewerPersonId)
   const facts = weekFacts(events, tz)
-  const fallback = headsUpFallback(facts)
+  const fallback = headsUpFallback(facts, locale)
   try {
     const system = [
       "You write the one short 'Heads up this week' card on a family hub's calendar.",
       'Given a factual summary of the week, return a 2–4 word headline and a warm, practical 1–2 sentence body.',
       'Call out the busiest day or any scheduling clash when present; otherwise reassure. Be specific, never generic. No emojis. JSON only.',
+      `Write every human-facing string in the language of locale ${locale || 'en-US'}. Keep event titles and names unchanged.`,
     ].join('\n')
     const { data, via } = await completeJson(householdId, {
       system,
@@ -151,8 +161,13 @@ export async function weekHeadsUp(householdId: string, from: string, to: string,
 }
 
 // ── Per-event insight ────────────────────────────────────────────────────────
-function eventInsightFallback(e: EventRow, tz: string): { headline: string; body: string; leaveBy: string | null; reminder: string } {
+function eventInsightFallback(e: EventRow, tz: string, locale?: string): { headline: string; body: string; leaveBy: string | null; reminder: string } {
   const hasLoc = !!e.location?.trim()
+  if (locale?.toLowerCase().startsWith('de')) {
+    if (hasLoc && !e.all_day) return { headline: 'Anfahrt einplanen', body: `„${e.title}“ findet in ${e.location} statt. Prüfe die Route vorher, damit du ohne Eile ankommst.`, leaveBy: null, reminder: `Stelle einen Wecker etwa 30 Minuten vor der Abfahrt zu ${e.title}.` }
+    if (hasLoc) return { headline: 'Gut vorbereitet', body: `„${e.title}“ findet in ${e.location} statt. Prüfe die Details am besten am Vortag.`, leaveBy: null, reminder: `Erinnere dich am Vorabend an ${e.title}.` }
+    return { headline: 'Alles im Blick', body: `Eine Erinnerung vor „${e.title}“ hilft dir, gut durch den Tag zu kommen.`, leaveBy: null, reminder: `Stelle kurz vor Beginn von ${e.title} eine Erinnerung ein.` }
+  }
   if (hasLoc && !e.all_day) {
     return {
       headline: 'Plan your trip',
@@ -182,12 +197,13 @@ const INSIGHT_SCHEMA = {
 export async function eventInsight(
   householdId: string,
   id: string,
-  viewerPersonId: string | null
+  viewerPersonId: string | null,
+  locale?: string
 ): Promise<{ headline: string; body: string; leaveBy: string | null; reminder: string; via: string } | null> {
   const tz = await householdTz(householdId)
   const event = await getEventById(householdId, id, viewerPersonId)
   if (!event) return null
-  const fallback = eventInsightFallback(event, tz)
+  const fallback = eventInsightFallback(event, tz, locale)
   try {
     const p = partsInTz(new Date(event.starts_at), tz)
     const ctx = {
@@ -210,6 +226,7 @@ export async function eventInsight(
       'Return a 2–4 word headline, a 1–2 sentence body with concrete prep advice (what to bring or do beforehand),',
       'an optional leaveBy clock time (ONLY when the event has a location and a start time and travel genuinely matters — otherwise null),',
       'and a one-sentence reminder nudge the user could set. Ground everything in the event details. No emojis. JSON only.',
+      `Write every human-facing string in the language of locale ${locale || 'en-US'}. Keep event titles and names unchanged.`,
     ].join('\n')
     const { data, via } = await completeJson(householdId, {
       system,
@@ -244,14 +261,16 @@ export function registerCalendarAiRoutes(api: Api): void {
       to = d.toISOString().slice(0, 10)
     }
     if (from > to) [from, to] = [to, from]
-    return weekHeadsUp(tenant.householdId, from, to, tenant.personId ?? null)
+    const locale = typeof req.query?.locale === 'string' ? req.query.locale.slice(0, 35) : undefined
+    return weekHeadsUp(tenant.householdId, from, to, tenant.personId ?? null, locale)
   }))
 
   // Per-event insight for the detail screen's AI card + "Remind me".
   api.get('/api/events/:id/insight', tenantRoute(async (tenant, req: Request, res: Response) => {
     const id = req.params.id ?? ''
     if (!UUID_RE.test(id)) return res.status(404).json({ error: 'NotFound', message: 'event not found' })
-    const insight = await eventInsight(tenant.householdId, id, tenant.personId ?? null)
+    const locale = typeof req.query?.locale === 'string' ? req.query.locale.slice(0, 35) : undefined
+    const insight = await eventInsight(tenant.householdId, id, tenant.personId ?? null, locale)
     if (!insight) return res.status(404).json({ error: 'NotFound', message: 'event not found' })
     return insight
   }))

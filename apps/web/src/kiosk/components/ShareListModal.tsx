@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import QRCode from 'qrcode'
 import { formatShareList, formatShareListMarkdown, type ShareListItem } from './share-list'
+import { useI18n } from '../../lib/locale-provider'
 import {
   QR_DISPLAY_PX,
   QR_ERROR_CORRECTION,
@@ -23,6 +24,7 @@ import {
 const canShare = (): boolean => typeof navigator !== 'undefined' && typeof navigator.share === 'function'
 
 export function ShareListModal({ items, onClose }: { items: ShareListItem[]; onClose: () => void }) {
+  const { t } = useI18n()
   const text = formatShareList(items)
   const count = items.filter((i) => !i.checked).length
   const [qr, setQr] = useState<string | null>(null)
@@ -83,10 +85,10 @@ export function ShareListModal({ items, onClose }: { items: ShareListItem[]; onC
         onClick={(e) => e.stopPropagation()}
       >
         <button type="button" className="modal-close" aria-label="Close" onClick={onClose}>×</button>
-        <div className="card-h wf-serif" style={{ fontSize: 22, marginBottom: 4 }}>Share list</div>
+        <div className="card-h wf-serif" style={{ fontSize: 22, marginBottom: 4 }}>{t('lists.share')}</div>
 
         {!text ? (
-          <div className="muted" style={{ padding: '12px 0' }}>Nothing to share — everything’s checked off. 🎉</div>
+          <div className="muted" style={{ padding: '12px 0' }}>{t('lists.nothingShare')}</div>
         ) : (
           <>
             <div style={{ display: 'flex', gap: 18, alignItems: 'center', flexWrap: 'wrap', padding: '10px 0' }}>
@@ -107,7 +109,7 @@ export function ShareListModal({ items, onClose }: { items: ShareListItem[]; onC
                     : 'This list is too long to scan as a QR code — the squares would be too small for a camera to read. Copy it or send it through the share sheet instead.'}
                 </div>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  {canShare() && <button type="button" className="btn btn-primary" onClick={share}>Share…</button>}
+                  {canShare() && <button type="button" className="btn btn-primary" onClick={share}>{t('lists.shareAction')}</button>}
                   <button
                     type="button"
                     className={`btn ${canShare() ? 'btn-ghost' : 'btn-primary'}`}

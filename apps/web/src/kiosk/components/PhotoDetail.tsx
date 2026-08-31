@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { api, type Photo } from '../../lib/api'
 import { AlbumPicker } from './AlbumPicker'
 import { ConfirmDialog } from './ConfirmDialog'
+import { useI18n } from '../../lib/locale-provider'
 
 // Photo detail overlay — a back-pill topbar with "Set as screensaver / ✏️ Edit /
 // 🗑", the big photo stage on the left, and the Details / "Part of memory" AI
@@ -9,14 +10,6 @@ import { ConfirmDialog } from './ConfirmDialog'
 // album (datalist of existing albums) / favorite / date fields; Save PATCHes the
 // photo and refetches the wall.
 
-function fmtDate(iso: string | null): string {
-  if (!iso) return '—'
-  return new Date(iso).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
-}
-function fmtWeekday(iso: string | null): string {
-  if (!iso) return ''
-  return new Date(iso).toLocaleDateString('en-US', { weekday: 'long' })
-}
 // ISO timestamp → YYYY-MM-DD for a <input type=date> value (and back).
 function isoToDateInput(iso: string | null): string {
   if (!iso) return ''
@@ -42,6 +35,7 @@ export function PhotoDetail({
   onUpdated?: () => void
   onDeleted: () => void
 }) {
+  const { t, formatDate } = useI18n()
   const [confirmDel, setConfirmDel] = useState(false)
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -93,12 +87,12 @@ export function PhotoDetail({
       <div className="wf-kiosk wf" style={{ position: 'absolute', inset: 0, background: '#efece6' }}>
         <div className="kiosk-main" style={{ gridColumn: '1 / -1' }}>
           <div className="topbar">
-            <button type="button" className="pill" style={{ cursor: 'pointer' }} onClick={onClose}>‹ Photos</button>
+            <button type="button" className="pill" style={{ cursor: 'pointer' }} onClick={onClose}>‹ {t('nav.photos')}</button>
             <div className="tb-right">
               {!editing && (
-                <button type="button" className="pill" style={{ cursor: 'pointer' }} onClick={startEdit}>✏️ Edit</button>
+                <button type="button" className="pill" style={{ cursor: 'pointer' }} onClick={startEdit}>✏️ {t('common.edit')}</button>
               )}
-              <button type="button" className="icon-btn" style={{ cursor: 'pointer' }} aria-label="Delete photo" onClick={() => setConfirmDel(true)}>
+              <button type="button" className="icon-btn" style={{ cursor: 'pointer' }} aria-label={t('photos.deleteLabel')} onClick={() => setConfirmDel(true)}>
                 🗑
               </button>
             </div>
@@ -110,7 +104,7 @@ export function PhotoDetail({
               <div className="pd-stage-cap">
                 {photo.caption && <div className="wf-serif">{photo.caption}</div>}
                 <div className="pd-stage-sub">
-                  {fmtWeekday(photo.takenAt ?? photo.createdAt)}
+                  {photo.takenAt || photo.createdAt ? formatDate(photo.takenAt ?? photo.createdAt!, { weekday: 'long' }) : ''}
                   {photo.memory ? ` · ${photo.memory}` : ''}
                 </div>
               </div>
@@ -119,21 +113,21 @@ export function PhotoDetail({
             <div className="pd-side">
               <div className="card" style={{ padding: '18px 20px' }}>
                 <div className="card-h" style={{ fontSize: 17, marginBottom: 10 }}>
-                  Details
+                  {t('photos.details')}
                 </div>
 
                 {editing ? (
                   <div className="pd-edit">
                     <label className="ap-field-label">
-                      Caption
-                      <input className="field" placeholder="Caption" value={caption} onChange={(e) => setCaption(e.target.value)} />
+                      {t('photos.captionLabel')}
+                      <input className="field" placeholder={t('photos.captionLabel')} value={caption} onChange={(e) => setCaption(e.target.value)} />
                     </label>
                     <label className="ap-field-label">
-                      Album
+                      {t('photos.album')}
                       <AlbumPicker value={album} onChange={setAlbum} albums={albums} />
                     </label>
                     <label className="ap-field-label">
-                      Date
+                      {t('photos.date')}
                       <input className="field" type="date" value={takenDate} onChange={(e) => setTakenDate(e.target.value)} />
                     </label>
                     <div className="ap-form-row">
@@ -143,20 +137,20 @@ export function PhotoDetail({
                         aria-pressed={isFavorite}
                         onClick={() => setIsFavorite((v) => !v)}
                       >
-                        {isFavorite ? '❤️' : '🤍'} Favorite
+                        {isFavorite ? '❤️' : '🤍'} {t('photos.favorite')}
                       </button>
                     </div>
                     <div className="pd-edit-actions">
-                      <button type="button" className="pill" onClick={() => setEditing(false)}>Cancel</button>
+                      <button type="button" className="pill" onClick={() => setEditing(false)}>{t('common.cancel')}</button>
                       <button type="button" className="btn btn-primary" disabled={saving} onClick={save}>
-                        {saving ? 'Saving…' : 'Save'}
+                        {saving ? t('common.saving') : t('common.save')}
                       </button>
                     </div>
                   </div>
                 ) : (
                   <>
                     <div className="set-row" style={{ padding: '11px 0' }}>
-                      <div className="set-tx"><div className="st1">Album</div></div>
+                      <div className="set-tx"><div className="st1">{t('photos.album')}</div></div>
                       {photo.memory && onOpenAlbum ? (
                         <button type="button" className="pd-album-link" style={{ marginLeft: 'auto' }} onClick={() => onOpenAlbum(photo.memory!)}>
                           {photo.memory} <span aria-hidden>›</span>
@@ -166,16 +160,16 @@ export function PhotoDetail({
                       )}
                     </div>
                     <div className="set-row" style={{ padding: '11px 0' }}>
-                      <div className="set-tx"><div className="st1">Added by</div></div>
+                      <div className="set-tx"><div className="st1">{t('photos.addedBy')}</div></div>
                       <span className="tiny muted" style={{ fontWeight: 600, marginLeft: 'auto' }}>{photo.uploadedBy?.name ?? '—'}</span>
                     </div>
                     <div className="set-row" style={{ padding: '11px 0' }}>
-                      <div className="set-tx"><div className="st1">Date</div></div>
-                      <div className="tiny muted" style={{ fontWeight: 600, marginLeft: 'auto' }}>{fmtDate(photo.takenAt ?? photo.createdAt)}</div>
+                      <div className="set-tx"><div className="st1">{t('photos.date')}</div></div>
+                      <div className="tiny muted" style={{ fontWeight: 600, marginLeft: 'auto' }}>{photo.takenAt || photo.createdAt ? formatDate(photo.takenAt ?? photo.createdAt!, { weekday: 'short', month: 'short', day: 'numeric' }) : '—'}</div>
                     </div>
                     <div className="set-row" style={{ padding: '11px 0', borderBottom: 0 }}>
-                      <div className="set-tx"><div className="st1">Favorite</div></div>
-                      <div className="tiny muted" style={{ fontWeight: 600, marginLeft: 'auto' }}>{photo.isFavorite ? '❤️ Yes' : 'No'}</div>
+                      <div className="set-tx"><div className="st1">{t('photos.favorite')}</div></div>
+                      <div className="tiny muted" style={{ fontWeight: 600, marginLeft: 'auto' }}>{photo.isFavorite ? `❤️ ${t('common.yes')}` : t('common.no')}</div>
                     </div>
                   </>
                 )}
@@ -183,7 +177,7 @@ export function PhotoDetail({
 
               {photo.memory && onOpenAlbum && (
                 <button type="button" className="pd-album-cta" onClick={() => onOpenAlbum(photo.memory!)}>
-                  <span>View all {memoryCount} in “{photo.memory}”</span>
+                  <span>{t('photos.viewAlbum', { count: memoryCount, album: photo.memory })}</span>
                   <span aria-hidden>›</span>
                 </button>
               )}
@@ -194,9 +188,9 @@ export function PhotoDetail({
 
       {confirmDel && (
         <ConfirmDialog
-          title="Delete photo?"
-          message="This can’t be undone."
-          confirmLabel="Delete"
+          title={t('photos.deleteTitle')}
+          message={t('photos.deleteWarning')}
+          confirmLabel={t('common.delete')}
           danger
           onConfirm={del}
           onClose={() => setConfirmDel(false)}

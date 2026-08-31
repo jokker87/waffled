@@ -3,9 +3,11 @@ import { useTopbarSlots } from '../topbar-slot'
 import { useHousehold, useWeather, type Weather } from '../../lib/api'
 import { applyEventStyle, eventStyle } from '../../lib/display'
 import { CaptureBar } from './CaptureBar'
+import { useI18n } from '../../lib/locale-provider'
 
 // Weather widget with a hover/tap popover that says where the reading comes from.
 function WeatherWidget({ wx }: { wx: Weather }) {
+  const { t, language, formatNumber } = useI18n()
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -16,26 +18,28 @@ function WeatherWidget({ wx }: { wx: Weather }) {
     document.addEventListener('click', onDoc)
     return () => document.removeEventListener('click', onDoc)
   }, [open])
+  const temperature = language === 'en' ? wx.tempF! : Math.round((wx.tempF! - 32) * 5 / 9)
+  const unit = language === 'en' ? 'F' : 'C'
   return (
     <div className="tb-wx-wrap" ref={ref}>
       <button
         type="button"
         className="tb-wx"
-        aria-label="Weather details"
+        aria-label={t('topbar.weatherDetails')}
         onClick={(e) => {
           e.stopPropagation()
           setOpen((o) => !o)
         }}
       >
         <span aria-hidden="true">{wx.emoji}</span>
-        {wx.tempF}°
+        {formatNumber(temperature)}°{unit}
       </button>
       <div className={`tb-wx-pop ${open ? 'open' : ''}`} role="tooltip">
         <div className="tb-wx-pop-t">
-          {wx.emoji} {wx.tempF}°{wx.label ? ` · ${wx.label}` : ''}
+          {wx.emoji} {formatNumber(temperature)}°{unit}{wx.label ? ` · ${wx.label}` : ''}
         </div>
-        <div className="tb-wx-pop-s">{wx.location ? `Weather for ${wx.location}` : 'Weather'}</div>
-        <div className="tb-wx-pop-s muted">via Open-Meteo · change in Settings → Location</div>
+        <div className="tb-wx-pop-s">{wx.location ? t('topbar.weatherFor', { location: wx.location }) : t('topbar.weather')}</div>
+        <div className="tb-wx-pop-s muted">{t('topbar.weatherSource')}</div>
       </div>
     </div>
   )
@@ -50,18 +54,12 @@ function useNow(): Date {
   return now
 }
 
-function formatDate(d: Date, tz?: string): string {
-  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'long', day: 'numeric', timeZone: tz || undefined })
-}
-
-function formatTime(d: Date, tz?: string): string {
-  // 12-hour without the AM/PM suffix (matches the design), in the household tz
-  return d
-    .toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: tz || undefined })
-    .replace(/\s?[AP]M$/i, '')
+function formatTime(d: Date, locale: string, tz?: string): string {
+  return d.toLocaleTimeString(locale, { hour: 'numeric', minute: '2-digit', timeZone: tz || undefined })
 }
 
 export function Topbar() {
+  const { locale, formatDate } = useI18n()
   const now = useNow()
   const { right, full } = useTopbarSlots()
   const { household } = useHousehold()
@@ -76,8 +74,8 @@ export function Topbar() {
   if (full) return <div className="topbar">{full}</div>
   return (
     <div className="topbar">
-      <div className="tb-date wf-serif">{formatDate(now, tz)}</div>
-      <div className="tb-time">{formatTime(now, tz)}</div>
+      <div className="tb-date wf-serif">{formatDate(now, { weekday: 'short', month: 'long', day: 'numeric', timeZone: tz || undefined })}</div>
+      <div className="tb-time">{formatTime(now, locale, tz)}</div>
       {wx?.configured && wx.tempF != null && <WeatherWidget wx={wx} />}
       <div className="tb-right">{right ?? <CaptureBar />}</div>
     </div>

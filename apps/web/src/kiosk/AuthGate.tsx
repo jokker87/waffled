@@ -4,6 +4,7 @@ import { authApi, getAccessToken, isKioskMode, type AuthStatus, type SetupInput 
 import { ProfilePicker } from './ProfilePicker'
 import { PairDevice } from './PairDevice'
 import '../styles/auth.css'
+import { useI18n } from '../lib/locale-provider'
 
 type Phase = 'loading' | 'authed' | 'login' | 'setup' | 'picker'
 
@@ -11,6 +12,7 @@ type Phase = 'loading' | 'authed' | 'login' | 'setup' | 'picker'
 // app — driven by whether a session exists and whether the instance is initialized.
 // Also handles the OIDC return at /auth/callback (exchange the handoff → session).
 export function AuthGate({ children }: { children: ReactNode }) {
+  const { t } = useI18n()
   const [phase, setPhase] = useState<Phase>(() => (getAccessToken() ? 'authed' : 'loading'))
   const [status, setStatus] = useState<AuthStatus | null>(null)
   const [oidcError, setOidcError] = useState<string | null>(null)
@@ -78,7 +80,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
   if (phase === 'login') return <LoginScreen status={status} oidcError={oidcError} />
   return (
     <div className="auth-screen">
-      <div className="auth-loading">Loading…</div>
+      <div className="auth-loading">{t('common.loading')}</div>
     </div>
   )
 }
@@ -97,6 +99,7 @@ function AuthShell({ title, sub, children }: { title: string; sub: string; child
 }
 
 function LoginScreen({ status, oidcError }: { status: AuthStatus | null; oidcError: string | null }) {
+  const { t } = useI18n()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
@@ -129,7 +132,7 @@ function LoginScreen({ status, oidcError }: { status: AuthStatus | null; oidcErr
   }
 
   return (
-    <AuthShell title="Welcome back" sub="Sign in to your family's Waffled.">
+    <AuthShell title={t('auth.welcomeBack')} sub={t('auth.signInSub')}>
       {error && (
         <div ref={errorRef} id="login-error" className="auth-error" style={{ marginBottom: 12 }} role="alert" tabIndex={-1}>
           {error}
@@ -140,20 +143,20 @@ function LoginScreen({ status, oidcError }: { status: AuthStatus | null; oidcErr
           {status!.oidc!.buttonLabel}
         </button>
       )}
-      {showOidc && showPassword && <div className="auth-or">or</div>}
+      {showOidc && showPassword && <div className="auth-or">{t('auth.or')}</div>}
       {showPassword && (
         <form onSubmit={submit} className="auth-form">
-          <label className="auth-label" htmlFor="login-email">Email</label>
+          <label className="auth-label" htmlFor="login-email">{t('auth.email')}</label>
           <input id="login-email" className="auth-input" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} aria-describedby={error ? 'login-error' : undefined} autoFocus required />
-          <label className="auth-label" htmlFor="login-password">Password</label>
+          <label className="auth-label" htmlFor="login-password">{t('auth.password')}</label>
           <input id="login-password" className="auth-input" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} aria-describedby={error ? 'login-error' : undefined} required />
           <button type="submit" className="btn btn-primary auth-submit" disabled={busy || !email || !password}>
-            {busy ? 'Signing in…' : 'Sign in'}
+            {busy ? t('auth.signingIn') : t('auth.signIn')}
           </button>
         </form>
       )}
       <button type="button" className="auth-kiosk-link" onClick={() => setPairing(true)}>
-        Set up this device as a kiosk
+        {t('auth.kiosk')}
       </button>
     </AuthShell>
   )
@@ -181,6 +184,7 @@ const TIMEZONES: string[] = (() => {
 const SETUP_EMAIL_RE = /^[^\s@]{2,}@[^\s@]+\.[^\s@]+$/
 
 function SetupWizard() {
+  const { t } = useI18n()
   const detectedTz = (() => {
     try {
       return Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/New_York'
@@ -235,33 +239,33 @@ function SetupWizard() {
   }
 
   return (
-    <AuthShell title="Welcome to Waffled" sub="Let's set up your household and your admin account.">
+    <AuthShell title={t('auth.setupTitle')} sub={t('auth.setupSub')}>
       <form onSubmit={submit} className="auth-form">
-        <div className="auth-section">Your household</div>
-        <label className="auth-label" htmlFor="setup-household">Household name</label>
+        <div className="auth-section">{t('auth.household')}</div>
+        <label className="auth-label" htmlFor="setup-household">{t('auth.householdName')}</label>
         <input id="setup-household" className="auth-input" value={householdName} onChange={(e) => setHouseholdName(e.target.value)} placeholder="The Sites Family" autoFocus required />
-        <label className="auth-label" htmlFor="setup-timezone">Timezone</label>
+        <label className="auth-label" htmlFor="setup-timezone">{t('auth.timezone')}</label>
         <select id="setup-timezone" className="auth-input auth-select" value={timezone} onChange={(e) => setTimezone(e.target.value)} required>
           {tzOptions.map((tz) => (
             <option key={tz} value={tz}>{tz.replace(/_/g, ' ')}</option>
           ))}
         </select>
 
-        <div className="auth-section" style={{ marginTop: 14 }}>Admin account</div>
-        <label className="auth-label" htmlFor="setup-name">Your name</label>
+        <div className="auth-section" style={{ marginTop: 14 }}>{t('auth.adminAccount')}</div>
+        <label className="auth-label" htmlFor="setup-name">{t('auth.yourName')}</label>
         <input id="setup-name" className="auth-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="John Doe" required />
-        <label className="auth-label" htmlFor="setup-email">Email</label>
+        <label className="auth-label" htmlFor="setup-email">{t('auth.email')}</label>
         <input id="setup-email" className="auth-input" type="email" autoComplete="username" value={email} onChange={(e) => { setEmail(e.target.value); clearErr('email') }} onBlur={() => setShowErr((s) => ({ ...s, email: !!email.trim() && !emailValid }))} aria-invalid={showErr.email || undefined} aria-describedby={showErr.email ? 'setup-email-error' : undefined} placeholder="you@example.com" required />
-        {showErr.email && <div id="setup-email-error" className="auth-error">Enter a valid email address (e.g. you@example.com).</div>}
-        <label className="auth-label" htmlFor="setup-password">Password</label>
+        {showErr.email && <div id="setup-email-error" className="auth-error">{t('auth.invalidEmail')}</div>}
+        <label className="auth-label" htmlFor="setup-password">{t('auth.password')}</label>
         <input id="setup-password" className="auth-input" type="password" autoComplete="new-password" value={password} onChange={(e) => { setPassword(e.target.value); clearErr('password') }} onBlur={() => setShowErr((s) => ({ ...s, password: !!password && !passwordLongEnough }))} aria-invalid={showErr.password || undefined} aria-describedby={showErr.password ? 'setup-password-error' : undefined} placeholder="At least 8 characters" required />
-        {showErr.password && <div id="setup-password-error" className="auth-error">Password must be at least 8 characters.</div>}
-        <label className="auth-label" htmlFor="setup-confirm">Confirm password</label>
+        {showErr.password && <div id="setup-password-error" className="auth-error">{t('auth.passwordLength')}</div>}
+        <label className="auth-label" htmlFor="setup-confirm">{t('auth.confirmPassword')}</label>
         <input id="setup-confirm" className="auth-input" type="password" autoComplete="new-password" value={confirm} onChange={(e) => { setConfirm(e.target.value); clearErr('confirm') }} onBlur={() => setShowErr((s) => ({ ...s, confirm: !!password && !!confirm && !passwordsMatch }))} aria-invalid={showErr.confirm || undefined} aria-describedby={showErr.confirm ? 'setup-confirm-error' : undefined} required />
-        {showErr.confirm && <div id="setup-confirm-error" className="auth-error">Passwords don't match.</div>}
+        {showErr.confirm && <div id="setup-confirm-error" className="auth-error">{t('auth.passwordMismatch')}</div>}
         {error && <div ref={errorRef} className="auth-error" role="alert" tabIndex={-1}>{error}</div>}
         <button type="submit" className="btn btn-primary auth-submit" disabled={busy || !valid}>
-          {busy ? 'Creating…' : 'Create household'}
+          {busy ? t('auth.creating') : t('auth.createHousehold')}
         </button>
       </form>
     </AuthShell>

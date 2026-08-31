@@ -14,6 +14,7 @@ import { GettingStartedBar } from './onboarding/GettingStarted'
 import { useTopbarRight } from './topbar-slot'
 import { useTodayLayout, useHousehold, type LayoutScope, type StoredLayout } from '../lib/api'
 import { moduleEnabled, rewardsEnabled } from '../lib/modules'
+import { useI18n } from '../lib/locale-provider'
 
 // Pantry is an optional module that defaults to off, and its card is the only one
 // whose module isn't already on Today's critical path. Loading it on demand keeps it
@@ -99,6 +100,7 @@ function dropTargetAt(x: number, y: number): { col: number; index: number } | nu
 // default + optional per-person override) and can be rearranged in a Customize
 // mode via drag-and-drop, then saved for just you or the whole family.
 export function Today() {
+  const { t } = useI18n()
   const { resolved, source, loading, save, reset } = useTodayLayout()
   const { household } = useHousehold()
   // Optional-module cards: shown when the module is enabled and not hidden from Today.
@@ -202,7 +204,7 @@ export function Today() {
         <div className="tb-today-actions">
           <button type="button" className="pill today-customize" disabled={loading} onClick={() => setEditing(true)}>
             ⠿ Customize
-            {source === 'user' && <span className="today-src-tag">personal</span>}
+            {source === 'user' && <span className="today-src-tag">{t('today.personal')}</span>}
           </button>
           <CaptureBar />
         </div>
@@ -271,10 +273,10 @@ export function Today() {
 
       {editing && (
         <div className="today-toolbar">
-          <span className="tiny muted today-toolbar-hint">Drag a card by its bar to rearrange</span>
-          <button type="button" className="pill" style={{ cursor: 'pointer' }} disabled={saving} onClick={cancel}>Cancel</button>
-          <button type="button" className="pill" style={{ cursor: 'pointer' }} disabled={saving} onClick={resetDefault}>Reset to defaults</button>
-          <button type="button" className="pill btn-primary" style={{ color: 'var(--on-accent)', border: 0, cursor: 'pointer' }} disabled={saving} onClick={() => persist('user')}>Save for me</button>
+          <span className="tiny muted today-toolbar-hint">{t('today.dragHint')}</span>
+          <button type="button" className="pill" style={{ cursor: 'pointer' }} disabled={saving} onClick={cancel}>{t('common.cancel')}</button>
+          <button type="button" className="pill" style={{ cursor: 'pointer' }} disabled={saving} onClick={resetDefault}>{t('today.reset')}</button>
+          <button type="button" className="pill btn-primary" style={{ color: 'var(--on-accent)', border: 0, cursor: 'pointer' }} disabled={saving} onClick={() => persist('user')}>{t('today.saveMine')}</button>
         </div>
       )}
 
@@ -294,13 +296,13 @@ export function Today() {
                     <div className="today-card-wrap compact" data-card={card}>
                       <div className="today-card-bar" onPointerDown={(e) => startDrag(e, card)}>
                         <span className="today-card-grip">⠿</span>
-                        <span className="today-card-name">{def.label}</span>
-                        {def.fill && <span className="today-card-fillhint">list</span>}
+                        <span className="today-card-name">{t(`today.card.${card}`)}</span>
+                        {def.fill && <span className="today-card-fillhint">{t('today.list')}</span>}
                         <button
                           type="button"
                           className="today-card-hide"
                           title="Hide from Today"
-                          aria-label={`Hide ${def.label}`}
+                          aria-label={t('today.hide', { name: t(`today.card.${card}`) })}
                           onPointerDown={(e) => e.stopPropagation()}
                           onClick={() => hideCard(card)}
                         >
@@ -315,22 +317,22 @@ export function Today() {
               )
             })}
             {editing && drag && target?.col === ci && target?.index === col.length && <div className="today-drop-line" />}
-            {editing && col.length === 0 && <div className="today-col-empty">Drop a card here</div>}
+            {editing && col.length === 0 && <div className="today-col-empty">{t('today.dropHere')}</div>}
           </div>
         ))}
       </div>
 
       {editing && (
         <div className="today-hidden-tray">
-          <div className="today-hidden-tray-h">Hidden cards</div>
+          <div className="today-hidden-tray-h">{t('today.hidden')}</div>
           {hiddenShowable.length === 0 ? (
-            <div className="today-hidden-empty">Tap × on a card to hide it from Today. Hidden cards appear here to add back.</div>
+            <div className="today-hidden-empty">{t('today.hiddenHelp')}</div>
           ) : (
             <div className="today-hidden-chips">
               {hiddenShowable.map((card) => (
                 <button key={card} type="button" className="today-hidden-chip" onClick={() => showCard(card)}>
                   <span className="plus">+</span>
-                  {CARDS[card].label}
+                  {t(`today.card.${card}`)}
                 </button>
               ))}
             </div>
@@ -340,7 +342,7 @@ export function Today() {
 
       {drag && (
         <div className="today-drag-ghost" style={{ left: pos.x, top: pos.y }}>
-          ⠿ {CARDS[drag.card]?.label}
+          ⠿ {t(`today.card.${drag.card}`)}
         </div>
       )}
     </div>

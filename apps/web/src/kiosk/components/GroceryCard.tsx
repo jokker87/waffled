@@ -1,10 +1,12 @@
 import { useState, type FormEvent } from 'react'
 import { Icon } from '../icons'
 import { useGrocery } from '../../lib/api'
+import { useI18n } from '../../lib/locale-provider'
 
 // Real, interactive grocery list: tap to check off, type to add. Backed by
 // /api/lists/grocery.
 export function GroceryCard() {
+  const { t } = useI18n()
   const { items, loading, error, add, toggle, remove } = useGrocery()
   const [draft, setDraft] = useState('')
 
@@ -20,18 +22,18 @@ export function GroceryCard() {
     <div className="card" style={{ padding: '18px 20px', display: 'flex', flexDirection: 'column' }}>
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: 10 }}>
         <div className="card-h" style={{ fontSize: 17 }}>
-          Grocery
+          {t('grocery.title')}
         </div>
         <div style={{ marginLeft: 'auto' }} className="ai-tag">
           <Icon name="spark" />
-          Auto
+          {t('grocery.auto')}
         </div>
       </div>
 
-      {loading && <div className="tiny muted">Loading…</div>}
-      {error && <div className="tiny muted">Couldn't load the list — reload or sign in again.</div>}
+      {loading && <div className="tiny muted">{t('common.loading')}</div>}
+      {error && <div className="tiny muted">{t('grocery.error')}</div>}
       {!loading && !error && items.length === 0 && (
-        <div className="tiny muted" style={{ paddingBottom: 6 }}>Nothing on the list yet.</div>
+        <div className="tiny muted" style={{ paddingBottom: 6 }}>{t('grocery.empty')}</div>
       )}
 
       <div className="gc-scroll">
@@ -40,7 +42,7 @@ export function GroceryCard() {
             <button
               type="button"
               onClick={() => toggle(item.id, !item.checked)}
-              aria-label={`Toggle ${item.name}`}
+              aria-label={t('common.toggle', { name: item.name })}
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -71,7 +73,7 @@ export function GroceryCard() {
               type="button"
               className="gitem-del"
               onClick={() => remove(item.id)}
-              aria-label={`Remove ${item.name}`}
+              aria-label={t('common.remove', { name: item.name })}
             >
               ×
             </button>
@@ -84,8 +86,8 @@ export function GroceryCard() {
           <input
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
-            placeholder="Add item"
-            aria-label="Add grocery item"
+            placeholder={t('grocery.addItem')}
+            aria-label={t('grocery.addItemLabel')}
             style={{
               width: '100%',
               border: '2px dashed var(--hair)',

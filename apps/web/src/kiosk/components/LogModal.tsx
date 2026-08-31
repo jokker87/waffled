@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { api, localToday, type Goal, type GoalStep } from '../../lib/api'
+import { useI18n } from '../../lib/locale-provider'
 
 const HOURS = new Set(['hour', 'hours', 'hr', 'hrs'])
 // Cold-start note chips, shown until this goal has enough of its own logged history to
@@ -80,6 +81,7 @@ export function LogModal({
   onSaved: () => void
   onDeleted?: () => void
 }) {
+  const { t } = useI18n()
   const chips = quickChips(goal.unit)
   const isChecklist = goal.goalType === 'checklist'
   const isHabit = goal.goalType === 'habit'
@@ -242,10 +244,10 @@ export function LogModal({
       <div className="modal-overlay" onClick={onClose}>
         <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 440 }}>
           <button type="button" className="modal-close" aria-label="Close" onClick={onClose}>×</button>
-          <div className="wf-serif" style={{ fontSize: 20, fontWeight: 600, marginBottom: 2 }}>Checklist</div>
+          <div className="wf-serif" style={{ fontSize: 20, fontWeight: 600, marginBottom: 2 }}>{t('goalLog.checklist')}</div>
           <div className="muted" style={{ fontSize: 14, marginBottom: 14 }}>{goal.title} · {done}/{total} steps</div>
-          {steps == null && <div className="muted tiny" style={{ fontWeight: 600 }}>Loading…</div>}
-          {steps != null && steps.length === 0 && <div className="muted tiny" style={{ fontWeight: 600 }}>No steps yet — add some by editing this goal.</div>}
+          {steps == null && <div className="muted tiny" style={{ fontWeight: 600 }}>{t('common.loading')}</div>}
+          {steps != null && steps.length === 0 && <div className="muted tiny" style={{ fontWeight: 600 }}>{t('goalLog.noSteps')}</div>}
           <div className="log-steps">
             {steps?.map((s) => (
               <button key={s.id} type="button" className={`log-step-row ${s.done ? 'done' : ''}`} onClick={() => toggleStep(s)}>
@@ -254,7 +256,7 @@ export function LogModal({
               </button>
             ))}
           </div>
-          <button type="button" className="btn btn-primary" onClick={onClose} style={{ width: '100%', justifyContent: 'center', marginTop: 18 }}>Done</button>
+          <button type="button" className="btn btn-primary" onClick={onClose} style={{ width: '100%', justifyContent: 'center', marginTop: 18 }}>{t('common.done')}</button>
           {canDelete && (
             <button
               type="button"
@@ -273,14 +275,14 @@ export function LogModal({
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 440 }}>
         <button type="button" className="modal-close" aria-label="Close" onClick={onClose}>×</button>
-        <div className="wf-serif" style={{ fontSize: 20, fontWeight: 600, marginBottom: 2 }}>Log progress</div>
+        <div className="wf-serif" style={{ fontSize: 20, fontWeight: 600, marginBottom: 2 }}>{t('goalLog.progress')}</div>
         <div className="muted" style={{ fontSize: 14, marginBottom: 16 }}>{goal.title}</div>
 
         <form onSubmit={submit}>
           {isHabit ? (
             // Habit: no amount — one tap = one completion. Show the cadence so far.
             <>
-              <div className="flabel">Consistency · {periodLabel}</div>
+              <div className="flabel">{t('goalLog.consistency', { period: periodLabel })}</div>
               <div className="log-habit">
                 <span className="log-habit-prog">{goal.periodDone}{habitTarget ? ` / ${habitTarget}` : ''}</span>
                 <span className="tiny muted" style={{ fontWeight: 600 }}>
@@ -291,17 +293,17 @@ export function LogModal({
           ) : isCount ? (
             // Whole-unit count: integer stepper, no fractions.
             <>
-              <div className="flabel">How many?</div>
+              <div className="flabel">{t('goalLog.howMany')}</div>
               <div className="log-stepper">
-                <button type="button" className="log-step" aria-label="Less" disabled={amount <= 1} onClick={() => setAmount((a) => Math.max(1, Math.round(a) - 1))}>−</button>
+                <button type="button" className="log-step" aria-label={t('goalLog.less')} disabled={amount <= 1} onClick={() => setAmount((a) => Math.max(1, Math.round(a) - 1))}>−</button>
                 <span className="log-step-val">{Math.max(1, Math.round(amount))}{goal.unit ? ` ${goal.unit}` : ''}</span>
-                <button type="button" className="log-step" aria-label="More" onClick={() => setAmount((a) => Math.round(a) + 1)}>＋</button>
+                <button type="button" className="log-step" aria-label={t('goalLog.more')} onClick={() => setAmount((a) => Math.round(a) + 1)}>＋</button>
               </div>
             </>
           ) : isTime ? (
             // Time goal: quick chips + separate hours/minutes entry — no decimal math.
             <>
-              <div className="flabel">How long?</div>
+              <div className="flabel">{t('goalLog.howLong')}</div>
               <div className="log-quick">
                 {chips.map((c) => (
                   <button key={c.label} type="button" className={`log-chip ${Math.abs(timeAmount - c.value) < 1e-6 ? 'on' : ''}`} onClick={() => setTimeChip(c.value)}>
@@ -310,17 +312,17 @@ export function LogModal({
                 ))}
               </div>
               <div className="log-custom">
-                <span className="tiny muted" style={{ fontWeight: 600 }}>or</span>
-                <input type="number" step={1} min={0} value={hours} onChange={(e) => setHours(Math.max(0, Math.floor(Number(e.target.value) || 0)))} aria-label="hours" />
-                <span className="tiny muted" style={{ fontWeight: 600 }}>hr</span>
-                <input type="number" step={1} min={0} max={59} value={minutes} onChange={(e) => setMinutes(Math.min(59, Math.max(0, Math.floor(Number(e.target.value) || 0))))} aria-label="minutes" />
-                <span className="tiny muted" style={{ fontWeight: 600 }}>min</span>
+                <span className="tiny muted" style={{ fontWeight: 600 }}>{t('goalLog.or')}</span>
+                <input type="number" step={1} min={0} value={hours} onChange={(e) => setHours(Math.max(0, Math.floor(Number(e.target.value) || 0)))} aria-label={t('goalLog.hours')} />
+                <span className="tiny muted" style={{ fontWeight: 600 }}>{t('goalLog.hr')}</span>
+                <input type="number" step={1} min={0} max={59} value={minutes} onChange={(e) => setMinutes(Math.min(59, Math.max(0, Math.floor(Number(e.target.value) || 0))))} aria-label={t('goalLog.minutes')} />
+                <span className="tiny muted" style={{ fontWeight: 600 }}>{t('goalLog.min')}</span>
               </div>
             </>
           ) : (
             // Total amount: quick chips + free entry (fractions allowed).
             <>
-              <div className="flabel">How much?</div>
+              <div className="flabel">{t('goalLog.howMuch')}</div>
               <div className="log-quick">
                 {chips.map((c) => (
                   <button key={c.label} type="button" className={`log-chip ${amount === c.value ? 'on' : ''}`} onClick={() => setAmount(c.value)}>
@@ -329,7 +331,7 @@ export function LogModal({
                 ))}
               </div>
               <div className="log-custom">
-                <span className="tiny muted" style={{ fontWeight: 600 }}>or</span>
+                <span className="tiny muted" style={{ fontWeight: 600 }}>{t('goalLog.or')}</span>
                 <input type="number" step="any" value={amount} onChange={(e) => setAmount(Number(e.target.value))} aria-label="amount" />
                 {goal.unit && <span className="tiny muted" style={{ fontWeight: 600 }}>{goal.unit}</span>}
               </div>
@@ -346,7 +348,7 @@ export function LogModal({
                     <span className="log-check" style={{ background: who.includes(FAMILY) ? 'var(--person-3)' : 'var(--card)', borderColor: who.includes(FAMILY) ? 'var(--person-3)' : 'var(--hair)' }}>
                       {who.includes(FAMILY) ? '✓' : ''}
                     </span>
-                    <span className="tiny" style={{ fontWeight: 700, color: 'var(--ink-2)' }}>Family</span>
+                    <span className="tiny" style={{ fontWeight: 700, color: 'var(--ink-2)' }}>{t('goalLog.family')}</span>
                   </button>
                 )}
                 {pickable.map((p) => {
@@ -368,7 +370,7 @@ export function LogModal({
             </>
           )}
 
-          <div className="flabel" style={{ marginTop: 16 }}>When?{loggedOn !== today && <span style={{ textTransform: 'none', letterSpacing: 0, fontWeight: 600, color: 'var(--primary)' }}> · catching up</span>}</div>
+          <div className="flabel" style={{ marginTop: 16 }}>{t('goalLog.when')}{loggedOn !== today && <span style={{ textTransform: 'none', letterSpacing: 0, fontWeight: 600, color: 'var(--primary)' }}> · {t('goalLog.catchingUp')}</span>}</div>
           <input
             className="log-note"
             type="date"
@@ -378,8 +380,8 @@ export function LogModal({
             aria-label="Date this happened"
           />
 
-          <div className="flabel" style={{ marginTop: 16 }}>What did you do? <span style={{ textTransform: 'none', letterSpacing: 0, fontWeight: 600, color: 'var(--ink-3)' }}>· optional</span></div>
-          <input className="log-note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Creek hike + fort building" />
+          <div className="flabel" style={{ marginTop: 16 }}>{t('goalLog.what')} <span style={{ textTransform: 'none', letterSpacing: 0, fontWeight: 600, color: 'var(--ink-3)' }}>· {t('goalLog.optional')}</span></div>
+          <input className="log-note" value={note} onChange={(e) => setNote(e.target.value)} placeholder={t('goalLog.noteExample')} />
           <div className="log-acts">
             {acts.map((a) => (
               <button key={a.label} type="button" className="log-act" onClick={() => setNote(a.note)}>{a.label}</button>

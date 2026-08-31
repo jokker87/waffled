@@ -9,6 +9,7 @@ import { mealsApi, uploadImage, useRecipe, type IngredientInput, type RecipeMeta
 import { fmtAmt, parseAmt } from '../lib/amount'
 import { ApiSendError } from '../lib/api/client'
 import '../styles/recipe.css'
+import { useI18n } from '../lib/locale-provider'
 
 // The one unified recipe editor — authoring a brand-new recipe and fully editing an
 // existing one (title, metadata, ingredients, steps). Replaces the old override-only
@@ -108,6 +109,7 @@ function stepFromStrings(instruction: string, strings: string[], ings: EditIng[]
 }
 
 export function RecipeEditor() {
+  const { t } = useI18n()
   const { id } = useParams()
   const isEdit = !!id
   const navigate = useNavigate()
@@ -173,8 +175,8 @@ export function RecipeEditor() {
   useTopbarFull(
     () => (
       <div style={{ display: 'flex', alignItems: 'center', width: '100%', gap: 14 }}>
-        <button className="pill" style={{ cursor: 'pointer' }} onClick={() => navigate(-1)}>‹ Back</button>
-        <div className="wf-serif" style={{ fontSize: 20, fontWeight: 600 }}>{isEdit ? 'Edit recipe' : 'New recipe'}</div>
+        <button className="pill" style={{ cursor: 'pointer' }} onClick={() => navigate(-1)}>‹ {t('common.back')}</button>
+        <div className="wf-serif" style={{ fontSize: 20, fontWeight: 600 }}>{isEdit ? t('recipe.edit') : t('recipe.new')}</div>
       </div>
     ),
     [navigate, isEdit]
@@ -510,20 +512,20 @@ export function RecipeEditor() {
     ;(rows?.[rows.length - 1]?.querySelector('textarea') as HTMLTextAreaElement | undefined)?.focus()
   }, [stps.length])
 
-  if (isEdit && loading && !prefilled) return <div className="muted" style={{ padding: 30 }}>Loading…</div>
+  if (isEdit && loading && !prefilled) return <div className="muted" style={{ padding: 30 }}>{t('common.loading')}</div>
 
   return (
     <div className="recipe-editor">
       {!isEdit && (
         <div className="re-paste-bar">
-          <span className="tiny muted" style={{ fontWeight: 700 }}>Build it by hand below, or</span>
+          <span className="tiny muted" style={{ fontWeight: 700 }}>{t('recipe.manualOr')}</span>
           {importCfg.vision && (
-            <button type="button" className="pill" onClick={() => setPhotoOpen(true)}>📷 From a photo</button>
+            <button type="button" className="pill" onClick={() => setPhotoOpen(true)}>{t('recipe.fromPhoto')}</button>
           )}
           {importCfg.text && (
-            <button type="button" className="pill" onClick={() => setDescribeOpen(true)}>🎤 Describe it</button>
+            <button type="button" className="pill" onClick={() => setDescribeOpen(true)}>{t('recipe.describe')}</button>
           )}
-          <button type="button" className="pill" onClick={() => setPasteOpen((v) => !v)}>📋 Paste markdown</button>
+          <button type="button" className="pill" onClick={() => setPasteOpen((v) => !v)}>{t('recipe.paste')}</button>
         </div>
       )}
 
@@ -537,18 +539,18 @@ export function RecipeEditor() {
       {pasteOpen && (
         <div className="card re-card re-paste">
           <div className="re-paste-head">
-            <div className="card-h re-section-h">Paste a recipe in Markdown</div>
+            <div className="card-h re-section-h">{t('recipe.pasteTitle')}</div>
             <div style={{ display: 'flex', gap: 8 }}>
-              <button type="button" className="pill" onClick={() => setMarkdown(RECIPE_TEMPLATE)}>Use template</button>
-              <button type="button" className="pill" onClick={() => setMarkdown(RECIPE_EXAMPLE)}>See example</button>
+              <button type="button" className="pill" onClick={() => setMarkdown(RECIPE_TEMPLATE)}>{t('recipe.template')}</button>
+              <button type="button" className="pill" onClick={() => setMarkdown(RECIPE_EXAMPLE)}>{t('recipe.example')}</button>
             </div>
           </div>
           <textarea className="re-paste-input" value={markdown} onChange={(e) => setMarkdown(e.target.value)} placeholder="Paste frontmatter + markdown here…" rows={12} />
           {parseErr && <div className="tiny" style={{ color: 'var(--danger)', fontWeight: 700, marginTop: 6 }}>{parseErr}</div>}
           <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 10 }}>
-            <button type="button" className="pill" onClick={() => setPasteOpen(false)}>Cancel</button>
+            <button type="button" className="pill" onClick={() => setPasteOpen(false)}>{t('common.cancel')}</button>
             <button type="button" className="pill btn-primary" style={{ color: 'var(--on-accent)', border: 0 }} disabled={parsing || !markdown.trim()} onClick={parse}>
-              {parsing ? 'Parsing…' : 'Parse → fill the form'}
+              {parsing ? t('recipe.parsing') : t('recipe.parse')}
             </button>
           </div>
         </div>
@@ -558,32 +560,32 @@ export function RecipeEditor() {
       <div className="card re-card">
         <div className="re-row re-title-row">
           <label className="re-f re-emoji">
-            <span>Emoji</span>
+            <span>{t('recipe.emoji')}</span>
             <input value={emoji} onChange={(e) => setEmoji(e.target.value)} placeholder="🍽️" maxLength={4} />
           </label>
           <label className="re-f re-grow">
-            <span>Title</span>
-            <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Recipe title" />
+            <span>{t('recipe.title')}</span>
+            <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t('recipe.titlePlaceholder')} />
           </label>
         </div>
         <div className="re-row">
-          <label className="re-f re-num"><span>Servings</span><input type="number" min={1} value={servings} onChange={(e) => setServings(e.target.value)} /></label>
-          <label className="re-f re-num"><span>Prep (min)</span><input type="number" min={0} value={prep} onChange={(e) => setPrep(e.target.value)} /></label>
-          <label className="re-f re-num"><span>Cook (min)</span><input type="number" min={0} value={cook} onChange={(e) => setCook(e.target.value)} /></label>
+          <label className="re-f re-num"><span>{t('recipe.servings')}</span><input type="number" min={1} value={servings} onChange={(e) => setServings(e.target.value)} /></label>
+          <label className="re-f re-num"><span>{t('recipe.prepMinutes')}</span><input type="number" min={0} value={prep} onChange={(e) => setPrep(e.target.value)} /></label>
+          <label className="re-f re-num"><span>{t('recipe.cookMinutes')}</span><input type="number" min={0} value={cook} onChange={(e) => setCook(e.target.value)} /></label>
         </div>
       </div>
 
       {/* metadata */}
       <div className="card re-card">
         <div className="re-card-head">
-          <div className="card-h re-section-h">Details</div>
+          <div className="card-h re-section-h">{t('recipe.details')}</div>
           {suggesting ? (
-            <span className="re-ai-thinking"><span className="re-ai-spark">✨</span> Thinking…</span>
+            <span className="re-ai-thinking"><span className="re-ai-spark">✨</span> {t('recipe.thinking')}</span>
           ) : aiPending > 0 ? (
             <div className="re-ai-actions">
               <span className="re-ai-tag">✨ {aiPending} suggestion{aiPending === 1 ? '' : 's'}</span>
-              <button type="button" className="re-ai-chip" onClick={keepAll}>Keep all</button>
-              <button type="button" className="re-ai-dismiss" onClick={dismissAll}>Dismiss</button>
+              <button type="button" className="re-ai-chip" onClick={keepAll}>{t('recipe.keepAll')}</button>
+              <button type="button" className="re-ai-dismiss" onClick={dismissAll}>{t('recipe.dismiss')}</button>
             </div>
           ) : null}
         </div>
@@ -608,23 +610,23 @@ export function RecipeEditor() {
         </div>
         <div className="re-chips">
           <div className="re-chip-f">
-            <div className="cz-label">Dietary</div>
+            <div className="cz-label">{t('recipe.dietary')}</div>
             <ChipEditor items={dietary} onChange={setDietary} placeholder="gluten-free, vegan…" color="#ede4ff" />
             <SugChips items={sugDietary} onAccept={(v) => acceptItem(setDietary, dietary, v)} onDismiss={(v) => dismiss(`dietary:${v.toLowerCase()}`)} />
           </div>
           <div className="re-chip-f">
-            <div className="cz-label">Vegetables</div>
+            <div className="cz-label">{t('recipe.vegetables')}</div>
             <ChipEditor items={vegetables} onChange={setVegetables} placeholder="spinach, tomato…" color="#e4f5e9" />
             <SugChips items={sugVeg} onAccept={(v) => acceptItem(setVegetables, vegetables, v)} onDismiss={(v) => dismiss(`veg:${v.toLowerCase()}`)} />
           </div>
           <div className="re-chip-f">
-            <div className="cz-label">Tags</div>
+            <div className="cz-label">{t('recipe.tags')}</div>
             <ChipEditor items={tags} onChange={setTags} placeholder="family-favorite…" color="#e9eef6" />
             <SugChips items={sugTags} onAccept={(v) => acceptItem(setTags, tags, v)} onDismiss={(v) => dismiss(`tag:${v.toLowerCase()}`)} />
           </div>
         </div>
         <label className="re-f" style={{ marginTop: 14 }}>
-          <span>Photo (optional)</span>
+          <span>{t('recipe.photoOptional')}</span>
           <div className="re-image">
             <div className="re-image-row">
               <input
@@ -633,7 +635,7 @@ export function RecipeEditor() {
                 placeholder="Paste an image URL…"
               />
               <label className="pill re-upload-btn" style={{ cursor: 'pointer', whiteSpace: 'nowrap' }}>
-                {uploading ? 'Uploading…' : '📷 Upload'}
+                {uploading ? t('photos.uploading') : t('recipe.upload')}
                 <input
                   type="file"
                   // Supported, canvas-decodable formats only — greys out HEIC in the
@@ -664,9 +666,9 @@ export function RecipeEditor() {
 
       {/* ingredients */}
       <div className="card re-card">
-        <div className="card-h re-section-h" style={{ marginBottom: 14 }}>Ingredients</div>
+        <div className="card-h re-section-h" style={{ marginBottom: 14 }}>{t('recipe.ingredients')}</div>
         <div className="re-ing-head">
-          <span /><span>Qty</span><span>Unit</span><span>Ingredient</span><span>Prep · optional</span><span />
+          <span /><span>{t('recipe.quantity')}</span><span>{t('recipe.unit')}</span><span>{t('recipe.ingredient')}</span><span>{t('recipe.prepOptional')}</span><span />
         </div>
         <div className="re-ings" ref={ingListRef}>
           {ingGroups.map((grp, gi) => (
@@ -706,14 +708,14 @@ export function RecipeEditor() {
           ))}
         </div>
         <div className="re-ing-actions">
-          <button type="button" className="btn re-add-ing" onClick={addIngredient}>+ Add ingredient</button>
-          <button type="button" className="re-add-section" onClick={addSection}>+ Add section</button>
+          <button type="button" className="btn re-add-ing" onClick={addIngredient}>{t('recipe.addIngredient')}</button>
+          <button type="button" className="re-add-section" onClick={addSection}>{t('recipe.addSection')}</button>
         </div>
       </div>
 
       {/* steps */}
       <div className="card re-card">
-        <div className="card-h re-section-h" style={{ marginBottom: 14 }}>Method</div>
+        <div className="card-h re-section-h" style={{ marginBottom: 14 }}>{t('recipe.method')}</div>
         <div className="re-steps" ref={stepListRef}>
           {stps.map((s, i) => (
             <div key={s.uid} className="re-step-row">
@@ -741,21 +743,21 @@ export function RecipeEditor() {
             </div>
           ))}
         </div>
-        <button type="button" className="pill re-add-row" onClick={addStep}>+ Add step</button>
+        <button type="button" className="pill re-add-row" onClick={addStep}>{t('recipe.addStep')}</button>
       </div>
 
       <div className="card re-card">
-        <div className="card-h re-section-h">Notes</div>
+        <div className="card-h re-section-h">{t('recipe.notes')}</div>
         {isEdit ? (
           // Editing an existing recipe: the recipe's own notes and yours are separate
           // columns, so they get separate boxes.
           <>
             <label className="re-f">
-              <span>Recipe notes</span>
+              <span>{t('recipe.recipeNotes')}</span>
               <textarea className="re-notes" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Anything worth remembering…" rows={3} />
             </label>
             <label className="re-f" style={{ marginTop: 12 }}>
-              <span>Your notes</span>
+              <span>{t('recipe.yourNotes')}</span>
               <textarea className="re-notes" value={userNotes} onChange={(e) => setUserNotes(e.target.value)} placeholder="e.g. doubles well · go easy on the salt (kept across re-imports)" rows={3} />
             </label>
           </>
@@ -768,20 +770,20 @@ export function RecipeEditor() {
         <div className="tiny" role="alert" style={{ color: 'var(--danger)', fontWeight: 700, textAlign: 'right', marginTop: 6 }}>{saveErr}</div>
       )}
       <div className="re-actions">
-        {isEdit && <button type="button" className="pill re-delete-btn" onClick={() => setConfirmDelete(true)}>🗑 Delete recipe</button>}
+        {isEdit && <button type="button" className="pill re-delete-btn" onClick={() => setConfirmDelete(true)}>🗑 {t('recipe.delete')}</button>}
         <div className="re-actions-right">
-          <button type="button" className="pill" onClick={() => navigate(-1)}>Cancel</button>
+          <button type="button" className="pill" onClick={() => navigate(-1)}>{t('common.cancel')}</button>
           <button type="button" className="pill btn-primary" style={{ color: 'var(--on-accent)', border: 0 }} disabled={!title.trim() || saving} onClick={save}>
-            {saving ? 'Saving…' : isEdit ? 'Save changes' : 'Create recipe'}
+            {saving ? t('common.saving') : isEdit ? t('recipe.saveChanges') : t('recipe.create')}
           </button>
         </div>
       </div>
 
       {confirmDelete && (
         <ConfirmDialog
-          title="Delete this recipe?"
-          message="It will be removed from your library. Any planned meals lose the link."
-          confirmLabel="Delete"
+          title={t('recipe.deleteTitle')}
+          message={t('recipe.deleteWarning')}
+          confirmLabel={t('common.delete')}
           danger
           onConfirm={remove}
           onClose={() => setConfirmDelete(false)}
@@ -794,13 +796,14 @@ export function RecipeEditor() {
 // Visible AI suggestions for an array field — ghost chips you tap to keep (✨) or
 // dismiss (×). Nothing is added until you tap.
 function SugChips({ items, onAccept, onDismiss }: { items: string[]; onAccept: (v: string) => void; onDismiss: (v: string) => void }) {
+  const { t } = useI18n()
   if (!items.length) return null
   return (
     <div className="re-sug-chips">
       {items.map((v) => (
         <span key={v} className="re-sug-chip">
           <button type="button" className="re-sug-chip-add" onClick={() => onAccept(v)} title={`Add ${v}`}>✨ {v}</button>
-          <button type="button" className="re-sug-chip-x" aria-label={`Dismiss ${v}`} onClick={() => onDismiss(v)}>×</button>
+          <button type="button" className="re-sug-chip-x" aria-label={`${t('recipe.dismiss')} ${v}`} onClick={() => onDismiss(v)}>×</button>
         </span>
       ))}
     </div>
@@ -827,6 +830,7 @@ function StepIngredients({
   onSetAmount: (uid: string, amount: string) => void
   onRemoveExtra: (j: number) => void
 }) {
+  const { t } = useI18n()
   const [open, setOpen] = useState(false)
   const wrapRef = useRef<HTMLDivElement>(null)
 
@@ -844,12 +848,12 @@ function StepIngredients({
       {/* The tag button (popover anchor) stays FIRST so it never shifts as tags are
           added or amounts change — otherwise the open popover jumps around. */}
       <div className="re-tagpop-wrap" ref={wrapRef}>
-        <button type="button" className="re-tag-add" onClick={() => setOpen((o) => !o)}>+ Tag ingredient</button>
+        <button type="button" className="re-tag-add" onClick={() => setOpen((o) => !o)}>{t('recipe.tagIngredient')}</button>
         {open && (
           <div className="re-tagpop">
-            <div className="re-tagpop-h">Tag an ingredient for this step</div>
+            <div className="re-tagpop-h">{t('recipe.tagForStep')}</div>
             {namedIngs.length === 0 ? (
-              <div className="re-tagpop-empty">Add ingredients above first.</div>
+              <div className="re-tagpop-empty">{t('recipe.addIngredientsFirst')}</div>
             ) : (
               namedIngs.map((g) => {
                 const picked = picks.find((p) => p.uid === g.uid)
@@ -916,6 +920,7 @@ function SectionInput({
   suggestions: string[]
   autoFocus?: boolean
 }) {
+  const { t } = useI18n()
   const [open, setOpen] = useState(false)
   const [hi, setHi] = useState(0)
   const wrapRef = useRef<HTMLDivElement>(null)
@@ -939,8 +944,8 @@ function SectionInput({
         className="re-ing-section"
         value={value}
         autoFocus={autoFocus}
-        placeholder="Section name"
-        aria-label="Section name"
+        placeholder={t('recipe.sectionName')}
+        aria-label={t('recipe.sectionName')}
         onChange={(e) => { onChange(e.target.value); setOpen(true); setHi(0) }}
         onFocus={() => setOpen(true)}
         onKeyDown={(e) => {
@@ -975,6 +980,7 @@ function fmtTimer(s: number): string {
 // dashed "⏱ Add timer" button when unset. Editing exposes minute + second inputs.
 // The value lives on the step (prop-driven) so it never desyncs from saved state.
 function StepTimerControl({ seconds, onChange }: { seconds: number | null; onChange: (secs: number | null) => void }) {
+  const { t } = useI18n()
   const [editing, setEditing] = useState(false)
   const mins = seconds != null ? Math.floor(seconds / 60) : 0
   const secs = seconds != null ? seconds % 60 : 0
@@ -989,12 +995,12 @@ function StepTimerControl({ seconds, onChange }: { seconds: number | null; onCha
     return (
       <span className="re-timer-edit">
         <span className="re-timer-ic" aria-hidden>⏱</span>
-        <input type="number" min={0} className="re-timer-num" value={mins || ''} placeholder="0" aria-label="Timer minutes" autoFocus onChange={(e) => commit(Number(e.target.value || 0), secs)} />
+        <input type="number" min={0} className="re-timer-num" value={mins || ''} placeholder="0" aria-label={t('recipe.timerMinutes')} autoFocus onChange={(e) => commit(Number(e.target.value || 0), secs)} />
         <span className="re-timer-unit">min</span>
-        <input type="number" min={0} max={59} className="re-timer-num" value={secs || ''} placeholder="0" aria-label="Timer seconds" onChange={(e) => commit(mins, Number(e.target.value || 0))} />
+        <input type="number" min={0} max={59} className="re-timer-num" value={secs || ''} placeholder="0" aria-label={t('recipe.timerSeconds')} onChange={(e) => commit(mins, Number(e.target.value || 0))} />
         <span className="re-timer-unit">sec</span>
-        <button type="button" className="re-timer-done" aria-label="Done" onClick={() => setEditing(false)}>✓</button>
-        <button type="button" className="re-timer-cancel" aria-label="Remove timer" onClick={() => { onChange(null); setEditing(false) }}>×</button>
+        <button type="button" className="re-timer-done" aria-label={t('common.done')} onClick={() => setEditing(false)}>✓</button>
+        <button type="button" className="re-timer-cancel" aria-label={t('recipe.removeTimer')} onClick={() => { onChange(null); setEditing(false) }}>×</button>
       </span>
     )
   }
@@ -1002,13 +1008,13 @@ function StepTimerControl({ seconds, onChange }: { seconds: number | null; onCha
     return (
       <span className="re-timer-pill">
         <span aria-hidden>⏱</span>
-        <button type="button" className="re-timer-time" onClick={() => setEditing(true)} aria-label="Edit timer">{fmtTimer(seconds)}</button>
-        <button type="button" className="re-timer-x" aria-label="Remove timer" onClick={() => onChange(null)}>×</button>
+        <button type="button" className="re-timer-time" onClick={() => setEditing(true)} aria-label={t('recipe.editTimer')}>{fmtTimer(seconds)}</button>
+        <button type="button" className="re-timer-x" aria-label={t('recipe.removeTimer')} onClick={() => onChange(null)}>×</button>
       </span>
     )
   }
   return (
-    <button type="button" className="re-timer-add" onClick={() => setEditing(true)}>⏱ Add timer</button>
+    <button type="button" className="re-timer-add" onClick={() => setEditing(true)}>⏱ {t('cook.addTimer')}</button>
   )
 }
 

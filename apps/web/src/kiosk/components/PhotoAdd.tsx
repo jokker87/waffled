@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
 import { api, uploadImage } from '../../lib/api'
 import { AlbumPicker } from './AlbumPicker'
+import { useI18n } from '../../lib/locale-provider'
 
 // Add-photos overlay. The hero is a big drag-and-drop / click-to-browse zone that
 // accepts up to MAX photos at once. Each chosen file is re-encoded + sent to
@@ -29,6 +30,7 @@ export function PhotoAdd({
   onAdded: () => void
   albums?: string[]
 }) {
+  const { t } = useI18n()
   const [saving, setSaving] = useState(false)
   const [items, setItems] = useState<StagedPhoto[]>([])
   const [sharedAlbum, setSharedAlbum] = useState('')
@@ -51,7 +53,7 @@ export function PhotoAdd({
     const room = MAX - items.length
     const take = files.slice(0, Math.max(0, room))
     const dropped = files.length - take.length
-    setUploadErr(dropped > 0 ? `You can add up to ${MAX} photos at once — ${dropped} not added.` : null)
+    setUploadErr(dropped > 0 ? t('photos.uploadLimit', { max: MAX, count: dropped }) : null)
     setUploading((n) => n + take.length)
     await Promise.all(
       take.map(async (file) => {
@@ -59,7 +61,7 @@ export function PhotoAdd({
           const { key, url } = await uploadImage(file)
           setItems((prev) => [...prev, { key, previewUrl: url, caption: '', isFavorite: false, album: sharedAlbum }])
         } catch (e) {
-          setUploadErr(e instanceof Error ? e.message : 'A photo failed to upload — please try again.')
+          setUploadErr(e instanceof Error ? e.message : t('photos.uploadFailed'))
         } finally {
           setUploading((n) => n - 1)
         }
@@ -108,15 +110,15 @@ export function PhotoAdd({
   }
 
   const staged = items.length > 0
-  const addLabel = saving ? 'Adding…' : items.length > 1 ? `Add ${items.length} photos` : 'Add photo'
+  const addLabel = saving ? t('common.adding') : items.length > 1 ? t('photos.addCount', { count: items.length }) : t('photos.addOne')
 
   return (
     <div className="ph-saver" style={{ position: 'fixed', inset: 0, zIndex: 900, background: 'var(--bg)', color: 'var(--ink)', display: 'block', cursor: 'default' }}>
       <div className="wf-kiosk wf" style={{ position: 'absolute', inset: 0, background: '#efece6' }}>
         <div className="kiosk-main" style={{ gridColumn: '1 / -1' }}>
           <div className="topbar">
-            <button type="button" className="pill" style={{ cursor: 'pointer' }} onClick={onClose}>‹ Photos</button>
-            <div className="wf-serif" style={{ fontSize: 20, fontWeight: 600, marginLeft: 14 }}>Add photos</div>
+            <button type="button" className="pill" style={{ cursor: 'pointer' }} onClick={onClose}>‹ {t('nav.photos')}</button>
+            <div className="wf-serif" style={{ fontSize: 20, fontWeight: 600, marginLeft: 14 }}>{t('photos.add')}</div>
             <div className="tb-right">
               {staged && (
                 <button type="button" className="btn btn-primary" disabled={saving || uploading > 0} onClick={add}>
@@ -153,15 +155,15 @@ export function PhotoAdd({
                   {uploading > 0 ? (
                     <>
                       <div className="ap-drop-icon">⏳</div>
-                      <div className="ap-drop-title">Uploading…</div>
-                      <div className="ap-drop-sub tiny muted">Resizing and saving your photos</div>
+                      <div className="ap-drop-title">{t('photos.uploading')}</div>
+                      <div className="ap-drop-sub tiny muted">{t('photos.processing')}</div>
                     </>
                   ) : (
                     <>
                       <div className="ap-drop-icon">📷</div>
-                      <div className="ap-drop-title">Drag &amp; drop photos here</div>
-                      <div className="ap-drop-sub">or <span className="ap-drop-link">click to browse</span></div>
-                      <div className="ap-drop-meta tiny muted">Up to {MAX} at once · JPG, PNG or WebP · 10&nbsp;MB each</div>
+                      <div className="ap-drop-title">{t('photos.drop')}</div>
+                      <div className="ap-drop-sub"><span className="ap-drop-link">{t('photos.browse')}</span></div>
+                      <div className="ap-drop-meta tiny muted">{t('photos.limit', { count: MAX })}</div>
                     </>
                   )}
                 </button>
@@ -171,7 +173,7 @@ export function PhotoAdd({
               <div className="ap-batch">
                 <div className="ap-batch-bar">
                   <label className="ap-field-label ap-batch-album">
-                    Album for all
+                    {t('photos.albumAll')}
                     <AlbumPicker id="ap-shared-album" value={sharedAlbum} onChange={changeSharedAlbum} albums={albums} />
                   </label>
                   <div className="ap-batch-actions">
@@ -182,13 +184,13 @@ export function PhotoAdd({
                       onClick={() => fileRef.current?.click()}
                       disabled={items.length >= MAX || uploading > 0}
                     >
-                      ＋ Add more
+                      {t('photos.addMore')}
                     </button>
                   </div>
                 </div>
 
                 {uploadErr && <div className="ap-err tiny">{uploadErr}</div>}
-                {uploading > 0 && <div className="tiny muted ap-uploading">Uploading {uploading} more…</div>}
+                {uploading > 0 && <div className="tiny muted ap-uploading">{t('photos.uploadingMore', { count: uploading })}</div>}
 
                 <div className="ap-list">
                   {items.map((it, i) => (
@@ -199,7 +201,7 @@ export function PhotoAdd({
                       <div className="ap-row-fields">
                         <input
                           className="field"
-                          placeholder="Add a caption…"
+                          placeholder={t('photos.caption')}
                           value={it.caption}
                           onChange={(e) => patchItem(i, { caption: e.target.value })}
                         />
@@ -208,7 +210,7 @@ export function PhotoAdd({
                             type="button"
                             className={`pill ap-fav ${it.isFavorite ? 'on' : ''}`}
                             aria-pressed={it.isFavorite}
-                            aria-label="Favorite"
+                            aria-label={t('photos.favorite')}
                             onClick={() => patchItem(i, { isFavorite: !it.isFavorite })}
                           >
                             {it.isFavorite ? '❤️' : '🤍'}
@@ -219,7 +221,7 @@ export function PhotoAdd({
                           <button
                             type="button"
                             className="ap-row-del"
-                            aria-label="Remove photo"
+                            aria-label={t('recipe.remove')}
                             onClick={() => removeItem(i)}
                           >
                             ×

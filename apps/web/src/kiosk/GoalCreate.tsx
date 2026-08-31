@@ -4,6 +4,7 @@ import { useTopbarFull } from './topbar-slot'
 import { api, useGoalLists, useGoalDetail, useHousehold, can, type GoalList } from '../lib/api'
 import { CATEGORIES, CATEGORY_KEYS } from './categories'
 import { ListModal } from './components/ListModal'
+import { useI18n } from '../lib/locale-provider'
 import './../styles/goals.css'
 
 // The measure type is also what tells us divisibility: "Total" accumulates a
@@ -141,6 +142,7 @@ const CheckIcon = () => (
 )
 
 export function GoalCreate() {
+  const { t: tr } = useI18n()
   const navigate = useNavigate()
   const { id } = useParams()
   const editing = !!id
@@ -313,7 +315,7 @@ export function GoalCreate() {
       <div className="ge-topbar">
         <div className="ge-title">{editing ? 'Edit goal' : 'New goal'}</div>
         <div className="ge-sp" />
-        <button type="button" className="ge-cancel" onClick={() => navigate(backToGoals, { replace: true })}>Cancel</button>
+        <button type="button" className="ge-cancel" onClick={() => navigate(backToGoals, { replace: true })}>{tr('common.cancel')}</button>
         <button
           type="button"
           className="ge-create"
@@ -446,15 +448,15 @@ export function GoalCreate() {
 
           {/* 1 · name */}
           <div className="ge-sec">
-            <div className="ge-sec-t">Name your goal</div>
-            <div className="ge-sec-h">A short, motivating title your family will see.</div>
-            <input className="ge-name" value={form.title} onChange={(e) => set('title', e.target.value)} placeholder="e.g. 750 Hours Outside" autoFocus />
+            <div className="ge-sec-t">{tr('goalCreate.name')}</div>
+            <div className="ge-sec-h">{tr('goalCreate.nameHelp')}</div>
+            <input className="ge-name" value={form.title} onChange={(e) => set('title', e.target.value)} placeholder={tr('goalCreate.nameExample')} autoFocus />
           </div>
 
           {/* 2 · who */}
           <div className="ge-sec">
-            <div className="ge-sec-t">Who’s it for?</div>
-            <div className="ge-sec-h">Pick a goal list — the people in it share this goal.</div>
+            <div className="ge-sec-t">{tr('goalCreate.who')}</div>
+            <div className="ge-sec-h">{tr('goalCreate.whoHelp')}</div>
             <div className="ge-who">
               {pickableLists.map((l: GoalList) => (
                 <button key={l.id} type="button" className={`ge-who-chip ${form.goalListId === l.id ? 'on' : ''}`} onClick={() => set('goalListId', l.id)}>
@@ -466,19 +468,19 @@ export function GoalCreate() {
                   {l.name}
                 </button>
               ))}
-              <button type="button" className="ge-who-chip dashed" onClick={() => setShowListModal(true)}>＋ New group</button>
+              <button type="button" className="ge-who-chip dashed" onClick={() => setShowListModal(true)}>{tr('goalCreate.newGroup')}</button>
             </div>
           </div>
 
           {/* 3 · measure */}
           <div className="ge-sec">
-            <div className="ge-sec-t">How do you measure it?</div>
-            <div className="ge-sec-h">This shapes how progress is logged and shown.</div>
+            <div className="ge-sec-t">{tr('goalCreate.measure')}</div>
+            <div className="ge-sec-h">{tr('goalCreate.measureHelp')}</div>
             <div className="ge-measure-grid">
               {TYPES.map((t) => (
                 <button key={t.key} type="button" className={`ge-mcard ${form.goalType === t.key ? 'on' : ''}`} onClick={() => setMeasure(t.key)}>
                   <div className="me">{t.emoji}</div>
-                  <div><div className="mt">{t.title}</div><div className="md">{t.desc}</div></div>
+                  <div><div className="mt">{tr(`goalCreate.${t.key}`)}</div><div className="md">{tr(`goalCreate.${t.key}Help`)}</div></div>
                   <div className="mck">{form.goalType === t.key && <CheckIcon />}</div>
                 </button>
               ))}
@@ -490,23 +492,23 @@ export function GoalCreate() {
                 {steps.map((s, i) => (
                   <div key={i} className="ge-step">
                     <span className="ge-step-dot" />
-                    <input value={s.label} placeholder={`Step ${i + 1}`} onChange={(e) => setSteps((ss) => ss.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))} />
+                    <input value={s.label} placeholder={tr('goalCreate.step', { count: i + 1 })} onChange={(e) => setSteps((ss) => ss.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))} />
                     <button type="button" className="ge-step-x" aria-label="remove step" onClick={() => setSteps((ss) => (ss.length > 1 ? ss.filter((_, j) => j !== i) : ss))}>×</button>
                   </div>
                 ))}
-                <button type="button" className="ge-add" onClick={() => setSteps((ss) => [...ss, { label: '' }])}>＋ Add step</button>
+                <button type="button" className="ge-add" onClick={() => setSteps((ss) => [...ss, { label: '' }])}>{tr('goalCreate.addStep')}</button>
               </div>
             ) : form.goalType === 'habit' ? (
               <div className="ge-cfg">
                 <NumField value={form.habitPerPeriod} step={1} onChange={(v) => set('habitPerPeriod', v)} />
                 <div className="ge-unitsel">× per{' '}
                   <select value={form.habitPeriod} onChange={(e) => set('habitPeriod', e.target.value)}>
-                    <option value="day">day</option>
-                    <option value="week">week</option>
-                    <option value="month">month</option>
+                    <option value="day">{tr('goalCreate.day')}</option>
+                    <option value="week">{tr('goalCreate.week')}</option>
+                    <option value="month">{tr('goalCreate.month')}</option>
                   </select>
                 </div>
-                <span className="ge-lead">keep the streak going</span>
+                <span className="ge-lead">{tr('goalCreate.keepStreak')}</span>
               </div>
             ) : (
               <>
@@ -515,7 +517,7 @@ export function GoalCreate() {
                   <input className="ge-unit-input" value={form.unit} onChange={(e) => { unitTouched.current = true; set('unit', e.target.value) }} placeholder="unit — hours, books, miles…" />
                 </div>
                 <div className="ge-deadline">
-                  <div className="ge-deadline-tx"><div className="e1">Set a deadline</div><div className="e2">Optional — a target date to reach it by</div></div>
+                  <div className="ge-deadline-tx"><div className="e1">{tr('goalCreate.deadline')}</div><div className="e2">{tr('goalCreate.deadlineHelp')}</div></div>
                   <Toggle on={dlOpen} onClick={() => { const n = !dlOpen; setDlOpen(n); if (!n) set('deadline', '') }} />
                 </div>
                 {dlOpen && <input type="date" className="ge-date-input" value={form.deadline} onChange={(e) => set('deadline', e.target.value)} />}
@@ -527,8 +529,8 @@ export function GoalCreate() {
                 steps are always shared). Only shown with 2+ people. */}
             {participantCount > 1 && form.goalType !== 'checklist' && (
               <div className="ge-share" style={{ marginTop: 18 }}>
-                <button type="button" className={shared ? 'on' : ''} onClick={() => setForm((f) => ({ ...f, ...sharedDefault(f.goalType) }))}>{form.goalType === 'habit' ? 'One shared streak' : 'One shared total'}</button>
-                <button type="button" className={!shared ? 'on' : ''} onClick={() => setForm((f) => ({ ...f, ...eachTracksOwn, targetBasis: (f.goalType === 'total' || f.goalType === 'count') ? 'per_person' : 'family' }))}>{form.goalType === 'habit' ? 'Each keeps their own' : 'Each tracks their own'}</button>
+                <button type="button" className={shared ? 'on' : ''} onClick={() => setForm((f) => ({ ...f, ...sharedDefault(f.goalType) }))}>{tr(form.goalType === 'habit' ? 'goalCreate.sharedStreak' : 'goalCreate.sharedTotal')}</button>
+                <button type="button" className={!shared ? 'on' : ''} onClick={() => setForm((f) => ({ ...f, ...eachTracksOwn, targetBasis: (f.goalType === 'total' || f.goalType === 'count') ? 'per_person' : 'family' }))}>{tr(form.goalType === 'habit' ? 'goalCreate.eachOwn' : 'goalCreate.eachTracks')}</button>
               </div>
             )}
 
@@ -536,8 +538,8 @@ export function GoalCreate() {
                 Below Measure"). Only for a SHARED total/count goal with 2+ people. */}
             {shared && participantCount > 1 && (form.goalType === 'total' || form.goalType === 'count') && (
               <div className="ge-count">
-                <div className="ge-count-q">When a shared activity includes more than one person…</div>
-                <div className="ge-count-h">How should a group entry add up toward the total?</div>
+                <div className="ge-count-q">{tr('goalCreate.sharedQuestion')}</div>
+                <div className="ge-count-h">{tr('goalCreate.sharedHelp')}</div>
                 {COUNT_RULES[form.goalType as 'total' | 'count'].map((o) => {
                   const on = countChoice === o.k
                   const u = unit || (form.goalType === 'total' ? 'hr' : 'visit')
@@ -569,15 +571,15 @@ export function GoalCreate() {
 
           {/* 4 · category */}
           <div className="ge-sec">
-            <div className="ge-sec-t">Category</div>
-            <div className="ge-sec-h">Where this counts toward a balanced life.</div>
+            <div className="ge-sec-t">{tr('goalCreate.category')}</div>
+            <div className="ge-sec-h">{tr('goalCreate.categoryHelp')}</div>
             <div className="ge-cats">
               {CATEGORY_KEYS.map((k) => {
                 const c = CATEGORIES[k]
                 const on = form.category === k
                 return (
                   <button key={k} type="button" className={`ge-cat ${on ? 'on' : ''}`} onClick={() => set('category', k)} style={on ? { color: c.txt, borderColor: c.color, background: c.tint } : undefined}>
-                    <span className="cemo">{c.emoji}</span>{c.label}
+                    <span className="cemo">{c.emoji}</span>{tr(`goal.category.${k}`)}
                   </button>
                 )
               })}
@@ -586,18 +588,18 @@ export function GoalCreate() {
 
           {/* 5 · extras */}
           <div className="ge-sec">
-            <div className="ge-sec-t">Extras</div>
-            <div className="ge-sec-h">All optional. Turn on only what this goal needs.</div>
+            <div className="ge-sec-t">{tr('goalCreate.extras')}</div>
+            <div className="ge-sec-h">{tr('goalCreate.extrasHelp')}</div>
 
             <div className="ge-extra" style={{ display: 'block' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 13 }}>
                 <div className="eic">🌟</div>
-                <div className="etx"><div className="e1">Spotlight &amp; pinned</div><div className="e2">How prominent this goal is on the home screen and goals list</div></div>
+                <div className="etx"><div className="e1">{tr('goalCreate.spotlightPinned')}</div><div className="e2">{tr('goalCreate.spotlightHelp')}</div></div>
               </div>
               <div className="ge-share ge-share-3" style={{ display: 'flex', marginTop: 12 }}>
-                <button type="button" className={tier === 'spotlight' ? 'on' : ''} onClick={() => setTier('spotlight')}>🌟 Spotlight</button>
-                <button type="button" className={tier === 'featured' ? 'on' : ''} onClick={() => setTier('featured')}>📌 Pinned</button>
-                <button type="button" className={tier === 'normal' ? 'on' : ''} onClick={() => setTier('normal')}>Normal</button>
+                <button type="button" className={tier === 'spotlight' ? 'on' : ''} onClick={() => setTier('spotlight')}>🌟 {tr('goals.spotlight')}</button>
+                <button type="button" className={tier === 'featured' ? 'on' : ''} onClick={() => setTier('featured')}>📌 {tr('goals.pinned')}</button>
+                <button type="button" className={tier === 'normal' ? 'on' : ''} onClick={() => setTier('normal')}>{tr('goalCreate.normal')}</button>
               </div>
               <div className="ge-sec-h" style={{ marginTop: 6 }}>{tierHint}</div>
               {tier === 'spotlight' && listSpotlight && (
@@ -607,7 +609,7 @@ export function GoalCreate() {
 
             <div className="ge-extra">
               <div className="eic">🏆</div>
-              <div className="etx"><div className="e1">Milestones &amp; rewards</div><div className="e2">Bonus stars at thresholds you set</div></div>
+              <div className="etx"><div className="e1">{tr('goalCreate.milestonesRewards')}</div><div className="e2">{tr('goalCreate.rewardsHelp')}</div></div>
               <Toggle on={form.hasRewards} onClick={() => set('hasRewards', !form.hasRewards)} />
             </div>
             {form.hasRewards && (
@@ -617,7 +619,7 @@ export function GoalCreate() {
                   <div key={i} className="ge-ms-row">
                     <input className="ge-ms-emoji" value={m.emoji} maxLength={4} aria-label="emoji" onChange={(e) => setMs(i, { emoji: e.target.value })} />
                     <span className="ge-ms-n"><input value={m.threshold} aria-label="threshold" onChange={(e) => setMs(i, { threshold: Number(e.target.value) || 0, label: e.target.value })} /></span>
-                    <input className="ge-ms-r" value={m.rewardText} placeholder="Add a reward (optional)" onChange={(e) => setMs(i, { rewardText: e.target.value })} />
+                    <input className="ge-ms-r" value={m.rewardText} placeholder={tr('goalCreate.rewardOptional')} onChange={(e) => setMs(i, { rewardText: e.target.value })} />
                     <button type="button" className="ge-ms-x" aria-label="remove milestone" onClick={() => { msTouched.current = true; setMilestones((ms) => ms.filter((_, j) => j !== i)) }}>✕</button>
                   </div>
                 ))}
@@ -627,14 +629,14 @@ export function GoalCreate() {
 
             <div className="ge-extra">
               <div className="eic">🔔</div>
-              <div className="etx"><div className="e1">Weekly check-in</div><div className="e2">Sunday recap on the kiosk</div></div>
+              <div className="etx"><div className="e1">{tr('goalCreate.weekly')}</div><div className="e2">{tr('goalCreate.weeklyHelp')}</div></div>
               <Toggle on={form.weeklyCheckIn} onClick={() => set('weeklyCheckIn', !form.weeklyCheckIn)} />
             </div>
 
             {CALENDAR_TYPES.has(form.goalType) && (
               <div className="ge-extra">
                 <div className="eic">📅</div>
-                <div className="etx"><div className="e1">Auto-count from calendar</div><div className="e2">Matching events add progress automatically</div></div>
+                <div className="etx"><div className="e1">{tr('goalCreate.autoCount')}</div><div className="e2">{tr('goalCreate.autoCountHelp')}</div></div>
                 <Toggle on={form.autoFromCalendar} onClick={() => set('autoFromCalendar', !form.autoFromCalendar)} />
               </div>
             )}
@@ -647,8 +649,8 @@ export function GoalCreate() {
 
       {/* RIGHT · live preview */}
       <div className="ge-pvpane">
-        <div className="ge-pvlabel">Live preview</div>
-        <div className="ge-pvcap">How this goal appears on the kitchen display.</div>
+        <div className="ge-pvlabel">{tr('goalCreate.preview')}</div>
+        <div className="ge-pvcap">{tr('goalCreate.previewHelp')}</div>
         <div className="ge-pvstage">
           {tier !== 'normal' ? (
             <div className="ge-pv-hero">
@@ -691,7 +693,7 @@ export function GoalCreate() {
 
           {form.hasRewards && milestones.length > 0 && (
             <div className="ge-pv-mtrack">
-              <div className="mth">Milestones &amp; rewards</div>
+              <div className="mth">{tr('goalCreate.milestonesRewards')}</div>
               <div className="ge-pv-track">
                 {milestones.slice(0, 4).map((m, i) => (
                   <div key={i} className="ge-pv-node">

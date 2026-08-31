@@ -12,7 +12,15 @@ import { aisleFor, isStaple } from '../lists/aisles'
 // ---- ingredient line parsing ---------------------------------------------
 
 const FRACTIONS: Record<string, number> = { '½': 0.5, '¼': 0.25, '¾': 0.75, '⅓': 1 / 3, '⅔': 2 / 3, '⅛': 0.125, '⅜': 0.375, '⅝': 0.625, '⅞': 0.875, '⅕': 0.2, '⅖': 0.4 }
-const UNITS = new Set(['oz', 'oz.', 'lb', 'lbs', 'g', 'kg', 'ml', 'l', 'tsp', 'tsp.', 'teaspoon', 'teaspoons', 'tbsp', 'tbsp.', 'tablespoon', 'tablespoons', 'cup', 'cups', 'clove', 'cloves', 'can', 'cans', 'jar', 'jars', 'bunch', 'bunches', 'sprig', 'sprigs', 'ct', 'count', 'package', 'packages', 'pkg', 'bottle', 'bottles', 'slice', 'slices', 'pinch', 'stick', 'sticks', 'head', 'heads'])
+const UNITS = new Set([
+  'oz', 'oz.', 'lb', 'lbs', 'g', 'kg', 'ml', 'l', 'tsp', 'tsp.', 'teaspoon', 'teaspoons', 'tbsp', 'tbsp.', 'tablespoon', 'tablespoons', 'cup', 'cups', 'clove', 'cloves', 'can', 'cans', 'jar', 'jars', 'bunch', 'bunches', 'sprig', 'sprigs', 'ct', 'count', 'package', 'packages', 'pkg', 'bottle', 'bottles', 'slice', 'slices', 'pinch', 'stick', 'sticks', 'head', 'heads',
+  // German
+  'tl', 'el', 'teelöffel', 'esslöffel', 'tasse', 'tassen', 'zehe', 'zehen', 'dose', 'dosen', 'bund', 'prise', 'stück',
+  // French (common single-token spellings/abbreviations)
+  'cac', 'cas', 'cuillère', 'cuillères', 'tasse', 'tasses', 'gousse', 'gousses', 'boîte', 'boîtes', 'botte', 'bottes', 'pincée', 'pincées',
+  // Italian
+  'cucchiaino', 'cucchiaini', 'cucchiaio', 'cucchiai', 'tazza', 'tazze', 'spicchio', 'spicchi', 'lattina', 'lattine', 'mazzo', 'mazzi', 'pizzico', 'pizzichi',
+])
 
 // Leading modifiers that describe an ingredient but never stand alone as one, e.g.
 // "boneless, skinless chicken breast". A comma right after a run of these is part of
@@ -70,7 +78,7 @@ export function parseIngredient(raw: string, section: string | null): ParsedIng 
     rest = amtMatch[2]
   }
   // optional unit token (handles a trailing dot like "oz." / "tsp.")
-  const unitMatch = /^([A-Za-z]+)\.?\s+(.*)$/.exec(rest)
+  const unitMatch = /^([\p{L}]+)\.?\s+(.*)$/u.exec(rest)
   if (unitMatch && (UNITS.has(unitMatch[1].toLowerCase()) || UNITS.has(unitMatch[1].toLowerCase() + '.'))) {
     unit = unitMatch[1]
     rest = unitMatch[2]
@@ -103,9 +111,9 @@ export function parseIngredient(raw: string, section: string | null): ParsedIng 
 // into total seconds. Sums every unit-tagged number it finds. Returns null when the
 // string carries no recognizable duration.
 const DURATION_UNIT_SECONDS: Array<{ re: RegExp; mult: number }> = [
-  { re: /(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|h)\b/gi, mult: 3600 },
-  { re: /(\d+(?:\.\d+)?)\s*(?:minutes?|mins?|m)\b/gi, mult: 60 },
-  { re: /(\d+(?:\.\d+)?)\s*(?:seconds?|secs?|s)\b/gi, mult: 1 },
+  { re: /(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|h|stunden?|std\.?|heures?|ora|ore)\b/giu, mult: 3600 },
+  { re: /(\d+(?:\.\d+)?)\s*(?:minutes?|mins?|min\.?|minuten?|minuti?)\b/giu, mult: 60 },
+  { re: /(\d+(?:\.\d+)?)\s*(?:seconds?|secs?|s|sekunden?|sek\.?|secondes?|sec\.?|secondi?)\b/giu, mult: 1 },
 ]
 
 // A duration phrase written inline in a step sentence ("cook for 6 minutes",
@@ -114,7 +122,7 @@ const DURATION_UNIT_SECONDS: Array<{ re: RegExp; mult: number }> = [
 // (minute/min/hour/hr/second/sec) — not bare single letters — so it doesn't fire on
 // stray letters in prose; matches the FIRST phrase only (optionally compound), so a
 // step listing two times ("bake 20 min, then rest 5 min") yields the first, not the sum.
-const PROSE_DURATION_RE = /\b\d+(?:\.\d+)?\s*(?:hours?|hrs?|minutes?|mins?|seconds?|secs?)(?:\s+\d+(?:\.\d+)?\s*(?:hours?|hrs?|minutes?|mins?|seconds?|secs?))?/i
+const PROSE_DURATION_RE = /\b\d+(?:\.\d+)?\s*(?:hours?|hrs?|stunden?|std\.?|heures?|ora|ore|minutes?|mins?|minuten?|minuti?|seconds?|secs?|sekunden?|sek\.?|secondes?|sec\.?|secondi?)(?:\s+\d+(?:\.\d+)?\s*(?:hours?|hrs?|stunden?|std\.?|heures?|ora|ore|minutes?|mins?|minuten?|minuti?|seconds?|secs?|sekunden?|sek\.?|secondes?|sec\.?|secondi?))?/iu
 
 export function parseDuration(raw: string | null | undefined): number | null {
   const t = (raw ?? '').trim()

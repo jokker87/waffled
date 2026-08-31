@@ -8,6 +8,7 @@ import { Screensaver } from './components/Screensaver'
 import { ConfirmDialog } from './components/ConfirmDialog'
 import { MovePhotosModal } from './components/MovePhotosModal'
 import '../styles/photos.css'
+import { useI18n } from '../lib/locale-provider'
 
 // Photos home — the family wall (matches photos.png): a "NEW MEMORY" banner over
 // a masonry wall of tiles, each an <img> or an emoji-on-gradient tile (Waffled has
@@ -64,6 +65,7 @@ function PhotoTile({
 }
 
 export function Photos() {
+  const { t } = useI18n()
   const { photos, loading, error, refetch } = usePhotos()
   const wx = useWeather()
   const { household } = useHousehold()
@@ -156,7 +158,7 @@ export function Photos() {
           </button>
           <button type="button" className="pill btn-primary" style={{ color: 'var(--on-accent)', border: 0, cursor: 'pointer' }} onClick={() => setAdding(true)}>
             <Icon name="plus" />
-            <span>Add photos</span>
+            <span>{t('photos.add')}</span>
           </button>
         </div>
       ),
@@ -195,7 +197,7 @@ export function Photos() {
   }
 
   if (error) {
-    return <div className="ph-empty">Couldn't load photos — try reloading or signing in again.</div>
+    return <div className="ph-empty">{t('photos.error')}</div>
   }
 
   return (
@@ -206,15 +208,15 @@ export function Photos() {
             {newest.imageUrl ? <img src={newest.imageUrl} alt="" /> : newest.emoji ?? '🏖️'}
           </div>
           <div style={{ flex: 1 }}>
-            <div className="ph-banner-tag" style={{ marginBottom: 4 }}>Recently added</div>
+            <div className="ph-banner-tag" style={{ marginBottom: 4 }}>{t('photos.recent')}</div>
             <div className="ph-banner-title">
               {memory
-                ? `“${memory}” — ${memoryPhotos.length} ${memoryPhotos.length === 1 ? 'photo' : 'photos'}`
-                : `${photos.length} ${photos.length === 1 ? 'photo' : 'photos'}`}
+                ? `“${memory}” — ${memoryPhotos.length} ${t(memoryPhotos.length === 1 ? 'photos.photo' : 'photos.photos')}`
+                : `${photos.length} ${t(photos.length === 1 ? 'photos.photo' : 'photos.photos')}`}
             </div>
-            <div className="tiny muted">Tap any photo to view, or play them as a slideshow.</div>
+            <div className="tiny muted">{t('photos.help')}</div>
           </div>
-          <button type="button" className="btn btn-ghost btn-play" onClick={() => setSaver({ album: memory })}>▶ Play</button>
+          <button type="button" className="btn btn-ghost btn-play" onClick={() => setSaver({ album: memory })}>▶ {t('photos.play')}</button>
         </div>
       )}
 
@@ -225,7 +227,7 @@ export function Photos() {
             className={`pill ph-chip ${albumFilter === null ? 'on' : ''}`}
             onClick={() => setAlbumFilter(null)}
           >
-            All
+            {t('photos.all')}
           </button>
           {albums.map((a) => (
             <button
@@ -248,7 +250,7 @@ export function Photos() {
             className={`pill ${albumIsScreensaver ? 'on' : ''}`}
             onClick={() => toggleAlbumScreensaver(albumFilter)}
           >
-            {albumIsScreensaver ? '✓ Screensaver album' : '🖼️ Set as screensaver'}
+            {albumIsScreensaver ? t('photos.screensaverOn') : t('photos.screensaverSet')}
           </button>
         </div>
       )}

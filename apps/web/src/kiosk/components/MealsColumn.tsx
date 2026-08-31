@@ -1,8 +1,9 @@
 import { Link, useNavigate } from 'react-router'
 import { useMealsWeek, localToday, type WeekEntry } from '../../lib/api'
+import { useI18n } from '../../lib/locale-provider'
 
-function dayAbbrev(dateStr: string): string {
-  return new Date(`${dateStr}T00:00:00`).toLocaleDateString('en-US', { weekday: 'short' })
+function dayAbbrev(dateStr: string, locale: string): string {
+  return new Date(`${dateStr}T00:00:00`).toLocaleDateString(locale, { weekday: 'short' })
 }
 
 // A meal can be eating-out (no cooking) — detected from a recipe-less title.
@@ -23,10 +24,11 @@ export function isTryNew(entry: { recipeId: string | null; title: string | null 
 // Tonight's dinner — works whether it's a recipe, a recipe-less ("Fish") plan, or
 // an eating-out night. Never vanishes when something is planned.
 function TonightCard({ entry }: { entry: WeekEntry }) {
+  const { t } = useI18n()
   const navigate = useNavigate()
   const recipe = entry.recipe
   const recipeId = entry.recipeId
-  const title = recipe?.title ?? entry.title ?? 'Dinner'
+  const title = recipe?.title ?? entry.title ?? t('meals.dinners')
   const eatingOut = isEatingOut(entry)
   const tryNew = isTryNew(entry)
   const emoji = recipe?.emoji ?? (eatingOut ? '🍴' : tryNew ? '✨' : '🍽️')
@@ -38,10 +40,10 @@ function TonightCard({ entry }: { entry: WeekEntry }) {
       </div>
       <div style={{ padding: '14px 16px 15px' }}>
         <div className="tiny" style={{ color: 'var(--person-4)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em' }}>
-          Tonight · Dinner
+          {t('meals.tonightDinner')}
         </div>
         <div className="wf-serif" style={{ fontSize: 20, fontWeight: 600, margin: '3px 0 6px' }}>
-          {eatingOut ? 'Eating out' : tryNew ? 'Try something new' : title}
+          {eatingOut ? t('meals.eatingOut') : tryNew ? t('meals.tryNew') : title}
         </div>
 
         {/* A plate gets the same two actions a recipe does — open it, or cook it —
@@ -50,15 +52,15 @@ function TonightCard({ entry }: { entry: WeekEntry }) {
         {!recipeId && entry.mealId ? (
           <>
             <div className="tiny muted" style={{ display: 'flex', gap: 14 }}>
-              <span>🍽️ Meal · {entry.meal?.recipes.length ?? 0}</span>
-              {entry.meal?.servings != null && <span>Serves {entry.meal.servings}</span>}
+              <span>🍽️ {t('meals.meal')} · {entry.meal?.recipes.length ?? 0}</span>
+              {entry.meal?.servings != null && <span>{t('meals.serves', { count: entry.meal.servings })}</span>}
             </div>
             <div style={{ display: 'flex', gap: 9, paddingTop: 13 }}>
               <button className="btn btn-ghost" onClick={() => navigate(`/meals/build/${entry.mealId}`)} style={{ flex: 1, justifyContent: 'center', fontSize: 14, padding: 10, cursor: 'pointer' }}>
-                View meal
+                {t('meals.viewMeal')}
               </button>
-              <button className="btn btn-primary" onClick={() => navigate(`/meals/meal/${entry.mealId}/cook`)} title="Cook the whole meal, dish by dish" style={{ flex: 1, justifyContent: 'center', fontSize: 14, padding: 10, cursor: 'pointer' }}>
-                👨‍🍳 Cook Mode
+              <button className="btn btn-primary" onClick={() => navigate(`/meals/meal/${entry.mealId}/cook`)} title={t('meals.cookWhole')} style={{ flex: 1, justifyContent: 'center', fontSize: 14, padding: 10, cursor: 'pointer' }}>
+                {t('meals.cookMode')}
               </button>
             </div>
           </>
@@ -66,25 +68,25 @@ function TonightCard({ entry }: { entry: WeekEntry }) {
           <>
             <div className="tiny muted" style={{ display: 'flex', gap: 14 }}>
               {recipe?.cookTimeMinutes != null && <span>🕐 {recipe.cookTimeMinutes} min</span>}
-              {recipe?.servings != null && <span>🍽️ Serves {recipe.servings}</span>}
+              {recipe?.servings != null && <span>🍽️ {t('meals.serves', { count: recipe.servings })}</span>}
             </div>
             <div style={{ display: 'flex', gap: 9, paddingTop: 13 }}>
               <button className="btn btn-ghost" onClick={() => navigate(`/meals/recipe/${recipeId}`)} style={{ flex: 1, justifyContent: 'center', fontSize: 14, padding: 10, cursor: 'pointer' }}>
-                View recipe
+                {t('meals.viewRecipe')}
               </button>
-              <button className="btn btn-primary" onClick={() => navigate(`/meals/recipe/${recipeId}/cook`)} title="Start step-by-step cook mode" style={{ flex: 1, justifyContent: 'center', fontSize: 14, padding: 10, cursor: 'pointer' }}>
-                👨‍🍳 Cook Mode
+              <button className="btn btn-primary" onClick={() => navigate(`/meals/recipe/${recipeId}/cook`)} title={t('meals.cookSteps')} style={{ flex: 1, justifyContent: 'center', fontSize: 14, padding: 10, cursor: 'pointer' }}>
+                {t('meals.cookMode')}
               </button>
             </div>
           </>
         ) : (
           <>
             <div className="tiny muted" style={{ paddingBottom: 2 }}>
-              {eatingOut ? 'No cooking tonight 🎉' : tryNew ? 'Time to try a brand-new dish ✨' : 'No recipe attached yet.'}
+              {eatingOut ? `${t('meals.noCooking')} 🎉` : tryNew ? t('meals.newTime') : t('meals.noRecipe')}
             </div>
             <div style={{ display: 'flex', gap: 9, paddingTop: 13 }}>
               <button className="btn btn-ghost" onClick={() => navigate('/meals')} style={{ flex: 1, justifyContent: 'center', fontSize: 14, padding: 10, cursor: 'pointer' }}>
-                {eatingOut ? 'Change plan' : '🔎 Find a recipe'}
+                {eatingOut ? t('meals.changePlan') : t('meals.findRecipe')}
               </button>
             </div>
           </>
@@ -105,6 +107,7 @@ export function TonightCardSlot() {
 
 // "This week's dinners" as a standalone Today card (self-fetching).
 export function WeekDinnersCard() {
+  const { t, locale } = useI18n()
   const navigate = useNavigate()
   const { entries, loading, error } = useMealsWeek()
   const dinners = entries.filter((e) => e.mealType === 'dinner')
@@ -112,16 +115,16 @@ export function WeekDinnersCard() {
     <div className="card" style={{ padding: '15px 18px 8px', display: 'flex', flexDirection: 'column' }}>
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
         <Link to="/meals" className="card-h" style={{ fontSize: 16, textDecoration: 'none', color: 'inherit' }}>
-          This week’s dinners
+          {t('meals.weekDinners')}
         </Link>
         <Link to="/meals" className="tiny muted" style={{ marginLeft: 'auto', textDecoration: 'none', color: 'var(--ink-2)' }}>
-          {dinners.length} planned ›
+          {t('meals.plannedCount', { count: dinners.length })}
         </Link>
       </div>
-      {loading && <div className="tiny muted" style={{ padding: '6px 0' }}>Loading…</div>}
-      {error && <div className="tiny muted" style={{ padding: '6px 0' }}>Couldn't load meals — try reloading or signing in again.</div>}
+      {loading && <div className="tiny muted" style={{ padding: '6px 0' }}>{t('common.loading')}</div>}
+      {error && <div className="tiny muted" style={{ padding: '6px 0' }}>{t('meals.loadError')}</div>}
       {!loading && !error && dinners.length === 0 && (
-        <div className="tiny muted" style={{ padding: '6px 0' }}>No dinners planned yet.</div>
+        <div className="tiny muted" style={{ padding: '6px 0' }}>{t('meals.noDinners')}</div>
       )}
       {dinners.map((e: WeekEntry) => {
         // A slot holds EITHER a recipe or a whole plate — both are somewhere to go.
@@ -134,14 +137,14 @@ export function WeekDinnersCard() {
             onClick={() => clickable && navigate(e.mealId ? `/meals/build/${e.mealId}` : `/meals/recipe/${e.recipeId}`)}
             role={clickable ? 'button' : undefined}
             tabIndex={clickable ? 0 : undefined}
-            title={clickable ? (e.mealId ? 'Open meal' : 'Open recipe') : undefined}
+            title={clickable ? t(e.mealId ? 'meals.openMeal' : 'meals.openRecipe') : undefined}
             style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '6px 0', borderBottom: '1px solid var(--hair-2)', cursor: clickable ? 'pointer' : 'default' }}
           >
             <div className="tiny" style={{ width: 34, fontWeight: 700, color: 'var(--ink-2)' }}>
-              {dayAbbrev(e.date)}
+              {dayAbbrev(e.date, locale)}
             </div>
             <div style={{ fontSize: 16, width: 22, textAlign: 'center' }}>{e.recipe?.emoji ?? (out ? '🍴' : tryNew ? '✨' : '🍽️')}</div>
-            <div style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{out ? 'Eating out' : tryNew ? 'Try something new' : e.recipe?.title ?? e.title ?? 'Planned'}</div>
+            <div style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{out ? t('meals.eatingOut') : tryNew ? t('meals.tryNew') : e.recipe?.title ?? e.title ?? t('meals.planned')}</div>
             {clickable && <div className="tiny muted" style={{ fontSize: 16 }}>›</div>}
           </div>
         )

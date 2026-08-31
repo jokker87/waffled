@@ -1,5 +1,16 @@
 import { Component, type ReactNode } from 'react'
 import { Placeholder } from './Placeholder'
+import { useI18n } from '../../lib/locale-provider'
+
+function LocalizedScreenError() {
+  const { t } = useI18n()
+  return (
+    <Placeholder title={t('error.screenTitle')} icon="cloud">
+      <div className="muted ph-body">{t('error.screenBody')}</div>
+      <button type="button" className="btn btn-primary" onClick={() => window.location.reload()}>{t('common.reload')}</button>
+    </Placeholder>
+  )
+}
 
 // Catches a screen that fails to render — in practice, a code-split chunk that
 // never arrives. React re-throws a rejected lazy() import during render, and an
@@ -27,16 +38,6 @@ export class ScreenBoundary extends Component<{ children: ReactNode }, { failed:
 
   render() {
     if (!this.state.failed) return this.props.children
-    return (
-      <Placeholder title="This screen couldn’t load" icon="cloud">
-        <div className="muted ph-body">
-          It’s usually a dropped connection right after an update. Everything else still works —
-          pick another screen from the menu, or reload to try this one again.
-        </div>
-        <button type="button" className="btn btn-primary" onClick={() => window.location.reload()}>
-          Reload
-        </button>
-      </Placeholder>
-    )
+    return <LocalizedScreenError />
   }
 }

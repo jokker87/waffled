@@ -3,6 +3,7 @@ import { usePersons, type AgendaEvent, type Countdown } from '../../lib/api'
 import { evVars, useEventColor } from '../../lib/event-color'
 import { DOW, ymd, addDays, localDate, fmtHour, fmtTime, minutesOfDay, durationMin, eventPeople, packLanes } from './cal-utils'
 import { CountdownChip } from './CountdownChip'
+import { useI18n } from '../../lib/locale-provider'
 
 const DAY_START = 0 // midnight — top of the grid (full day so early events are reachable)
 const DAY_END = 23 // 11 PM — bottom
@@ -30,6 +31,7 @@ export function WeekView({
   onCreate: (date: string, time?: string) => void
   onPickDay?: (d: Date) => void
 }) {
+  const { t } = useI18n()
   const { persons = [] } = usePersons()
   const colorOf = useEventColor()
   // Empty selection = everyone (no filter); toggling a chip narrows to those people.
@@ -79,7 +81,7 @@ export function WeekView({
       <div className="wk-bar">
         <button type="button" className="wk-add" onClick={() => onCreate(ymd(weekStart))}>
           <span className="wk-add-plus">＋</span>
-          <span className="wk-add-ph">Add an event…</span>
+          <span className="wk-add-ph">{t('calendar.addEvent')}</span>
         </button>
         <div className="wk-chips">
           {persons.map((p) => {
@@ -113,7 +115,7 @@ export function WeekView({
                 className={`wk-day-h ${key === today ? 'today' : ''} ${onPickDay ? 'tappable' : ''}`}
                 role={onPickDay ? 'button' : undefined}
                 tabIndex={onPickDay ? 0 : undefined}
-                title={onPickDay ? 'Open this day' : undefined}
+                title={onPickDay ? t('calendar.openDay') : undefined}
                 onClick={onPickDay ? () => onPickDay(d) : undefined}
               >
                 <div className="wk-dow">{DOW[d.getDay()]}</div>
@@ -124,7 +126,7 @@ export function WeekView({
         </div>
 
         <div className="wk-allday">
-          <div className="wk-rail-lbl">ALL-DAY</div>
+          <div className="wk-rail-lbl">{t('calendar.allDay')}</div>
           {days.map((d) => {
             const key = ymd(d)
             const allday = (byDay[key] ?? []).filter((e) => e.allDay)
@@ -188,14 +190,14 @@ export function WeekView({
                         key={e.id}
                         className={`wk-ev ev-tint ${isMeal ? 'ev-meal' : ''} ${tight ? 'tight' : ''}`}
                         style={{ top, height, left, width, ...evVars(color), borderLeft: `3px solid ${color}` }}
-                        title={isMeal ? `Planned meal · ${e.title}` : `${fmtTime(e)} · ${e.title}`}
+                        title={isMeal ? `${t('calendar.plannedMeal')} · ${e.title}` : `${fmtTime(e)} · ${e.title}`}
                         onClick={(ev) => {
                           ev.stopPropagation()
                           onOpenEvent(e)
                         }}
                       >
                         <div className="wk-ev-t">{fmtTime(e)}</div>
-                        <div className="wk-ev-title">{e.occurrenceStart && <span className="ev-rep" title="Repeats">↻ </span>}{e.title}</div>
+                        <div className="wk-ev-title">{e.occurrenceStart && <span className="ev-rep" title={t('calendar.repeats')}>↻ </span>}{e.title}</div>
                       </div>
                     )
                   })}

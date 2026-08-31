@@ -7,25 +7,27 @@ import { CookConfirm } from './CookConfirm'
 import { useTopbarFull } from '../topbar-slot'
 import { fmtAmt } from '../../lib/amount'
 import '../../styles/recipe.css'
+import { useI18n } from '../../lib/locale-provider'
 
 // Favorite / edit / schedule as icon buttons. Rendered in the topbar (full-screen
 // route, on the back-button row) and inline (modal preview, which has no topbar).
 function RecipeActionIcons({ fav, onFav, onEdit, onSchedule, onAddToGrocery, onShare }: { fav: boolean; onFav: () => void; onEdit: () => void; onSchedule: () => void; onAddToGrocery: () => void; onShare: () => void }) {
+  const { t } = useI18n()
   return (
     <>
-      <button type="button" className={`icon-btn rd-fav ${fav ? 'on' : ''}`} aria-label="Favorite" aria-pressed={fav} onClick={onFav}>
+      <button type="button" className={`icon-btn rd-fav ${fav ? 'on' : ''}`} aria-label={t('recipe.favorite')} aria-pressed={fav} onClick={onFav}>
         <svg viewBox="0 0 24 24"><path d="M12 20s-7-4.6-9.2-9C1.3 8 2.6 4.7 5.8 4.5 8 4.3 9.4 5.8 12 8.6c2.6-2.8 4-4.3 6.2-4.1 3.2.2 4.5 3.5 3 6.5C19 15.4 12 20 12 20z" /></svg>
       </button>
-      <button type="button" className="icon-btn" aria-label="Add to grocery" onClick={onAddToGrocery}>
+      <button type="button" className="icon-btn" aria-label={t('recipe.addGrocery')} onClick={onAddToGrocery}>
         <svg viewBox="0 0 24 24"><path d="M2.5 4h2.4l2.2 11.2a1.6 1.6 0 0 0 1.6 1.3h8.9a1.6 1.6 0 0 0 1.6-1.2l1.8-7.3H6.1M9.5 20.2a.9.9 0 1 1-1.8 0 .9.9 0 0 1 1.8 0zM18.6 20.2a.9.9 0 1 1-1.8 0 .9.9 0 0 1 1.8 0z" /></svg>
       </button>
-      <button type="button" className="icon-btn" aria-label="Edit recipe" onClick={onEdit}>
+      <button type="button" className="icon-btn" aria-label={t('recipe.edit')} onClick={onEdit}>
         <svg viewBox="0 0 24 24"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" /></svg>
       </button>
-      <button type="button" className="icon-btn" aria-label="Schedule" onClick={onSchedule}>
+      <button type="button" className="icon-btn" aria-label={t('recipe.schedule')} onClick={onSchedule}>
         <svg viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="16" rx="3" /><path d="M3 9.5h18M8 2.5v4M16 2.5v4" /></svg>
       </button>
-      <button type="button" className="icon-btn" aria-label="Share recipe" onClick={onShare}>
+      <button type="button" className="icon-btn" aria-label={t('recipe.share')} onClick={onShare}>
         <svg viewBox="0 0 24 24"><path d="M12 15V4M8.5 7.5 12 4l3.5 3.5" /><path d="M6 11H5a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7a1 1 0 0 0-1-1h-1" /></svg>
       </button>
     </>
@@ -52,6 +54,7 @@ function downloadMarkdown(markdown: string, filename: string) {
 // full-screen route (RecipeDetail) or a modal preview (RecipeModal).
 
 function IngredientRow({ ing, ratio, onSub }: { ing: RecipeIngredient; ratio: number; onSub: (val: string) => void }) {
+  const { t } = useI18n()
   const [checked, setChecked] = useState(false)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
@@ -73,8 +76,8 @@ function IngredientRow({ ing, ratio, onSub }: { ing: RecipeIngredient; ratio: nu
             if (e.key === 'Escape') setEditing(false)
           }}
         />
-        <button type="button" className="ring-sub-ok" onClick={() => { onSub(draft); setEditing(false) }}>Save</button>
-        {ing.sub && <button type="button" className="ring-sub-clear" onClick={() => { onSub(''); setEditing(false) }}>Reset</button>}
+        <button type="button" className="ring-sub-ok" onClick={() => { onSub(draft); setEditing(false) }}>{t('common.save')}</button>
+        {ing.sub && <button type="button" className="ring-sub-clear" onClick={() => { onSub(''); setEditing(false) }}>{t('recipe.reset')}</button>}
       </div>
     )
   }
@@ -92,6 +95,7 @@ function IngredientRow({ ing, ratio, onSub }: { ing: RecipeIngredient; ratio: nu
 }
 
 function StepRow({ s, onNote }: { s: RecipeStep; onNote: (val: string) => void }) {
+  const { t } = useI18n()
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
   const timer =
@@ -107,7 +111,7 @@ function StepRow({ s, onNote }: { s: RecipeStep; onNote: (val: string) => void }
         {(s.ingredients.length > 0 || timer) && (
           <div className="rd-step-meta">
             {s.ingredients.length > 0 && (
-              <span className="rd-uses"><b>Uses:</b> {s.ingredients.join(', ')}</span>
+              <span className="rd-uses"><b>{t('recipe.uses')}</b> {s.ingredients.join(', ')}</span>
             )}
             {timer && (
               <span className="rd-timer" aria-label={`timer ${timer}`}>
@@ -122,14 +126,14 @@ function StepRow({ s, onNote }: { s: RecipeStep; onNote: (val: string) => void }
           <div className="rd-step-noteedit">
             <textarea autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="add a note for this step…" />
             <div className="rd-step-noteactions">
-              <button type="button" className="pill btn-primary" style={{ color: 'var(--on-accent)', border: 0 }} onClick={() => { onNote(draft); setEditing(false) }}>Save</button>
-              {s.note && <button type="button" className="pill" onClick={() => { onNote(''); setEditing(false) }}>Remove</button>}
-              <button type="button" className="pill" onClick={() => setEditing(false)}>Cancel</button>
+              <button type="button" className="pill btn-primary" style={{ color: 'var(--on-accent)', border: 0 }} onClick={() => { onNote(draft); setEditing(false) }}>{t('common.save')}</button>
+              {s.note && <button type="button" className="pill" onClick={() => { onNote(''); setEditing(false) }}>{t('common.remove', { name: '' }).trim()}</button>}
+              <button type="button" className="pill" onClick={() => setEditing(false)}>{t('common.cancel')}</button>
             </div>
           </div>
         ) : (
           <button type="button" className="rd-step-addnote" onClick={() => { setDraft(s.note ?? ''); setEditing(true) }}>
-            {s.note ? 'Edit note' : '+ Add note'}
+            {s.note ? t('recipe.editNote') : t('recipe.addNote')}
           </button>
         )}
       </div>
@@ -138,6 +142,7 @@ function StepRow({ s, onNote }: { s: RecipeStep; onNote: (val: string) => void }
 }
 
 export function RecipeView({ id, onSelect, selectLabel, fullScreen }: { id: string; onSelect?: () => void; selectLabel?: string; fullScreen?: boolean }) {
+  const { t } = useI18n()
   const navigate = useNavigate()
   // onHand/toBuy default here so a caller (or a test) that stubs useRecipe without
   // them can't turn an absent count into a crash — absent means "no claim", same as null.
@@ -241,7 +246,7 @@ export function RecipeView({ id, onSelect, selectLabel, fullScreen }: { id: stri
     () =>
       fullScreen ? (
         <>
-          <button type="button" className="pill" onClick={() => navigate(-1)}>‹ Recipes</button>
+          <button type="button" className="pill" onClick={() => navigate(-1)}>‹ {t('recipe.recipes')}</button>
           {recipe && (
             <div className="rd-topbar-actions">
               <RecipeActionIcons
@@ -259,8 +264,8 @@ export function RecipeView({ id, onSelect, selectLabel, fullScreen }: { id: stri
     [fullScreen, fav, recipe?.id]
   )
 
-  if (loading) return <div className="muted" style={{ padding: 30 }}>Loading…</div>
-  if (error || !recipe) return <div className="muted" style={{ padding: 30 }}>This recipe isn’t available.</div>
+  if (loading) return <div className="muted" style={{ padding: 30 }}>{t('common.loading')}</div>
+  if (error || !recipe) return <div className="muted" style={{ padding: 30 }}>{t('recipe.unavailable')}</div>
 
   const base = recipe.servings || 4
   const current = servings ?? base
@@ -360,7 +365,7 @@ export function RecipeView({ id, onSelect, selectLabel, fullScreen }: { id: stri
         <div className="rd-actions">
           {onSelect && (
             <button type="button" className="btn btn-primary rd-select" onClick={onSelect}>
-              {selectLabel ?? 'Select'}
+              {selectLabel ?? t('recipe.select')}
             </button>
           )}
           <RecipeActionIcons
@@ -387,8 +392,8 @@ export function RecipeView({ id, onSelect, selectLabel, fullScreen }: { id: stri
           <div className="wf-serif rd-title">{recipe.title}</div>
           <div className="rd-meta">
             {recipe.cookTimeMinutes != null && <span>🕐 {recipe.cookTimeMinutes} min</span>}
-            <span>🍽️ Serves {base}</span>
-            {steps.length > 0 && <span>🪜 {steps.length} steps</span>}
+            <span>🍽️ {t('recipe.serves', { count: base })}</span>
+            {steps.length > 0 && <span>🪜 {t('recipe.stepsCount', { count: steps.length })}</span>}
             {recipe.sourceName && <span>📖 {recipe.sourceName}</span>}
           </div>
 
@@ -398,7 +403,7 @@ export function RecipeView({ id, onSelect, selectLabel, fullScreen }: { id: stri
             ))}
             {chipTags.length > VISIBLE_TAGS && (
               <button className="rd-tag rd-tag-more" onClick={() => setShowAllTags((v) => !v)}>
-                {showAllTags ? 'Show less' : `+${hiddenCount} more`}
+                {showAllTags ? t('recipe.showLess') : t('recipe.more', { count: hiddenCount })}
               </button>
             )}
           </div>
@@ -409,7 +414,7 @@ export function RecipeView({ id, onSelect, selectLabel, fullScreen }: { id: stri
           {steps.length > 0 && (
             <button type="button" className="rd-cookbar" onClick={() => navigate(`/meals/recipe/${recipe.id}/cook`)}>
               <span className="rd-cookbar-emoji" aria-hidden>👨‍🍳</span>
-              Cook Mode
+              {t('recipe.cookMode')}
             </button>
           )}
 
@@ -423,32 +428,32 @@ export function RecipeView({ id, onSelect, selectLabel, fullScreen }: { id: stri
               disabled={building}
             >
               <span aria-hidden>🍽️</span>
-              {building ? 'Starting a meal…' : 'Build a meal around this'}
+              {building ? t('recipe.startingMeal') : t('recipe.buildMeal')}
             </button>
           </div>
 
           <div className="rd-status-row">
-            <span className="st-lbl">{cooked > 0 ? `👨‍🍳 Cooked ${cooked}×` : 'Not cooked yet'}</span>
+            <span className="st-lbl">{cooked > 0 ? `👨‍🍳 ${t('recipe.cookedCount', { count: cooked })}` : t('recipe.notCooked')}</span>
             <button type="button" className="rd-markbtn" onClick={markCooked}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12l5 5 9-10" /></svg>
-              Mark cooked
+              {t('recipe.markCooked')}
             </button>
           </div>
 
           <div className="card rd-ings">
             <div className="rd-ings-head">
-              <div className="card-h">Ingredients</div>
+              <div className="card-h">{t('recipe.ingredients')}</div>
               <div className="rd-servings">
-                <span className="tiny muted" style={{ fontWeight: 700 }}>Servings</span>
-                <button type="button" aria-label="Fewer" onClick={() => setServings(Math.max(1, current - 1))}>−</button>
+                <span className="tiny muted" style={{ fontWeight: 700 }}>{t('recipe.servings')}</span>
+                <button type="button" aria-label={t('recipe.fewer')} onClick={() => setServings(Math.max(1, current - 1))}>−</button>
                 <span className="rd-sv-n">{current}</span>
-                <button type="button" aria-label="More" onClick={() => setServings(current + 1)}>+</button>
+                <button type="button" aria-label={t('recipe.moreServings')} onClick={() => setServings(current + 1)}>+</button>
               </div>
             </div>
             {ingredients.map((ing) => (
               <IngredientRow key={ing.id} ing={ing} ratio={ratio} onSub={(val) => setSub(ing.name, val)} />
             ))}
-            <div className="tiny muted rd-sub-hint">Tap ⇄ to swap an ingredient — your swaps stick across re-imports.</div>
+            <div className="tiny muted rd-sub-hint">{t('recipe.swapHint')}</div>
           </div>
         </div>
 
@@ -491,15 +496,15 @@ export function RecipeView({ id, onSelect, selectLabel, fullScreen }: { id: stri
                 )}
               </div>
               {toBuy > 0 && (
-                <button type="button" className="rd-ai-go" onClick={addToGrocery}>Add to grocery</button>
+                <button type="button" className="rd-ai-go" onClick={addToGrocery}>{t('recipe.addGrocery')}</button>
               )}
             </div>
           )}
           {addedNote && <div className="rd-added tiny">{addedNote}</div>}
 
           <div className="card rd-method">
-            <div className="card-h" style={{ marginBottom: 14 }}>Method</div>
-            {steps.length === 0 && <div className="muted tiny" style={{ fontWeight: 600 }}>No steps recorded for this recipe.</div>}
+            <div className="card-h" style={{ marginBottom: 14 }}>{t('recipe.method')}</div>
+            {steps.length === 0 && <div className="muted tiny" style={{ fontWeight: 600 }}>{t('recipe.noSteps')}</div>}
             {steps.map((s) => (
               <StepRow key={s.stepNumber} s={s} onNote={(val) => setStepNote(s.stepNumber, val)} />
             ))}
@@ -515,7 +520,7 @@ export function RecipeView({ id, onSelect, selectLabel, fullScreen }: { id: stri
               />
               {recipe.notes && (
                 <details className="rd-srcnotes">
-                  <summary>Recipe notes (from the source)</summary>
+                  <summary>{t('recipe.sourceNotes')}</summary>
                   <div className="tiny muted" style={{ whiteSpace: 'pre-wrap', marginTop: 6 }}>{recipe.notes}</div>
                 </details>
               )}

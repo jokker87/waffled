@@ -7,6 +7,8 @@ import { MODULES, moduleEnabled } from '../lib/modules'
 import { useThemePref } from '../lib/theme'
 import { eventStyle } from '../lib/display'
 import { familyColorHex } from '../lib/event-color'
+import { LANGUAGE_OPTIONS, type LanguagePreference } from '../lib/locale'
+import { useI18n } from '../lib/locale-provider'
 import { PersonModal } from './components/PersonModal'
 import { ColorPicker, COLOR_SWATCHES } from './components/ColorPicker'
 import { SettingCard } from './components/SettingCard'
@@ -21,27 +23,27 @@ import '../styles/settings.css'
 // account/operator. Account is thin today; it grows with per-member self-service later.
 const NAV = [
   // Account — you
-  { key: 'appearance', icon: '🌗', label: 'Appearance', group: 'account' },
-  { key: 'profile', icon: '🙂', label: 'My Profile', group: 'account' },
-  { key: 'account', icon: '🔒', label: 'My Account', group: 'account' },
-  { key: 'households', icon: '🏠', label: 'Households', group: 'account' },
+  { key: 'appearance', icon: '🌗', label: 'Appearance', labelKey: 'settings.appearance', group: 'account' },
+  { key: 'profile', icon: '🙂', label: 'My Profile', labelKey: 'settings.profile', group: 'account' },
+  { key: 'account', icon: '🔒', label: 'My Account', labelKey: 'settings.account', group: 'account' },
+  { key: 'households', icon: '🏠', label: 'Households', labelKey: 'settings.households', group: 'account' },
   // Family — shared household configuration (admin)
-  { key: 'family', icon: '👨‍👩‍👧‍👦', label: 'Family & People', admin: true, group: 'family' },
-  { key: 'calendars', icon: '📅', label: 'Calendars', admin: true, group: 'family' },
-  { key: 'chores', icon: '⭐', label: 'Chores & Rewards', admin: true, group: 'family' },
-  { key: 'meals', icon: '🍽️', label: 'Meals', admin: true, group: 'family' },
-  { key: 'modules', icon: '🧩', label: 'Modules', admin: true, group: 'family' },
-  { key: 'display', icon: '🖥️', label: 'Display & Kiosk', admin: true, group: 'family' },
+  { key: 'family', icon: '👨‍👩‍👧‍👦', label: 'Family & People', labelKey: 'settings.familyPeople', admin: true, group: 'family' },
+  { key: 'calendars', icon: '📅', label: 'Calendars', labelKey: 'settings.calendars', admin: true, group: 'family' },
+  { key: 'chores', icon: '⭐', label: 'Chores & Rewards', labelKey: 'settings.choresRewards', admin: true, group: 'family' },
+  { key: 'meals', icon: '🍽️', label: 'Meals', labelKey: 'settings.meals', admin: true, group: 'family' },
+  { key: 'modules', icon: '🧩', label: 'Modules', labelKey: 'settings.modules', admin: true, group: 'family' },
+  { key: 'display', icon: '🖥️', label: 'Display & Kiosk', labelKey: 'settings.display', admin: true, group: 'family' },
   // System — the self-hosted deployment (admin/operator)
-  { key: 'security', icon: '🔐', label: 'Sign-in & Security', admin: true, group: 'system' },
-  { key: 'ai', icon: '✨', label: 'AI & Capture', admin: true, group: 'system' },
-  { key: 'apikeys', icon: '🔑', label: 'API Keys', admin: true, group: 'system' },
-  { key: 'health', icon: '🩺', label: 'System Health', admin: true, group: 'system' },
+  { key: 'security', icon: '🔐', label: 'Sign-in & Security', labelKey: 'settings.security', admin: true, group: 'system' },
+  { key: 'ai', icon: '✨', label: 'AI & Capture', labelKey: 'settings.ai', admin: true, group: 'system' },
+  { key: 'apikeys', icon: '🔑', label: 'API Keys', labelKey: 'settings.apiKeys', admin: true, group: 'system' },
+  { key: 'health', icon: '🩺', label: 'System Health', labelKey: 'settings.health', admin: true, group: 'system' },
   // About sits on its own at the end
-  { key: 'about', icon: 'ℹ️', label: 'About', group: 'about' },
+  { key: 'about', icon: 'ℹ️', label: 'About', labelKey: 'settings.about', group: 'about' },
 ]
 
-const NAV_GROUP_LABELS: Record<string, string> = { account: 'Account', family: 'Family', system: 'System' }
+const NAV_GROUP_KEYS: Record<string, string> = { account: 'settings.accountGroup', family: 'settings.familyGroup', system: 'settings.systemGroup' }
 
 const TIMEZONES = [
   'America/New_York',
@@ -64,32 +66,33 @@ function ageFrom(birthday: string | null | undefined): number | null {
   return age >= 0 ? age : null
 }
 
-function roleLine(m: SettingsMember): string {
+function roleLine(m: SettingsMember, t: (key: string, vars?: Record<string, string | number>) => string): string {
   const parts: string[] = [m.memberType.charAt(0).toUpperCase() + m.memberType.slice(1)]
-  if (m.isOwner) parts.push('Owner')
-  else if (m.isAdmin) parts.push('Admin')
+  if (m.isOwner) parts.push(t('settings.owner'))
+  else if (m.isAdmin) parts.push(t('settings.admin'))
   const age = ageFrom(m.birthday)
-  if (age != null && m.memberType !== 'adult') parts.push(`age ${age}`)
-  if (m.hasLogin) parts.push('signed in')
-  else if (m.memberType !== 'adult') parts.push('managed by parents')
+  if (age != null && m.memberType !== 'adult') parts.push(t('settings.age', { age }))
+  if (m.hasLogin) parts.push(t('settings.signedIn'))
+  else if (m.memberType !== 'adult') parts.push(t('settings.parentManaged'))
   return parts.join(' · ')
 }
 
-function fmtBirthday(birthday: string | null | undefined): string | null {
+function fmtBirthday(birthday: string | null | undefined, locale: string): string | null {
   if (!birthday) return null
   const b = new Date(String(birthday))
   if (isNaN(b.getTime())) return null
-  return b.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
+  return b.toLocaleDateString(locale, { month: 'short', day: 'numeric', timeZone: 'UTC' })
 }
 
 function MemberRow({ m, onClick }: { m: SettingsMember; onClick: () => void }) {
-  const bday = fmtBirthday(m.birthday)
+  const { t, locale } = useI18n()
+  const bday = fmtBirthday(m.birthday, locale)
   return (
     <div className="set-member" onClick={onClick}>
       <div className="av md" style={{ background: `${m.colorHex ?? '#A6A29B'}22` }}>{m.avatarEmoji ?? '🙂'}</div>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div className="set-member-n">{m.name}</div>
-        <div className="tiny muted" style={{ fontWeight: 600 }}>{roleLine(m)}</div>
+        <div className="tiny muted" style={{ fontWeight: 600 }}>{roleLine(m, t)}</div>
       </div>
       {bday && <div className="tiny muted set-bday" style={{ fontWeight: 600 }}>🎂 {bday}</div>}
       <div className="set-swatch" style={{ background: m.colorHex ?? '#A6A29B' }} />
@@ -130,6 +133,7 @@ function CardHeader({ title, sub, mid }: { title: React.ReactNode; sub?: React.R
 // Admins always have everything, so they're not a row here.
 const PERM_ROLES: Role[] = ['adult', 'teen', 'kid']
 function PermissionsCard() {
+  const { t } = useI18n()
   const [matrix, setMatrix] = useState<PermissionMatrix | null>(null)
   const [error, setError] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -155,11 +159,11 @@ function PermissionsCard() {
   if (error) return null // non-admins (403) simply don't see this card
   return (
     <SettingCard style={{ marginTop: 18 }}>
-      <CardHeader title="Permissions" sub="Choose what each role can do. Admins can always do everything. Everyone can always complete their own chores, redeem their own rewards, and log their own goals." />
+      <CardHeader title={t('settings.permissions')} sub={t('settings.permissionsSub')} />
       {matrix === null ? (
-        <div className="tiny muted" style={{ fontWeight: 600 }}>Loading…</div>
+        <div className="tiny muted" style={{ fontWeight: 600 }}>{t('common.loading')}</div>
       ) : (
-        <div className="perm-grid" role="table" aria-label="Role permissions">
+        <div className="perm-grid" role="table" aria-label={t('settings.rolePermissions')}>
           <div className="perm-row perm-head" role="row">
             <span className="perm-role" role="columnheader" />
             {CAPABILITIES.map((cap) => (
@@ -283,6 +287,7 @@ function scopeLabeler(scopes: ApiScopeDef[]): (scope: string) => string {
 }
 
 function ApiKeysPanel() {
+  const { t, formatDate } = useI18n()
   const [keys, setKeys] = useState<ApiKey[] | null>(null)
   const [catalog, setCatalog] = useState<ApiScopeDef[]>([])
   const [creating, setCreating] = useState(false)
@@ -327,30 +332,28 @@ function ApiKeysPanel() {
   return (
     <div className="set-panel">
       <div className="set-head">
-        <div className="wf-serif set-head-t">API Keys</div>
-        <button type="button" className="btn btn-primary" onClick={() => setCreating(true)}>+ New key</button>
+        <div className="wf-serif set-head-t">{t('settings.apiKeys')}</div>
+        <button type="button" className="btn btn-primary" onClick={() => setCreating(true)}>{t('settings.apiNew')}</button>
       </div>
       <div className="tiny muted" style={{ fontWeight: 600, margin: '-6px 2px 16px', lineHeight: 1.45 }}>
-        Give an external tool access to your household over the API. Send the key as the
-        {' '}<code>x-api-key</code> header. A key acts as you — it can only do what your account can,
-        limited further to the scopes you grant. Revoke it any time.
+        {t('settings.apiIntro')}
       </div>
 
       {justCreated && (
         <div className="apikey-reveal">
-          <div className="apikey-reveal-h">🔑 Copy your new key now — you won't be able to see it again.</div>
+          <div className="apikey-reveal-h">{t('settings.apiCopyNow')}</div>
           <div className="apikey-reveal-row">
             <code className="apikey-secret" ref={secretRef}>{justCreated.secret}</code>
-            <button type="button" className="btn btn-ghost apikey-copy" onClick={copySecret}>{copied ? 'Copied ✓' : 'Copy'}</button>
+            <button type="button" className="btn btn-ghost apikey-copy" onClick={copySecret}>{copied ? t('settings.copied') : t('settings.copy')}</button>
           </div>
-          <button type="button" className="btn btn-ghost tiny" style={{ marginTop: 10 }} onClick={() => setJustCreated(null)}>Done</button>
+          <button type="button" className="btn btn-ghost tiny" style={{ marginTop: 10 }} onClick={() => setJustCreated(null)}>{t('common.done')}</button>
         </div>
       )}
 
       {keys == null ? (
-        <div className="tiny muted" style={{ fontWeight: 600, padding: 8 }}>Loading…</div>
+        <div className="tiny muted" style={{ fontWeight: 600, padding: 8 }}>{t('common.loading')}</div>
       ) : keys.length === 0 ? (
-        <div className="tiny muted" style={{ fontWeight: 600, padding: '14px 2px' }}>No API keys yet. Create one to let an outside app reach Waffled.</div>
+        <div className="tiny muted" style={{ fontWeight: 600, padding: '14px 2px' }}>{t('settings.noApiKeys')}</div>
       ) : (
         <div className="apikey-list">
           {keys.map((k) => (
@@ -359,15 +362,15 @@ function ApiKeysPanel() {
                 <div className="apikey-name">{k.name}</div>
                 <code className="apikey-prefix">{k.prefix}…</code>
                 <div className="apikey-scopes">
-                  {k.scopes.length ? k.scopes.map((s) => <span key={s} className="apikey-scope">{label(s)}</span>) : <span className="tiny muted">no scopes</span>}
+                  {k.scopes.length ? k.scopes.map((s) => <span key={s} className="apikey-scope">{label(s)}</span>) : <span className="tiny muted">{t('settings.noScopes')}</span>}
                 </div>
                 <div className="tiny muted apikey-meta">
-                  {k.lastUsedAt ? `Last used ${new Date(k.lastUsedAt).toLocaleDateString()}` : 'Never used'}
-                  {' · '}Created {new Date(k.createdAt).toLocaleDateString()}
-                  {k.expiresAt ? ` · Expires ${new Date(k.expiresAt).toLocaleDateString()}` : ''}
+                  {k.lastUsedAt ? t('settings.lastUsed', { date: formatDate(k.lastUsedAt) }) : t('settings.neverUsed')}
+                  {' · '}{t('settings.created', { date: formatDate(k.createdAt) })}
+                  {k.expiresAt ? ` · ${t('settings.expires', { date: formatDate(k.expiresAt) })}` : ''}
                 </div>
               </div>
-              <button type="button" className="btn btn-ghost apikey-revoke" onClick={() => setRevoking(k)}>Revoke</button>
+              <button type="button" className="btn btn-ghost apikey-revoke" onClick={() => setRevoking(k)}>{t('settings.revoke')}</button>
             </div>
           ))}
         </div>
@@ -382,9 +385,9 @@ function ApiKeysPanel() {
       )}
       {revoking && (
         <ConfirmDialog
-          title={`Revoke "${revoking.name}"?`}
-          message="Any tool using this key will immediately lose access. This can't be undone."
-          confirmLabel="Revoke"
+          title={t('settings.revokeTitle', { name: revoking.name })}
+          message={t('settings.revokeWarning')}
+          confirmLabel={t('settings.revoke')}
           danger
           onConfirm={async () => { await apiKeysApi.revoke(revoking.id); setRevoking(null); refetch() }}
           onClose={() => setRevoking(null)}
@@ -399,6 +402,7 @@ function NewApiKeyModal({ catalog, onClose, onCreated }: {
   onClose: () => void
   onCreated: (name: string, secret: string) => void
 }) {
+  const { t } = useI18n()
   const [name, setName] = useState('')
   const [levels, setLevels] = useState<Record<string, ScopeLevel>>({})
   const [expiresAt, setExpiresAt] = useState('')
@@ -415,15 +419,15 @@ function NewApiKeyModal({ catalog, onClose, onCreated }: {
 
   async function save() {
     const scopes = buildScopes()
-    if (!name.trim()) { setErr('Give the key a name.'); return }
-    if (scopes.length === 0) { setErr('Grant at least one scope.'); return }
+    if (!name.trim()) { setErr(t('settings.keyNameError')); return }
+    if (scopes.length === 0) { setErr(t('settings.scopeError')); return }
     setSaving(true)
     setErr(null)
     try {
       const res = await apiKeysApi.create({ name: name.trim(), scopes, expiresAt: expiresAt || null })
       onCreated(res.apiKey.name, res.key)
     } catch {
-      setErr('Could not create the key — please try again.')
+      setErr(t('settings.keyCreateError'))
       setSaving(false)
     }
   }
@@ -431,12 +435,12 @@ function NewApiKeyModal({ catalog, onClose, onCreated }: {
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 520 }}>
-        <button type="button" className="modal-close" aria-label="Close" onClick={onClose}>×</button>
-        <div className="wf-serif" style={{ fontSize: 20, fontWeight: 600, marginBottom: 14 }}>New API key</div>
-        <label className="pantry-field"><span>Name</span>
+        <button type="button" className="modal-close" aria-label={t('common.close')} onClick={onClose}>×</button>
+        <div className="wf-serif" style={{ fontSize: 20, fontWeight: 600, marginBottom: 14 }}>{t('settings.newApiKey')}</div>
+        <label className="pantry-field"><span>{t('settings.name')}</span>
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Home Assistant" autoFocus />
         </label>
-        <div className="pantry-field"><span>Scopes</span></div>
+        <div className="pantry-field"><span>{t('settings.scopes')}</span></div>
         <div className="apikey-scopegrid">
           {catalog.map((s) => {
             const level = levels[s.resource] ?? 'none'
@@ -444,25 +448,25 @@ function NewApiKeyModal({ catalog, onClose, onCreated }: {
               <div key={s.resource} className="apikey-scoperow">
                 <div className="apikey-scoperow-main">
                   <div className="apikey-scoperow-label">{s.label}</div>
-                  <div className="tiny muted">{s.description}{s.readOnly ? ' · read-only' : ''}</div>
+                  <div className="tiny muted">{s.description}{s.readOnly ? ` · ${t('settings.readOnly')}` : ''}</div>
                 </div>
                 <div className="apikey-seg">
-                  <button type="button" className={level === 'none' ? 'on' : ''} onClick={() => setLevel(s.resource, 'none')}>None</button>
-                  <button type="button" className={level === 'read' ? 'on' : ''} onClick={() => setLevel(s.resource, 'read')}>Read</button>
-                  {!s.readOnly && <button type="button" className={level === 'write' ? 'on' : ''} onClick={() => setLevel(s.resource, 'write')}>Write</button>}
+                  <button type="button" className={level === 'none' ? 'on' : ''} onClick={() => setLevel(s.resource, 'none')}>{t('settings.none')}</button>
+                  <button type="button" className={level === 'read' ? 'on' : ''} onClick={() => setLevel(s.resource, 'read')}>{t('settings.read')}</button>
+                  {!s.readOnly && <button type="button" className={level === 'write' ? 'on' : ''} onClick={() => setLevel(s.resource, 'write')}>{t('settings.write')}</button>}
                 </div>
               </div>
             )
           })}
         </div>
-        <label className="pantry-field" style={{ marginTop: 12 }}><span>Expires (optional)</span>
+        <label className="pantry-field" style={{ marginTop: 12 }}><span>{t('settings.expiresOptional')}</span>
           <input type="date" value={expiresAt} onChange={(e) => setExpiresAt(e.target.value)} />
         </label>
         {err && <div className="pantry-err">{err}</div>}
         <div className="pantry-modal-actions">
           <span style={{ flex: 1 }} />
-          <button type="button" className="btn btn-ghost" disabled={saving} onClick={onClose}>Cancel</button>
-          <button type="button" className="btn btn-primary" disabled={saving} onClick={save}>{saving ? 'Creating…' : 'Create key'}</button>
+          <button type="button" className="btn btn-ghost" disabled={saving} onClick={onClose}>{t('common.cancel')}</button>
+          <button type="button" className="btn btn-primary" disabled={saving} onClick={save}>{saving ? t('settings.creating') : t('settings.createKey')}</button>
         </div>
       </div>
     </div>
@@ -531,6 +535,7 @@ function BrowserSyncCard() {
 }
 
 function SystemHealthPanel() {
+  const { t } = useI18n()
   const [report, setReport] = useState<HealthReport | null>(null)
   const [error, setError] = useState(false)
   const [upd, setUpd] = useState<UpdateInfo | null>(null)
@@ -559,7 +564,7 @@ function SystemHealthPanel() {
   return (
     <div className="set-panel">
       <div className="set-head">
-        <div className="wf-serif set-head-t">System Health</div>
+        <div className="wf-serif set-head-t">{t('settings.health')}</div>
         {report && (
           <span className={`health-badge health-${report.status} health-badge-lg`} title={`Overall: ${report.status}`}>
             {HEALTH_ICON[report.status]} {report.status.toUpperCase()}
@@ -580,7 +585,7 @@ function SystemHealthPanel() {
           Couldn’t reach the server for the rest of the report.
         </div>
       ) : !report ? (
-        <div className="tiny muted" style={{ fontWeight: 600, padding: 8 }}>Loading…</div>
+        <div className="tiny muted" style={{ fontWeight: 600, padding: 8 }}>{t('common.loading')}</div>
       ) : (
         <>
           <div className="health-grid">
@@ -600,6 +605,7 @@ function SystemHealthPanel() {
 // Update notifier row inside System Health: "update available / up to date / off",
 // with an admin toggle. Hidden entirely when the operator disabled it via env.
 function UpdateBanner({ upd, onToggle, toggling }: { upd: UpdateInfo; onToggle: (v: boolean) => void; toggling: boolean }) {
+  const { t } = useI18n()
   const envOff = !upd.enabled && upd.reason === 'env'
   return (
     <SettingCard style={{ marginBottom: 14 }}>
@@ -610,7 +616,7 @@ function UpdateBanner({ upd, onToggle, toggling }: { upd: UpdateInfo; onToggle: 
               <div className="card-h" style={{ margin: 0 }}>⬆ Update available — {upd.latest.tag}</div>
               <div className="tiny muted" style={{ fontWeight: 600 }}>
                 You're on {upd.current.version} ({upd.current.sha}).{' '}
-                <a href={upd.latest.url} target="_blank" rel="noreferrer">View release ↗</a>
+                <a href={upd.latest.url} target="_blank" rel="noreferrer">{t('settings.viewRelease')}</a>
               </div>
               <div className="tiny muted" style={{ fontWeight: 600, marginTop: 2 }}>
                 On the server, run <code>./waffled upgrade</code> to update.
@@ -625,14 +631,14 @@ function UpdateBanner({ upd, onToggle, toggling }: { upd: UpdateInfo; onToggle: 
             </>
           ) : upd.enabled ? (
             <>
-              <div className="card-h" style={{ margin: 0 }}>Update check</div>
+              <div className="card-h" style={{ margin: 0 }}>{t('settings.updateCheck')}</div>
               <div className="tiny muted" style={{ fontWeight: 600 }}>
                 Running {upd.current.version} ({upd.current.sha}){upd.error ? ` · ${upd.error}` : ''}
               </div>
             </>
           ) : (
             <>
-              <div className="card-h" style={{ margin: 0 }}>Update checks off</div>
+              <div className="card-h" style={{ margin: 0 }}>{t('settings.updateOff')}</div>
               <div className="tiny muted" style={{ fontWeight: 600 }}>
                 {envOff ? 'Disabled by the operator (UPDATE_CHECK_ENABLED).' : "Waffled won't check GitHub for new releases."}
               </div>
@@ -660,6 +666,7 @@ function accountErrMsg(e: unknown, fallback: string): string {
 // A signed-in member edits their OWN name, avatar, color, and birthday. Everything
 // else about the person (role, login, kiosk visibility) stays admin-managed.
 function MyProfilePanel() {
+  const { t } = useI18n()
   const [info, setInfo] = useState<AccountInfo | null>(null)
   const [error, setError] = useState(false)
   const [name, setName] = useState('')
@@ -685,8 +692,8 @@ function MyProfilePanel() {
     return () => { alive = false }
   }, [])
 
-  if (error) return <div className="set-panel"><div className="muted" style={{ padding: 20 }}>Couldn't load your profile — try reloading or signing in again.</div></div>
-  if (!info) return <div className="set-panel"><div className="muted" style={{ padding: 20 }}>Loading…</div></div>
+  if (error) return <div className="set-panel"><div className="muted" style={{ padding: 20 }}>{t('settings.loadProfileError')}</div></div>
+  if (!info) return <div className="set-panel"><div className="muted" style={{ padding: 20 }}>{t('common.loading')}</div></div>
 
   const dirty =
     name.trim() !== info.name ||
@@ -710,7 +717,7 @@ function MyProfilePanel() {
       setSaved(true)
       setTimeout(() => setSaved(false), 1800)
     } catch (e) {
-      setSaveErr(accountErrMsg(e, 'Could not save your profile — please try again.'))
+      setSaveErr(accountErrMsg(e, t('settings.profileSaveError')))
     } finally {
       setSaving(false)
     }
@@ -719,38 +726,38 @@ function MyProfilePanel() {
   return (
     <div className="set-panel">
       <div className="set-head">
-        <div className="wf-serif set-head-t">My Profile</div>
-        <div className="tiny muted" style={{ fontWeight: 600 }}>How you appear on the kiosk</div>
+        <div className="wf-serif set-head-t">{t('settings.profile')}</div>
+        <div className="tiny muted" style={{ fontWeight: 600 }}>{t('settings.profileSub')}</div>
       </div>
 
       <SettingCard>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 18 }}>
           <div className="av md" style={{ background: `${colorHex}22`, fontSize: 26 }}>{avatarEmoji || '🙂'}</div>
           <div className="field" style={{ flex: 1, marginBottom: 0 }}>
-            <span>Name</span>
-            <input value={name} onChange={(e) => { setName(e.target.value); setSaved(false) }} placeholder="Your name" />
+            <span>{t('settings.name')}</span>
+            <input value={name} onChange={(e) => { setName(e.target.value); setSaved(false) }} placeholder={t('settings.yourName')} />
           </div>
           <div className="field" style={{ width: 80, marginBottom: 0 }}>
-            <span>Avatar</span>
+            <span>{t('settings.avatar')}</span>
             <input value={avatarEmoji} onChange={(e) => { setAvatarEmoji(e.target.value); setSaved(false) }} placeholder="🙂" maxLength={4} />
           </div>
         </div>
 
         <div className="field">
-          <span>Color</span>
+          <span>{t('settings.color')}</span>
           <ColorPicker value={colorHex} onChange={(c) => { setColorHex(c); setSaved(false) }} />
         </div>
 
         <label className="field">
-          <span>Birthday (optional)</span>
+          <span>{t('settings.birthdayOptional')}</span>
           <input type="date" value={birthday} onChange={(e) => { setBirthday(e.target.value); setSaved(false) }} />
         </label>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 6 }}>
           <button type="button" className="btn btn-primary" onClick={save} disabled={!dirty || !name.trim() || saving}>
-            {saving ? 'Saving…' : 'Save'}
+            {saving ? t('common.saving') : t('common.save')}
           </button>
-          {saved && <span className="tiny" style={{ color: 'var(--success)', fontWeight: 700 }}>✓ Saved</span>}
+          {saved && <span className="tiny" style={{ color: 'var(--success)', fontWeight: 700 }}>{t('settings.saved')}</span>}
         </div>
         {saveErr && <div className="tiny" style={{ fontWeight: 700, color: 'var(--primary)', marginTop: 10 }}>{saveErr}</div>}
       </SettingCard>
@@ -762,6 +769,7 @@ function MyProfilePanel() {
 // Login & security for the signed-in member: change email and password. OIDC
 // members can't change either here — those live with their SSO provider.
 function MyAccountPanel() {
+  const { t } = useI18n()
   const [info, setInfo] = useState<AccountInfo | null>(null)
   const [error, setError] = useState(false)
 
@@ -788,8 +796,8 @@ function MyAccountPanel() {
     return () => { alive = false }
   }, [])
 
-  if (error) return <div className="set-panel"><div className="muted" style={{ padding: 20 }}>Couldn't load your account — try reloading or signing in again.</div></div>
-  if (!info) return <div className="set-panel"><div className="muted" style={{ padding: 20 }}>Loading…</div></div>
+  if (error) return <div className="set-panel"><div className="muted" style={{ padding: 20 }}>{t('settings.loadAccountError')}</div></div>
+  if (!info) return <div className="set-panel"><div className="muted" style={{ padding: 20 }}>{t('common.loading')}</div></div>
 
   async function saveEmail() {
     if (!info || emailBusy) return
@@ -801,7 +809,7 @@ function MyAccountPanel() {
       setEmailOk(true)
       setTimeout(() => setEmailOk(false), 2500)
     } catch (e) {
-      setEmailErr(accountErrMsg(e, 'Could not change your email — please try again.'))
+      setEmailErr(accountErrMsg(e, t('settings.emailChangeError')))
     } finally {
       setEmailBusy(false)
     }
@@ -809,8 +817,8 @@ function MyAccountPanel() {
 
   async function savePassword() {
     if (pwBusy) return
-    if (newPw.length < 8) { setPwErr('New password must be at least 8 characters.'); return }
-    if (newPw !== confirmPw) { setPwErr('Those passwords don’t match.'); return }
+    if (newPw.length < 8) { setPwErr(t('settings.passwordLength')); return }
+    if (newPw !== confirmPw) { setPwErr(t('settings.passwordMismatch')); return }
     setPwBusy(true); setPwOk(false); setPwErr(null)
     try {
       await accountApi.changePassword({ currentPassword: curPw, newPassword: newPw })
@@ -818,7 +826,7 @@ function MyAccountPanel() {
       setPwOk(true)
       setTimeout(() => setPwOk(false), 2500)
     } catch (e) {
-      setPwErr(accountErrMsg(e, 'Could not change your password — please try again.'))
+      setPwErr(accountErrMsg(e, t('settings.passwordChangeError')))
     } finally {
       setPwBusy(false)
     }
@@ -829,58 +837,58 @@ function MyAccountPanel() {
   return (
     <div className="set-panel">
       <div className="set-head">
-        <div className="wf-serif set-head-t">My Account</div>
-        <div className="tiny muted" style={{ fontWeight: 600 }}>Login &amp; security</div>
+        <div className="wf-serif set-head-t">{t('settings.account')}</div>
+        <div className="tiny muted" style={{ fontWeight: 600 }}>{t('settings.accountSub')}</div>
       </div>
 
       {oidc ? (
         <SettingCard>
-          <div className="set-row2-t" style={{ marginBottom: 4 }}>Email</div>
+          <div className="set-row2-t" style={{ marginBottom: 4 }}>{t('settings.email')}</div>
           <div style={{ fontWeight: 700, fontSize: 15 }}>{info.email}</div>
           <div className="tiny muted" style={{ fontWeight: 600, marginTop: 8 }}>
-            Managed by your SSO provider — change it there.
+            {t('settings.ssoManaged')}
           </div>
         </SettingCard>
       ) : (
         <>
           <SettingCard>
-            <div className="set-row2-t" style={{ marginBottom: 12 }}>Change Email</div>
+            <div className="set-row2-t" style={{ marginBottom: 12 }}>{t('settings.changeEmail')}</div>
             <label className="field" style={{ marginBottom: 10 }}>
-              <span>Email</span>
+              <span>{t('settings.email')}</span>
               <input type="email" autoComplete="off" value={email} onChange={(e) => { setEmail(e.target.value); setEmailOk(false) }} placeholder="name@example.com" />
             </label>
             <label className="field" style={{ marginBottom: 10 }}>
-              <span>Current password</span>
-              <input type="password" autoComplete="current-password" value={emailPw} onChange={(e) => { setEmailPw(e.target.value); setEmailOk(false) }} placeholder="Enter your current password" />
+              <span>{t('settings.currentPassword')}</span>
+              <input type="password" autoComplete="current-password" value={emailPw} onChange={(e) => { setEmailPw(e.target.value); setEmailOk(false) }} placeholder={t('settings.enterCurrentPassword')} />
             </label>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
               <button type="button" className="btn btn-primary" onClick={saveEmail} disabled={emailBusy || !email.trim() || !emailPw || email.trim() === (info.email ?? '')}>
-                {emailBusy ? 'Saving…' : 'Update email'}
+                {emailBusy ? t('common.saving') : t('settings.updateEmail')}
               </button>
-              {emailOk && <span className="tiny" style={{ color: 'var(--success)', fontWeight: 700 }}>✓ Saved</span>}
+              {emailOk && <span className="tiny" style={{ color: 'var(--success)', fontWeight: 700 }}>{t('settings.saved')}</span>}
             </div>
             {emailErr && <div className="tiny" style={{ fontWeight: 700, color: 'var(--primary)', marginTop: 10 }}>{emailErr}</div>}
           </SettingCard>
 
           <SettingCard style={{ marginTop: 16 }}>
-            <div className="set-row2-t" style={{ marginBottom: 12 }}>Change Password</div>
+            <div className="set-row2-t" style={{ marginBottom: 12 }}>{t('settings.changePassword')}</div>
             <label className="field" style={{ marginBottom: 10 }}>
-              <span>Current password</span>
-              <input type="password" autoComplete="current-password" value={curPw} onChange={(e) => { setCurPw(e.target.value); setPwOk(false) }} placeholder="Enter your current password" />
+              <span>{t('settings.currentPassword')}</span>
+              <input type="password" autoComplete="current-password" value={curPw} onChange={(e) => { setCurPw(e.target.value); setPwOk(false) }} placeholder={t('settings.enterCurrentPassword')} />
             </label>
             <label className="field" style={{ marginBottom: 10 }}>
-              <span>New password</span>
-              <input type="password" autoComplete="new-password" value={newPw} onChange={(e) => { setNewPw(e.target.value); setPwOk(false) }} placeholder="At least 8 characters" />
+              <span>{t('settings.newPassword')}</span>
+              <input type="password" autoComplete="new-password" value={newPw} onChange={(e) => { setNewPw(e.target.value); setPwOk(false) }} placeholder={t('settings.passwordMin')} />
             </label>
             <label className="field" style={{ marginBottom: 10 }}>
-              <span>Confirm new password</span>
-              <input type="password" autoComplete="new-password" value={confirmPw} onChange={(e) => { setConfirmPw(e.target.value); setPwOk(false) }} placeholder="Re-enter new password" />
+              <span>{t('settings.confirmNewPassword')}</span>
+              <input type="password" autoComplete="new-password" value={confirmPw} onChange={(e) => { setConfirmPw(e.target.value); setPwOk(false) }} placeholder={t('settings.reenterPassword')} />
             </label>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
               <button type="button" className="btn btn-primary" onClick={savePassword} disabled={pwBusy || !curPw || !newPw || !confirmPw}>
-                {pwBusy ? 'Saving…' : 'Update password'}
+                {pwBusy ? t('common.saving') : t('settings.updatePassword')}
               </button>
-              {pwOk && <span className="tiny" style={{ color: 'var(--success)', fontWeight: 700 }}>✓ Saved</span>}
+              {pwOk && <span className="tiny" style={{ color: 'var(--success)', fontWeight: 700 }}>{t('settings.saved')}</span>}
             </div>
             {pwErr && <div className="tiny" style={{ fontWeight: 700, color: 'var(--primary)', marginTop: 10 }}>{pwErr}</div>}
           </SettingCard>
@@ -896,6 +904,7 @@ function MyAccountPanel() {
 // email/password sign-in, and available even to SSO members. Self-service (the API
 // route is self-or-admin). 4–8 digits.
 function KioskPinCard({ personId, hasPin }: { personId: string; hasPin: boolean }) {
+  const { t } = useI18n()
   const [pinSet, setPinSet] = useState(hasPin)
   const [pin, setPin] = useState('')
   const [busy, setBusy] = useState(false)
@@ -905,38 +914,38 @@ function KioskPinCard({ personId, hasPin }: { personId: string; hasPin: boolean 
   async function save() {
     setBusy(true); setErr(''); setOk(false)
     try { await accountApi.setPin(personId, pin); setPin(''); setPinSet(true); setOk(true) }
-    catch (e) { setErr(accountErrMsg(e, 'Could not set your PIN — please try again.')) }
+    catch (e) { setErr(accountErrMsg(e, t('settings.pinSetError'))) }
     finally { setBusy(false) }
   }
   async function remove() {
     setBusy(true); setErr(''); setOk(false)
     try { await accountApi.removePin(personId); setPinSet(false); setPin(''); setOk(true) }
-    catch (e) { setErr(accountErrMsg(e, 'Could not remove your PIN — please try again.')) }
+    catch (e) { setErr(accountErrMsg(e, t('settings.pinRemoveError'))) }
     finally { setBusy(false) }
   }
   return (
     <SettingCard style={{ marginTop: 16 }}>
-      <div className="set-row2-t" style={{ marginBottom: 4 }}>Kiosk PIN</div>
+      <div className="set-row2-t" style={{ marginBottom: 4 }}>{t('settings.kioskPin')}</div>
       <div className="tiny muted" style={{ fontWeight: 600, marginBottom: 12 }}>
-        An optional 4–8 digit PIN to open your profile on the shared kiosk. {pinSet ? 'A PIN is set.' : 'No PIN set.'}
+        {t('settings.kioskPinSub', { status: pinSet ? t('settings.pinSet') : t('settings.pinNotSet') })}
       </div>
       <label className="field" style={{ marginBottom: 10 }}>
-        <span>{pinSet ? 'New PIN' : 'PIN'}</span>
+        <span>{pinSet ? t('settings.newPin') : t('settings.pin')}</span>
         <input
           type="password"
           inputMode="numeric"
           autoComplete="off"
           value={pin}
           onChange={(e) => { setPin(e.target.value.replace(/\D/g, '').slice(0, 8)); setOk(false) }}
-          placeholder="4–8 digits"
+          placeholder={t('settings.pinDigits')}
         />
       </label>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         <button type="button" className="btn btn-primary" onClick={save} disabled={busy || !valid}>
-          {busy ? 'Saving…' : pinSet ? 'Update PIN' : 'Set PIN'}
+          {busy ? t('common.saving') : pinSet ? t('settings.updatePin') : t('settings.setPin')}
         </button>
-        {pinSet && <button type="button" className="btn btn-ghost" onClick={remove} disabled={busy}>Remove PIN</button>}
-        {ok && <span className="tiny" style={{ color: 'var(--success)', fontWeight: 700 }}>✓ Saved</span>}
+        {pinSet && <button type="button" className="btn btn-ghost" onClick={remove} disabled={busy}>{t('settings.removePin')}</button>}
+        {ok && <span className="tiny" style={{ color: 'var(--success)', fontWeight: 700 }}>{t('settings.saved')}</span>}
       </div>
       {err && <div className="tiny" style={{ fontWeight: 700, color: 'var(--primary)', marginTop: 10 }}>{err}</div>}
     </SettingCard>
@@ -944,14 +953,15 @@ function KioskPinCard({ personId, hasPin }: { personId: string; hasPin: boolean 
 }
 
 function FamilyPanel() {
+  const { t } = useI18n()
   const { household, members, loading, error, refetch } = useHouseholdSettings()
   const [editing, setEditing] = useState<SettingsMember | null>(null)
   const [adding, setAdding] = useState(false)
   const [nameDraft, setNameDraft] = useState<string | null>(null)
   const [locDraft, setLocDraft] = useState<string | null>(null)
 
-  if (loading) return <div className="muted" style={{ padding: 20 }}>Loading…</div>
-  if (error || !household) return <div className="muted" style={{ padding: 20 }}>Couldn't load your family — try reloading or signing in again.</div>
+  if (loading) return <div className="muted" style={{ padding: 20 }}>{t('common.loading')}</div>
+  if (error || !household) return <div className="muted" style={{ padding: 20 }}>{t('settings.loadFamilyError')}</div>
 
   async function saveHousehold(patch: Record<string, unknown>) {
     await personsApi.updateHousehold(patch)
@@ -971,8 +981,8 @@ function FamilyPanel() {
   return (
     <div className="set-panel">
       <div className="set-head">
-        <div className="wf-serif set-head-t">Family &amp; People</div>
-        <div className="tiny muted" style={{ fontWeight: 600 }}>{members.length} {members.length === 1 ? 'person' : 'people'}</div>
+        <div className="wf-serif set-head-t">{t('settings.familyPeople')}</div>
+        <div className="tiny muted" style={{ fontWeight: 600 }}>{members.length} {t(members.length === 1 ? 'settings.person' : 'settings.people')}</div>
       </div>
 
       <SettingCard>
@@ -980,10 +990,10 @@ function FamilyPanel() {
           <MemberRow key={m.id} m={m} onClick={() => setEditing(m)} />
         ))}
       </SettingCard>
-      <button type="button" className="btn btn-ghost set-add" onClick={() => setAdding(true)}>＋ Add a person</button>
+      <button type="button" className="btn btn-ghost set-add" onClick={() => setAdding(true)}>{t('settings.addPerson')}</button>
 
       <SettingCard style={{ marginTop: 18 }}>
-        <SettingRow icon="🏡" title="Household name" sub="Shows on the kiosk &amp; invites">
+        <SettingRow icon="🏡" title={t('settings.householdName')} sub={t('settings.householdNameSub')}>
           {nameDraft === null ? (
             <button type="button" className="sel" onClick={() => setNameDraft(household.name)}>{household.name} ▾</button>
           ) : (
@@ -1000,43 +1010,43 @@ function FamilyPanel() {
             />
           )}
         </SettingRow>
-        <SettingRow icon="🗓️" title="Week starts on">
+        <SettingRow icon="🗓️" title={t('settings.weekStarts')}>
           <select className="sel" value={household.weekStart} onChange={(e) => saveHousehold({ weekStart: e.target.value })}>
-            <option value="sunday">Sunday</option>
-            <option value="monday">Monday</option>
+            <option value="sunday">{t('settings.sunday')}</option>
+            <option value="monday">{t('settings.monday')}</option>
           </select>
         </SettingRow>
-        <SettingRow icon="🎨" title="Event style" sub="How calendar events are colored">
+        <SettingRow icon="🎨" title={t('settings.eventStyle')} sub={t('settings.eventStyleSub')}>
           <select
             className="sel"
-            aria-label="Event style"
+            aria-label={t('settings.eventStyle')}
             value={eventStyle(household)}
             onChange={(e) => saveDisplay({ eventStyle: e.target.value })}
           >
-            <option value="solid">Solid colors</option>
-            <option value="tinted">Tinted</option>
+            <option value="solid">{t('settings.solidColors')}</option>
+            <option value="tinted">{t('settings.tinted')}</option>
           </select>
         </SettingRow>
-        <SettingRow icon="👨‍👩‍👧‍👦" title="Family color" sub="Events with the whole family use this color">
+        <SettingRow icon="👨‍👩‍👧‍👦" title={t('settings.familyColor')} sub={t('settings.familyColorSub')}>
           <ColorPicker value={familyColorHex(household)} onChange={(hex) => saveDisplay({ familyColorHex: hex })} size={24} />
         </SettingRow>
-        <SettingRow icon="🌐" title="Time zone" sub="Used for every calendar &amp; reminder">
+        <SettingRow icon="🌐" title={t('settings.timezone')} sub={t('settings.timezoneSub')}>
           <select className="sel" value={household.timezone} onChange={(e) => saveHousehold({ timezone: e.target.value })}>
             {(TIMEZONES.includes(household.timezone) ? TIMEZONES : [household.timezone, ...TIMEZONES]).map((tz) => (
               <option key={tz} value={tz}>{tz.split('/').pop()?.replace('_', ' ')}</option>
             ))}
           </select>
         </SettingRow>
-        <SettingRow icon="📍" title="Location" sub="For local weather on the kiosk (weather wiring coming soon)">
+        <SettingRow icon="📍" title={t('settings.location')} sub={t('settings.locationSub')}>
           {locDraft === null ? (
             <button type="button" className="sel" onClick={() => setLocDraft(household.location ?? '')}>
-              {household.location || 'Set location'} ▾
+              {household.location || t('settings.setLocation')} ▾
             </button>
           ) : (
             <input
               className="set-inline-input"
               autoFocus
-              placeholder="City, State"
+              placeholder={t('settings.cityState')}
               value={locDraft}
               onChange={(e) => setLocDraft(e.target.value)}
               onBlur={() => {
@@ -1070,6 +1080,7 @@ const PROVIDER_ORDER: Provider[] = ['heuristic', 'ollama', 'anthropic', 'openai'
 // suggestions + auto-link. View what's been learned and forget any of it (a single
 // word, or all of it) — so a wrong pattern can be corrected.
 function LearnedMatches() {
+  const { t } = useI18n()
   const [groups, setGroups] = useState<MemoryGroup[] | null>(null)
   const [confirmClear, setConfirmClear] = useState(false)
   const load = () => goalCalendarApi.memory().then((d) => setGroups(d.groups)).catch(() => setGroups([]))
@@ -1089,7 +1100,7 @@ function LearnedMatches() {
 
   return (
     <SettingCard style={{ marginTop: 18 }}>
-      <div className="set-row2-t" style={{ marginBottom: 4 }}>Smart Matching</div>
+      <div className="set-row2-t" style={{ marginBottom: 4 }}>{t('settings.smartMatching')}</div>
       <div className="tiny muted" style={{ fontWeight: 600, marginBottom: 12 }}>
         Words Waffled has learned to link to a goal, from the events you’ve linked. Remove any that look wrong.
       </div>
@@ -1115,7 +1126,7 @@ function LearnedMatches() {
       )}
       {groups.length > 0 && (
         <button type="button" className="btn btn-ghost" style={{ marginTop: 14 }} onClick={clearAll}>
-          {confirmClear ? 'Tap again to reset everything' : 'Reset learned matches'}
+          {confirmClear ? t('settings.resetMatchesConfirm') : t('settings.resetMatches')}
         </button>
       )}
     </SettingCard>
@@ -1126,6 +1137,7 @@ function LearnedMatches() {
 // in the server environment (docker-compose / .env) — this only flips the active
 // provider + model. Providers without a key/host configured are disabled here.
 function AiPanel() {
+  const { t } = useI18n()
   const [cfg, setCfg] = useState<CaptureConfig | null>(null)
   const [provider, setProvider] = useState<Provider>('heuristic')
   const [model, setModel] = useState('')
@@ -1149,8 +1161,8 @@ function AiPanel() {
     }
   }, [])
 
-  if (error) return <div className="set-panel"><div className="muted" style={{ padding: 20 }}>Couldn't load AI settings — try reloading or signing in again.</div></div>
-  if (!cfg) return <div className="set-panel"><div className="muted" style={{ padding: 20 }}>Loading…</div></div>
+  if (error) return <div className="set-panel"><div className="muted" style={{ padding: 20 }}>{t('settings.aiLoadError')}</div></div>
+  if (!cfg) return <div className="set-panel"><div className="muted" style={{ padding: 20 }}>{t('common.loading')}</div></div>
 
   function pick(p: Provider) {
     if (p !== 'heuristic' && !cfg!.available[p]) return
@@ -1178,8 +1190,8 @@ function AiPanel() {
   return (
     <div className="set-panel">
       <div className="set-head">
-        <div className="wf-serif set-head-t">AI &amp; Capture</div>
-        <div className="tiny muted" style={{ fontWeight: 600 }}>Powers the “Add anything” bar</div>
+        <div className="wf-serif set-head-t">{t('settings.ai')}</div>
+        <div className="tiny muted" style={{ fontWeight: 600 }}>{t('settings.aiSub')}</div>
       </div>
 
       <SettingCard>
@@ -1198,13 +1210,13 @@ function AiPanel() {
             >
               <span className={`ai-radio ${on ? 'on' : ''}`} />
               <span style={{ flex: 1, textAlign: 'left' }}>
-                <span className="set-row2-t">{meta.label}</span>
+                <span className="set-row2-t">{p === 'heuristic' ? t('settings.onDevice') : p === 'openai' ? t('settings.openaiCompatible') : p === 'ollama' ? t('settings.localServer') : meta.label}</span>
                 <span className="tiny muted" style={{ display: 'block', fontWeight: 600 }}>
-                  {enabled ? meta.sub : `Set ${meta.envHint} in the server environment to enable`}
+                  {enabled ? (p === 'heuristic' ? t('settings.onDeviceSub') : p === 'anthropic' ? t('settings.mostAccurate') : p === 'openai' ? t('settings.openaiSub') : t('settings.localServerSub')) : t('settings.envEnable', { name: meta.envHint })}
                 </span>
               </span>
               {p !== 'heuristic' && (
-                <span className={`ai-badge ${enabled ? 'ok' : ''}`}>{enabled ? 'key detected' : 'not configured'}</span>
+                <span className={`ai-badge ${enabled ? 'ok' : ''}`}>{enabled ? t('settings.keyDetected') : t('settings.notConfigured')}</span>
               )}
             </button>
           )
@@ -1213,7 +1225,7 @@ function AiPanel() {
 
       {provider !== 'heuristic' && (
         <SettingCard style={{ marginTop: 16 }}>
-          <SettingRow icon="🧠" title="Model" sub="Overrides the server default for this provider">
+          <SettingRow icon="🧠" title={t('settings.model')} sub={t('settings.modelSub')}>
             <input
               className="set-inline-input"
               value={model}
@@ -1227,11 +1239,11 @@ function AiPanel() {
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16 }}>
         <button type="button" className="btn btn-primary" onClick={save} disabled={!dirty || saving}>
-          {saving ? 'Saving…' : 'Save'}
+          {saving ? t('common.saving') : t('common.save')}
         </button>
-        {saved && <span className="tiny" style={{ color: 'var(--success)', fontWeight: 700 }}>✓ Saved</span>}
+        {saved && <span className="tiny" style={{ color: 'var(--success)', fontWeight: 700 }}>{t('settings.saved')}</span>}
         <span className="tiny muted" style={{ fontWeight: 600 }}>
-          Keys are read from the server environment and never leave it.
+          {t('settings.keysServer')}
         </span>
       </div>
 
@@ -1251,6 +1263,7 @@ const MEAL_TIME_ROWS: Array<{ key: string; label: string; icon: string }> = [
 // list. Same list shown on the Lists grocery board's "Edit staples"; managed here
 // too so it lives with the other meal settings.
 function StaplesEditor() {
+  const { t } = useI18n()
   const [staples, setStaples] = useState<PantryStaple[] | null>(null)
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
@@ -1269,17 +1282,17 @@ function StaplesEditor() {
       <CardHeader title="Pantry Staples" sub="Assumed in the house — the grocery list leaves these off. Manage them here or from the Lists grocery board." />
       <form onSubmit={add} style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
         <input className="set-inline-input" style={{ flex: 1, width: 'auto' }} value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Add a staple… (e.g. Soy sauce)" />
-        <button type="submit" className="btn btn-primary" disabled={!draft.trim() || busy}>Add</button>
+        <button type="submit" className="btn btn-primary" disabled={!draft.trim() || busy}>{t('common.add')}</button>
       </form>
       <div className="grocery-staples">
         {(staples ?? []).map((s) => (
           <span key={s.id} className="staple-chip editable">
             {s.name}
-            <button type="button" aria-label={`Remove ${s.name}`} onClick={() => remove(s.id)}>×</button>
+            <button type="button" aria-label={t('common.remove', { name: s.name })} onClick={() => remove(s.id)}>×</button>
           </span>
         ))}
         {staples != null && staples.length === 0 && (
-          <div className="tiny muted" style={{ fontWeight: 600 }}>No staples yet — add the things you always have.</div>
+          <div className="tiny muted" style={{ fontWeight: 600 }}>{t('settings.noStaples')}</div>
         )}
       </div>
     </SettingCard>
@@ -1290,6 +1303,7 @@ function StaplesEditor() {
 // push to Google, whose calendar they belong to, who's invited, and the time each
 // meal type lands at. Changes re-sync meals already on the plan.
 function MealsPanel() {
+  const { t } = useI18n()
   const { persons } = usePersons()
   const [cfg, setCfg] = useState<MealCalendarSettings | null>(null)
   const [error, setError] = useState(false)
@@ -1327,8 +1341,8 @@ function MealsPanel() {
     return () => clearTimeout(t)
   }, [cfg])
 
-  if (error) return <div className="set-panel"><div className="muted" style={{ padding: 20 }}>Couldn't load meal settings — try reloading or signing in again.</div></div>
-  if (!cfg) return <div className="set-panel"><div className="muted" style={{ padding: 20 }}>Loading…</div></div>
+  if (error) return <div className="set-panel"><div className="muted" style={{ padding: 20 }}>{t('settings.mealsLoadError')}</div></div>
+  if (!cfg) return <div className="set-panel"><div className="muted" style={{ padding: 20 }}>{t('common.loading')}</div></div>
 
   // null participantIds == the whole family; resolve to concrete ids for the chips.
   const allIds = persons.map((p) => p.id)
@@ -1342,21 +1356,21 @@ function MealsPanel() {
   return (
     <div className="set-panel">
       <div className="set-head" style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
-        <div className="wf-serif set-head-t">Meals</div>
-        {savedFlash && <span className="tiny" style={{ color: 'var(--success)', fontWeight: 700 }}>✓ Saved · meals updated</span>}
-        <span className="tiny muted" style={{ marginLeft: 'auto', fontWeight: 600 }}>Changes save automatically</span>
+        <div className="wf-serif set-head-t">{t('settings.meals')}</div>
+        {savedFlash && <span className="tiny" style={{ color: 'var(--success)', fontWeight: 700 }}>{t('settings.mealsUpdated')}</span>}
+        <span className="tiny muted" style={{ marginLeft: 'auto', fontWeight: 600 }}>{t('settings.autoSave')}</span>
       </div>
 
       <SettingCard>
-        <SettingRow icon="📅" title="Add planned meals to the calendar" sub="Each meal you plan shows on the Waffled calendar, linked to its recipe.">
+        <SettingRow icon="📅" title={t('settings.mealsCalendar')} sub={t('settings.mealsCalendarSub')}>
           <input type="checkbox" className="set-check" checked={cfg.addToCalendar} onChange={(e) => update({ addToCalendar: e.target.checked })} />
         </SettingRow>
-        <SettingRow icon="🔄" title="Sync them to Google Calendar" sub="Also push meal events to the calendar below, so they show on everyone’s phones.">
+        <SettingRow icon="🔄" title={t('settings.mealsGoogle')} sub={t('settings.mealsGoogleSub')}>
           <input type="checkbox" className="set-check" disabled={!cfg.addToCalendar} checked={cfg.addToCalendar && cfg.pushToGoogle} onChange={(e) => update({ pushToGoogle: e.target.checked })} />
         </SettingRow>
-        <SettingRow icon="👤" title="Add to this person’s calendar" sub="Meal events use this person’s color and their Google write-target calendar.">
+        <SettingRow icon="👤" title={t('settings.mealsPerson')} sub={t('settings.mealsPersonSub')}>
           <select className="sel" disabled={!cfg.addToCalendar} value={cfg.calendarPersonId ?? ''} onChange={(e) => update({ calendarPersonId: e.target.value || null })}>
-            <option value="">Unassigned</option>
+            <option value="">{t('settings.unassigned')}</option>
             {persons.map((p) => (
               <option key={p.id} value={p.id}>{p.name}</option>
             ))}
@@ -1365,11 +1379,11 @@ function MealsPanel() {
       </SettingCard>
 
       <SettingCard style={{ marginTop: 16 }}>
-        <SettingRow icon="🧑‍🤝‍🧑" title="Who’s invited" sub={cfg.participantIds === null ? 'The whole family' : `${selected.length} ${selected.length === 1 ? 'person' : 'people'}`}>
+        <SettingRow icon="🧑‍🤝‍🧑" title={t('settings.invited')} sub={cfg.participantIds === null ? t('settings.theWholeFamily') : `${selected.length} ${t(selected.length === 1 ? 'settings.person' : 'settings.people')}`}>
           <div />
         </SettingRow>
         <div className="meal-chips">
-          <button type="button" className={`tag ${cfg.participantIds === null ? 'on' : ''}`} disabled={!cfg.addToCalendar} onClick={() => update({ participantIds: null })}>Whole family</button>
+          <button type="button" className={`tag ${cfg.participantIds === null ? 'on' : ''}`} disabled={!cfg.addToCalendar} onClick={() => update({ participantIds: null })}>{t('settings.wholeFamily')}</button>
           {persons.map((p) => (
             <button key={p.id} type="button" className={`tag ${selected.includes(p.id) ? 'on' : ''}`} disabled={!cfg.addToCalendar} onClick={() => toggleParticipant(p.id)}>
               {p.avatarEmoji ? `${p.avatarEmoji} ` : ''}{p.name}
@@ -1381,12 +1395,12 @@ function MealsPanel() {
       {/* Meal times & reminders — the "when" of planned meals, in two sections:
           the per-meal-type times, and the optional same-day thaw reminder. */}
       <SettingCard style={{ marginTop: 16 }}>
-        <CardHeader title="Meal Times & Reminders" />
+        <CardHeader title={t('settings.mealTimesReminders')} />
 
         {/* Section 1 — the time each meal type lands on the calendar. */}
-        <CardHeader title="Meal Times" sub="When each meal lands on the calendar." mid />
+        <CardHeader title={t('settings.mealTimes')} sub={t('settings.mealTimesSub')} mid />
         {MEAL_TIME_ROWS.map((m) => (
-          <SettingRow key={m.key} icon={m.icon} title={m.label}>
+          <SettingRow key={m.key} icon={m.icon} title={t(`settings.${m.key}`)}>
             <input
               type="time"
               className="set-inline-input"
@@ -1398,11 +1412,11 @@ function MealsPanel() {
         ))}
 
         {/* Section 2 — the same-day "get it out of the freezer" nudge. */}
-        <CardHeader title="Thaw Reminder" sub="A same-day calendar reminder to pull the protein/ingredients out of the freezer for that day’s planned meal." mid />
-        <SettingRow icon="🧊" title="Remind me to thaw" sub="Off by default — turn on to add the reminder.">
+        <CardHeader title={t('settings.thawReminder')} sub={t('settings.thawReminderSub')} mid />
+        <SettingRow icon="🧊" title={t('settings.remindThaw')} sub={t('settings.remindThawSub')}>
           <input type="checkbox" className="set-check" checked={cfg.prepReminder} onChange={(e) => update({ prepReminder: e.target.checked })} />
         </SettingRow>
-        <SettingRow icon="⏰" title="Remind me at" sub="Time the reminder lands, on the meal’s own day.">
+        <SettingRow icon="⏰" title={t('settings.remindAt')} sub={t('settings.remindAtSub')}>
           <input
             type="time"
             className="set-inline-input"
@@ -1411,7 +1425,7 @@ function MealsPanel() {
             onChange={(e) => update({ prepReminderTime: e.target.value })}
           />
         </SettingRow>
-        <div className="set-field-label">For Which Meals</div>
+        <div className="set-field-label">{t('settings.forMeals')}</div>
         <div className="meal-chips">
           {MEAL_TIME_ROWS.map((m) => {
             const on = cfg.prepReminderMealTypes.includes(m.key)
@@ -1467,6 +1481,7 @@ function feedHost(url: string): string {
 }
 
 export function CalendarFeedsCard({ feeds, onChanged }: { feeds: IcsFeed[]; onChanged: () => void }) {
+  const { t } = useI18n()
   const { persons } = usePersons()
   const [url, setUrl] = useState('')
   const [name, setName] = useState('')
@@ -1487,7 +1502,7 @@ export function CalendarFeedsCard({ feeds, onChanged }: { feeds: IcsFeed[]; onCh
       // 15-minute cycle; refresh again when it lands (success or error badge).
       calendarsApi.syncFeed(feed.id).then(onChanged, onChanged)
     } catch {
-      setErr('Could not add that feed — check the URL and try again.')
+      setErr(t('settings.feedAddError'))
     } finally {
       setBusy(false)
     }
@@ -1522,7 +1537,7 @@ export function CalendarFeedsCard({ feeds, onChanged }: { feeds: IcsFeed[]; onCh
   }
 
   async function remove(f: IcsFeed) {
-    if (!window.confirm('Remove this calendar feed? Its imported events are removed too.')) return
+    if (!window.confirm(t('settings.removeFeedConfirm'))) return
     await calendarsApi.removeFeed(f.id)
     onChanged()
   }
@@ -1543,7 +1558,7 @@ export function CalendarFeedsCard({ feeds, onChanged }: { feeds: IcsFeed[]; onCh
               {f.name ?? feedHost(f.url)}
             </div>
             <div className="tiny muted" style={{ fontWeight: 600 }}>
-              {feedHost(f.url)} · {f.lastSyncedAt ? `Last synced ${fmtWhen(f.lastSyncedAt)}` : 'Not synced yet'}
+              {feedHost(f.url)} · {f.lastSyncedAt ? `Last synced ${fmtWhen(f.lastSyncedAt)}` : t('settings.notSynced')}
               {f.lastError && <span style={{ color: 'var(--primary)', fontWeight: 700 }}> · ⚠ {f.lastError}</span>}
             </div>
           </div>
@@ -1554,7 +1569,7 @@ export function CalendarFeedsCard({ feeds, onChanged }: { feeds: IcsFeed[]; onCh
             title="Who this feed belongs to (sets event color)"
             aria-label={`Person for feed ${f.name ?? feedHost(f.url)}`}
           >
-            <option value="">Unassigned</option>
+            <option value="">{t('settings.unassigned')}</option>
             {persons.map((p) => (
               <option key={p.id} value={p.id}>{p.name}</option>
             ))}
@@ -1603,15 +1618,15 @@ export function CalendarFeedsCard({ feeds, onChanged }: { feeds: IcsFeed[]; onCh
 
       <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap', marginTop: feeds.length ? 12 : 0 }}>
         <label className="field" style={{ flex: '2 1 220px' }}>
-          <span>Feed URL</span>
+          <span>{t('settings.feedUrl')}</span>
           <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…/calendar.ics" />
         </label>
         <label className="field" style={{ flex: '1 1 140px' }}>
-          <span>Name (optional)</span>
+          <span>{t('settings.nameOptional')}</span>
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="School calendar" />
         </label>
         <button type="button" className="btn btn-primary" onClick={add} disabled={busy || !canAdd}>
-          {busy ? 'Adding…' : 'Add feed'}
+          {busy ? t('common.adding') : t('settings.addFeed')}
         </button>
       </div>
       {err && <div className="tiny" style={{ fontWeight: 700, color: 'var(--primary)', marginTop: 8 }}>{err}</div>}
@@ -1620,6 +1635,7 @@ export function CalendarFeedsCard({ feeds, onChanged }: { feeds: IcsFeed[]; onCh
 }
 
 function CalendarsPanel() {
+  const { t } = useI18n()
   const [status, setStatus] = useState<CalendarStatus | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
@@ -1640,8 +1656,8 @@ function CalendarsPanel() {
   }
   useEffect(load, [])
 
-  if (loading) return <div className="set-panel"><div className="muted" style={{ padding: 20 }}>Loading…</div></div>
-  if (error || !status) return <div className="set-panel"><div className="muted" style={{ padding: 20 }}>Couldn't load calendars — try reloading or signing in again.</div></div>
+  if (loading) return <div className="set-panel"><div className="muted" style={{ padding: 20 }}>{t('common.loading')}</div></div>
+  if (error || !status) return <div className="set-panel"><div className="muted" style={{ padding: 20 }}>{t('settings.calendarsLoadError')}</div></div>
 
   async function connect(provider: 'google' | 'microsoft' = 'google') {
     setConnecting(true)
@@ -1669,7 +1685,7 @@ function CalendarsPanel() {
       )
       load()
     } catch {
-      setSyncMsg('Sync failed — check the server logs.')
+      setSyncMsg(t('settings.syncFailed'))
     } finally {
       setSyncing(false)
     }
@@ -1700,7 +1716,7 @@ function CalendarsPanel() {
     load()
   }
   async function disconnect(accountId: string) {
-    if (!window.confirm('Disconnect this Google account? Its calendars stop syncing (already-imported events stay).')) return
+    if (!window.confirm(t('settings.disconnectCalendar'))) return
     await calendarsApi.disconnectAccount(accountId)
     load()
   }
@@ -1727,7 +1743,7 @@ function CalendarsPanel() {
             {cal.isPrimary && <span className="tiny muted" style={{ fontWeight: 600 }}> · primary</span>}
           </div>
           <div className="tiny muted" style={{ fontWeight: 600 }}>
-            {cal.selected ? `Last synced ${fmtWhen(cal.lastSyncedAt)}` : 'Sync off'}
+            {cal.selected ? `Last synced ${fmtWhen(cal.lastSyncedAt)}` : t('settings.syncOff')}
             {cal.accessRole ? ` · ${cal.accessRole}` : ''}
             {cal.selected && (
               <span style={{ fontWeight: 700 }}>
@@ -1755,7 +1771,7 @@ function CalendarsPanel() {
           onChange={(e) => setPerson(cal, e.target.value)}
           title="Who owns this calendar (sets event color)"
         >
-          <option value="">Unassigned</option>
+          <option value="">{t('settings.unassigned')}</option>
           {persons.map((p) => (
             <option key={p.id} value={p.id}>{p.name}</option>
           ))}
@@ -1784,13 +1800,10 @@ function CalendarsPanel() {
   if (!status.configured && !status.microsoftConfigured) {
     return (
       <div className="set-panel">
-        <div className="set-head"><div className="wf-serif set-head-t">Calendars</div></div>
+        <div className="set-head"><div className="wf-serif set-head-t">{t('settings.calendars')}</div></div>
         <SettingCard>
           <div className="muted" style={{ fontWeight: 600 }}>
-            No calendar provider is configured on the server yet. For Google set <code>GOOGLE_CLIENT_ID</code>,{' '}
-            <code>GOOGLE_CLIENT_SECRET</code>, <code>GOOGLE_CALENDAR_REDIRECT_URI</code>; for Outlook set{' '}
-            <code>MS_CLIENT_ID</code>, <code>MS_CLIENT_SECRET</code>, <code>MS_CALENDAR_REDIRECT_URI</code> — plus{' '}
-            <code>TOKEN_ENCRYPTION_KEY</code> — then reload.
+            {t('settings.calendarNotConfigured')}
           </div>
         </SettingCard>
         {/* Feed subscriptions need no OAuth provider — they work regardless. */}
@@ -1802,10 +1815,10 @@ function CalendarsPanel() {
   return (
     <div className="set-panel">
       <div className="set-head">
-        <div className="wf-serif set-head-t">Calendars</div>
+        <div className="wf-serif set-head-t">{t('settings.calendars')}</div>
         {status.connected && (
           <button type="button" className="btn btn-primary" onClick={syncNow} disabled={syncing}>
-            {syncing ? 'Syncing…' : '↻ Sync now'}
+            {syncing ? t('common.syncing') : t('settings.syncNow')}
           </button>
         )}
       </div>
@@ -1814,19 +1827,19 @@ function CalendarsPanel() {
 
       {!status.connected ? (
         <SettingCard>
-          <div className="set-row2-t" style={{ marginBottom: 6 }}>Connect a calendar account</div>
+          <div className="set-row2-t" style={{ marginBottom: 6 }}>{t('settings.connectCalendar')}</div>
           <div className="tiny muted" style={{ fontWeight: 600, marginBottom: 16 }}>
             Bring your family’s calendars into Waffled. You’ll pick which ones sync and who each one belongs to.
           </div>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             {status.configured && (
               <button type="button" className="btn btn-primary" onClick={() => connect('google')} disabled={connecting}>
-                {connecting ? 'Opening…' : 'Connect Google Calendar'}
+                {connecting ? t('settings.opening') : t('settings.connectGoogle')}
               </button>
             )}
             {status.microsoftConfigured && (
               <button type="button" className="btn btn-primary" onClick={() => connect('microsoft')} disabled={connecting}>
-                {connecting ? 'Opening…' : 'Connect Outlook Calendar'}
+                {connecting ? t('settings.opening') : t('settings.connectOutlook')}
               </button>
             )}
           </div>
@@ -1896,20 +1909,20 @@ function CalendarsPanel() {
                 </div>
                 {acct.lastSyncError && (
                   <div className="cal-acct-error">
-                    ⚠ Problem syncing — Google sign-in expired or was revoked. Click <b>Reconnect</b> to fix (your calendar assignments are kept).
+                    {t('settings.syncProblem')}
                   </div>
                 )}
 
                 {open && (
                   <div className="cal-acct-body">
                     <div className="cal-bulk">
-                      <button type="button" className="linkbtn" onClick={() => setAll(shown, true)}>Sync all</button>
+                      <button type="button" className="linkbtn" onClick={() => setAll(shown, true)}>{t('settings.syncAll')}</button>
                       <span className="muted">·</span>
-                      <button type="button" className="linkbtn" onClick={() => setAll(shown, false)}>Sync none</button>
+                      <button type="button" className="linkbtn" onClick={() => setAll(shown, false)}>{t('settings.syncNone')}</button>
                     </div>
                     {shown.length === 0 ? (
                       <div className="muted" style={{ padding: '6px 2px 2px', fontWeight: 600 }}>
-                        {all.length === 0 ? 'No calendars on this account.' : 'No calendars match.'}
+                        {all.length === 0 ? t('settings.noAccountCalendars') : t('settings.noCalendarMatches')}
                       </div>
                     ) : (
                       shown.map((cal) => <CalRow key={cal.id} cal={cal} />)
@@ -1950,6 +1963,7 @@ const BIRTHDAY_HORIZON_OPTIONS: { days: number; label: string }[] = [
 ]
 
 function CountdownsSettings() {
+  const { t } = useI18n()
   const { sleeps, birthdayHorizonDays } = useCountdowns()
   const [on, setOn] = useState(sleeps)
   const [horizon, setHorizon] = useState(birthdayHorizonDays)
@@ -1976,11 +1990,11 @@ function CountdownsSettings() {
         onClick={(e) => { e.preventDefault(); toggle(!on) }}
       >
         <span className={`toggle ${on ? 'on' : ''}`} role="switch" aria-checked={on} aria-label="Count in sleeps instead of days" />
-        <span>Count in “sleeps” instead of “days” (kid-friendly)</span>
+        <span>{t('settings.sleeps')}</span>
       </label>
 
       <div style={{ marginTop: 18 }}>
-        <div className="set-row2-t" style={{ marginBottom: 4 }}>Show birthdays within</div>
+        <div className="set-row2-t" style={{ marginBottom: 4 }}>{t('settings.birthdaysWithin')}</div>
         <div className="tiny muted" style={{ fontWeight: 600, marginBottom: 10 }}>
           A birthday only appears on the countdown list once it’s this close — so the whole family’s birthdays don’t crowd it a year out.
         </div>
@@ -2006,6 +2020,7 @@ function CountdownsSettings() {
 // Currency catalog management (the "spend"/economy config). Admin-only writes;
 // inline edits save on blur, default/spendable toggle immediately.
 function CurrencyRow({ c, canDelete }: { c: Currency; canDelete: boolean }) {
+  const { t } = useI18n()
   const [label, setLabel] = useState(c.label)
   const [symbol, setSymbol] = useState(c.symbol ?? '')
   const [confirmDel, setConfirmDel] = useState(false)
@@ -2017,13 +2032,13 @@ function CurrencyRow({ c, canDelete }: { c: Currency; canDelete: boolean }) {
       <input className="cur-label" value={label} aria-label="Label"
         onChange={(e) => setLabel(e.target.value)} onBlur={() => label.trim() && label !== c.label && save({ label: label.trim() })} />
       <button type="button" className={`cur-flag ${c.isDefault ? 'on' : ''}`} title="Default earn currency"
-        onClick={() => !c.isDefault && save({ isDefault: true })}>{c.isDefault ? '★ Default' : 'Make default'}</button>
+        onClick={() => !c.isDefault && save({ isDefault: true })}>{c.isDefault ? t('settings.default') : t('settings.makeDefault')}</button>
       <button type="button" className={`cur-flag ${c.spendable ? 'on' : ''}`} title="Can be spent on rewards"
-        onClick={() => save({ spendable: !c.spendable })}>{c.spendable ? 'Spendable' : 'Earn-only'}</button>
+        onClick={() => save({ spendable: !c.spendable })}>{c.spendable ? t('settings.spendable') : t('settings.earnOnly')}</button>
       {canDelete && !c.isDefault ? (
         <button type="button" className="cur-del" aria-label={`Delete ${c.label}`}
           onClick={() => (confirmDel ? currenciesApi.remove(c.id).catch(() => {}) : setConfirmDel(true))}>
-          {confirmDel ? 'Tap to confirm' : '×'}
+          {confirmDel ? t('settings.tapConfirm') : '×'}
         </button>
       ) : <span className="cur-del-sp" />}
     </div>
@@ -2034,6 +2049,7 @@ function CurrencyRow({ c, canDelete }: { c: Currency; canDelete: boolean }) {
 // off → kids redeem instantly with currency they've already earned (a balance guard
 // still applies server-side). Optimistic toggle, reverts on failure.
 function RewardApprovalCard() {
+  const { t } = useI18n()
   const [requireApproval, setRequireApproval] = useState<boolean | null>(null)
   const [saving, setSaving] = useState(false)
   useEffect(() => {
@@ -2054,7 +2070,7 @@ function RewardApprovalCard() {
   }
   return (
     <SettingCard style={{ marginTop: 14 }}>
-      <CardHeader title="Reward Approvals" sub={<>Sets the default for <b>new</b> rewards. On = a parent OKs the purchase; off = the kid redeems instantly with what they’ve earned. Even if off, each reward can have an override to explicitly require approval.</>} />
+      <CardHeader title={t('settings.rewardApprovals')} />
       <SettingRow icon="✅" title="New rewards need a parent’s OK by default"
         sub={requireApproval === false ? 'Off — new rewards are instant unless you switch them on.' : 'On — new rewards wait in the approval queue unless you switch them off.'}>
         <input type="checkbox" className="set-check" checked={requireApproval ?? true}
@@ -2144,6 +2160,7 @@ function ChoreProofsDrawer({
   onChanged: (next: StoredProof[]) => void
   onClose: () => void
 }) {
+  const { t } = useI18n()
   const [busy, setBusy] = useState<string | null>(null)
   const [enlarge, setEnlarge] = useState<StoredProof | null>(null)
   const [confirmClear, setConfirmClear] = useState(false)
@@ -2170,16 +2187,16 @@ function ChoreProofsDrawer({
         <div className="proof-drawer" role="dialog" aria-label="Stored proof photos" onClick={(e) => e.stopPropagation()}>
           <div className="proof-drawer-head">
             <button type="button" className="pill" style={{ cursor: 'pointer' }} onClick={onClose}>‹ Back</button>
-            <div className="wf-serif">Stored proof photos</div>
+            <div className="wf-serif">{t('settings.proofPhotos')}</div>
           </div>
           <div className="proof-drawer-body">
             <div className="tiny muted" style={{ fontWeight: 600, marginBottom: 14 }}>
               Proof photos still on the server. They’re removed automatically per your retention setting — delete any here to clear them sooner.
             </div>
             {proofs === null ? (
-              <div className="muted" style={{ fontWeight: 600 }}>Loading…</div>
+              <div className="muted" style={{ fontWeight: 600 }}>{t('common.loading')}</div>
             ) : count === 0 ? (
-              <div className="muted" style={{ fontWeight: 600 }}>No stored proof photos.</div>
+              <div className="muted" style={{ fontWeight: 600 }}>{t('settings.noProofPhotos')}</div>
             ) : (
               <>
                 <div className="proof-grid">
@@ -2192,7 +2209,7 @@ function ChoreProofsDrawer({
                         <div className="proof-title">{p.emoji ? `${p.emoji} ` : ''}{p.choreTitle}</div>
                         <div className="tiny muted">{p.personName ?? '—'}{fmtProofDate(p.completedAt) ? ` · ${fmtProofDate(p.completedAt)}` : ''}</div>
                       </div>
-                      <button type="button" className="proof-del" aria-label={`Delete proof for ${p.choreTitle}`} disabled={busy === p.instanceId} onClick={() => del(p.instanceId)}>🗑</button>
+                      <button type="button" className="proof-del" aria-label={t('settings.deleteProof', { name: p.choreTitle })} disabled={busy === p.instanceId} onClick={() => del(p.instanceId)}>🗑</button>
                     </div>
                   ))}
                 </div>
@@ -2207,7 +2224,7 @@ function ChoreProofsDrawer({
       {enlarge && (
         <div className="modal-overlay" style={{ zIndex: 1100 }} onClick={() => setEnlarge(null)}>
           <div className="modal-card chore-proof-modal" onClick={(e) => e.stopPropagation()}>
-            <button type="button" className="modal-close" aria-label="Close" onClick={() => setEnlarge(null)}>×</button>
+            <button type="button" className="modal-close" aria-label={t('common.close')} onClick={() => setEnlarge(null)}>×</button>
             <div className="cpm-head"><div className="cpm-head-tx">
               <div className="cpm-title">{enlarge.emoji ? `${enlarge.emoji} ` : ''}{enlarge.choreTitle}</div>
               <div className="cpm-sub">{enlarge.personName ?? '—'}{fmtProofDate(enlarge.completedAt) ? ` · ${fmtProofDate(enlarge.completedAt)}` : ''}</div>
@@ -2227,6 +2244,7 @@ function ChoreProofsDrawer({
 }
 
 function RewardsSettingsPanel() {
+  const { t } = useI18n()
   const { currencies, loading } = useCurrencies()
   const [newLabel, setNewLabel] = useState('')
   const [newSymbol, setNewSymbol] = useState('')
@@ -2244,17 +2262,17 @@ function RewardsSettingsPanel() {
   return (
     <div className="set-panel">
       <div className="set-head">
-        <div className="wf-serif set-head-t">Chores &amp; Rewards</div>
-        <div className="tiny muted" style={{ fontWeight: 600 }}>The currencies your family earns &amp; spends</div>
+        <div className="wf-serif set-head-t">{t('settings.choresRewards')}</div>
+        <div className="tiny muted" style={{ fontWeight: 600 }}>{t('settings.currenciesSub')}</div>
       </div>
       {/* Economy widget — the currencies a family earns/spends and the trades
           between them belong together, so box them into one card with two
           subsections. */}
       <SettingCard>
         <CardHeader title="Currencies & Conversions" />
-        <CardHeader title="Currencies" sub={<>Rename stars, add your own, or run several. The <b>default</b> is what new chores award; <b>spendable</b> ones can buy rewards. Set up trades between them under <b>Conversions</b> below.</>} mid />
+        <CardHeader title={t('settings.currencies')} mid />
         {loading ? (
-          <div className="muted" style={{ fontWeight: 600 }}>Loading…</div>
+          <div className="muted" style={{ fontWeight: 600 }}>{t('common.loading')}</div>
         ) : (
           currencies.map((c) => <CurrencyRow key={c.id} c={c} canDelete={currencies.length > 1} />)
         )}
@@ -2277,6 +2295,7 @@ function RewardsSettingsPanel() {
 }
 
 function ConversionsSection({ currencies }: { currencies: Currency[] }) {
+  const { t } = useI18n()
   const { conversions } = useConversions()
   const [fromCur, setFromCur] = useState(currencies[0]?.key ?? '')
   const [toCur, setToCur] = useState(currencies[1]?.key ?? '')
@@ -2295,7 +2314,7 @@ function ConversionsSection({ currencies }: { currencies: Currency[] }) {
   }
   return (
     <>
-      <CardHeader title="Conversions" sub={<>Let the family trade up a tier — e.g. <b>10 ⭐ → 1 💵</b>. Anyone can convert their own balance on the Rewards tab.</>} mid />
+      <CardHeader title={t('settings.conversions')} mid />
       {conversions.map((c) => (
         <div key={c.id} className="conv-row">
           <span className="conv-rate">
@@ -2303,7 +2322,7 @@ function ConversionsSection({ currencies }: { currencies: Currency[] }) {
             <span className="conv-arrow">→</span>
             {c.toAmount} {c.to.symbol ?? sym(c.toCurrency)} {c.to.label ?? c.toCurrency}
           </span>
-          <button type="button" className="cur-del" aria-label="Delete conversion" onClick={() => conversionsApi.remove(c.id)}>×</button>
+          <button type="button" className="cur-del" aria-label={t('settings.deleteConversion')} onClick={() => conversionsApi.remove(c.id)}>×</button>
         </div>
       ))}
       <div className="conv-add">
@@ -2326,6 +2345,7 @@ function ConversionsSection({ currencies }: { currencies: Currency[] }) {
 // which fires waffled:auth-changed and drops the kiosk back to the Login screen.
 // Tap-to-confirm so a stray touch on the wall-mounted kiosk doesn't sign everyone out.
 function SignOutButton({ className }: { className?: string }) {
+  const { t } = useI18n()
   const [confirm, setConfirm] = useState(false)
   const [busy, setBusy] = useState(false)
   async function signOut() {
@@ -2339,7 +2359,7 @@ function SignOutButton({ className }: { className?: string }) {
   }
   return (
     <button type="button" className={className ?? 'btn btn-ghost'} onClick={signOut} disabled={busy}>
-      {busy ? 'Signing out…' : confirm ? 'Tap again to sign out' : '⏻ Sign out'}
+      {busy ? t('settings.signingOut') : confirm ? t('settings.signOutConfirm') : t('settings.signOut')}
     </button>
   )
 }
@@ -2366,6 +2386,7 @@ function Switch({ checked, disabled, onChange, ariaLabel }: { checked: boolean; 
 // Enable/disable optional modules for this household. Available modules use a live
 // toggle and, when on, reveal their own settings; planned ones show "Coming soon".
 function ModulesPanel() {
+  const { t } = useI18n()
   const { household } = useHousehold()
   const [saving, setSaving] = useState<string | null>(null)
 
@@ -2384,8 +2405,8 @@ function ModulesPanel() {
   return (
     <div className="set-panel">
       <div className="set-head">
-        <div className="wf-serif set-head-t">Modules</div>
-        <div className="set-head-sub">Optional features for your household — turn on just what you want.</div>
+        <div className="wf-serif set-head-t">{t('settings.modules')}</div>
+        <div className="set-head-sub">{t('settings.modulesSub')}</div>
       </div>
       <div className="set-modules">
         {MODULES.map((m) => {
@@ -2402,7 +2423,7 @@ function ModulesPanel() {
                 {available ? (
                   <Switch checked={on} disabled={saving === m.key} onChange={(v) => toggle(m.key, v)} ariaLabel={`Enable ${m.name}`} />
                 ) : (
-                  <span className="set-module-soon">Coming soon</span>
+                  <span className="set-module-soon">{t('settings.comingSoon')}</span>
                 )}
               </div>
               {on && m.hasSettings && m.key === 'pantry' && <PantrySettings />}
@@ -2419,6 +2440,7 @@ function ModulesPanel() {
 // Pantry's own settings (shown when the module is on): the Today-card toggle and
 // the editable location list. Saves immediately; refreshes household so Today reacts.
 function PantrySettings() {
+  const { t } = useI18n()
   const { locations, showOnToday, avoidAllergens, lowThreshold, locationIcons, staleMonths, loading } = usePantry()
   const [list, setList] = useState<string[]>([])
   const [adding, setAdding] = useState('')
@@ -2463,11 +2485,11 @@ function PantrySettings() {
   return (
     <div className="set-module-settings">
       <div className="set-module-setrow">
-        <span>Show a card on Today</span>
+        <span>{t('settings.showToday')}</span>
         <Switch checked={show} onChange={toggleShow} ariaLabel="Show pantry on Today" />
       </div>
       <div className="set-module-setrow">
-        <span>Running low at (or below)</span>
+        <span>{t('settings.lowAt')}</span>
         <input type="number" min="0" step="any" className="pl-low-input" value={low}
           onChange={(e) => setLow(e.target.value)} onBlur={() => commitLow(low)}
           onKeyDown={(e) => { if (e.key === 'Enter') commitLow(low) }} aria-label="Running low threshold" />
@@ -2476,7 +2498,7 @@ function PantrySettings() {
         Default for all items; set a per-item override in the item editor’s “Warn below”.
       </div>
       <div className="set-module-setrow">
-        <span>Flag items older than (months)</span>
+        <span>{t('settings.oldAfter')}</span>
         <input type="number" min="1" max="60" className="pl-low-input" value={stale}
           onChange={(e) => setStale(e.target.value)} onBlur={() => commitStale(stale)}
           onKeyDown={(e) => { if (e.key === 'Enter') commitStale(stale) }} aria-label="Old item threshold (months)" />
@@ -2484,7 +2506,7 @@ function PantrySettings() {
       <div className="set-module-desc" style={{ marginBottom: 4 }}>
         Items on hand longer than this get a 🕰️ age badge and a “Been a while” group.
       </div>
-      <div className="set-module-setlabel">Allergens to avoid</div>
+      <div className="set-module-setlabel">{t('settings.allergens')}</div>
       <div className="set-module-desc" style={{ marginBottom: 8 }}>
         Items containing these (from Open Food Facts) get a red warning — e.g. a gluten-free home.
       </div>
@@ -2501,7 +2523,7 @@ function PantrySettings() {
           </button>
         ))}
       </div>
-      <div className="set-module-setlabel">Locations</div>
+      <div className="set-module-setlabel">{t('settings.locations')}</div>
       <div className="pantry-loc-list">
         {list.map((l, i) => (
           <div className="pantry-loc-row" key={i}>
@@ -2519,7 +2541,7 @@ function PantrySettings() {
               onChange={(e) => setList((ls) => ls.map((x, j) => (j === i ? e.target.value : x)))}
               onBlur={() => commitLocations(list)}
             />
-            <button type="button" aria-label={`Remove ${l}`} onClick={() => commitLocations(list.filter((_, j) => j !== i))}>×</button>
+            <button type="button" aria-label={t('common.remove', { name: l })} onClick={() => commitLocations(list.filter((_, j) => j !== i))}>×</button>
           </div>
         ))}
       </div>
@@ -2530,7 +2552,7 @@ function PantrySettings() {
           placeholder="Add a location…"
           onKeyDown={(e) => { if (e.key === 'Enter' && adding.trim()) { commitLocations([...list, adding.trim()]); setAdding('') } }}
         />
-        <button type="button" className="pill" disabled={!adding.trim()} onClick={() => { commitLocations([...list, adding.trim()]); setAdding('') }}>Add</button>
+        <button type="button" className="pill" disabled={!adding.trim()} onClick={() => { commitLocations([...list, adding.trim()]); setAdding('') }}>{t('common.add')}</button>
       </div>
     </div>
   )
@@ -2541,6 +2563,7 @@ function PantrySettings() {
 // its own module — it can't be on without chores. Saves immediately; refreshes the
 // household so the Tasks "Rewards" tab and the profile jar/redemption cards react.
 function ChoresModuleSettings() {
+  const { t } = useI18n()
   const [rewards, setRewards] = useState<boolean | null>(null)
   useEffect(() => { choresApi.getSettings().then((s) => setRewards(s.rewards)).catch(() => setRewards(true)) }, [])
   async function toggle(v: boolean) {
@@ -2551,7 +2574,7 @@ function ChoresModuleSettings() {
   return (
     <div className="set-module-settings">
       <div className="set-module-setrow">
-        <span>Rewards (star shop &amp; redemptions)</span>
+        <span>{t('settings.rewardsModule')}</span>
         <Switch checked={rewards} onChange={toggle} ariaLabel="Enable rewards" />
       </div>
       <div className="set-module-desc" style={{ marginTop: 6 }}>
@@ -2567,6 +2590,7 @@ const FN_DAYS = [0, 1, 2, 3, 4, 5, 6]
 const slug = (label: string) => label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'part'
 
 function FamilyNightSettings() {
+  const { t } = useI18n()
   const { view, loading } = useFamilyNight()
   const [parts, setParts] = useState<FamilyNightPart[] | null>(null)
   const [saving, setSaving] = useState(false)
@@ -2584,10 +2608,10 @@ function FamilyNightSettings() {
   function editPart(i: number, patch: Partial<FamilyNightPart>) {
     setParts((ps) => (ps ? ps.map((p, j) => (j === i ? { ...p, ...patch } : p)) : ps))
   }
-  function addPart() { setParts((ps) => [...(ps ?? []), { id: `part${Date.now()}`, label: 'New part', emoji: '⭐', rotates: true }]) }
+  function addPart() { setParts((ps) => [...(ps ?? []), { id: `part${Date.now()}`, label: t('settings.newPart'), emoji: '⭐', rotates: true }]) }
   function removePart(i: number) { setParts((ps) => (ps ? ps.filter((_, j) => j !== i) : ps)) }
   async function saveParts() {
-    const clean = (parts ?? []).map((p) => ({ ...p, id: p.id || slug(p.label), label: p.label.trim() || 'Part' })).filter((p) => p.label)
+    const clean = (parts ?? []).map((p) => ({ ...p, id: p.id || slug(p.label), label: p.label.trim() || t('settings.part') })).filter((p) => p.label)
     if (!clean.length) return
     await save({ parts: clean })
   }
@@ -2600,7 +2624,7 @@ function FamilyNightSettings() {
   return (
     <div className="set-module-settings">
       <div className="set-module-setrow">
-        <span>Happens on</span>
+        <span>{t('settings.happensOn')}</span>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <select className="sel" value={config.dayOfWeek} disabled={saving} onChange={(e) => save({ dayOfWeek: Number(e.target.value) })}>
             {FN_DAYS.map((d) => <option key={d} value={d}>{weekdayName(d)}</option>)}
@@ -2610,19 +2634,19 @@ function FamilyNightSettings() {
       </div>
 
       <div className="set-module-setrow">
-        <span>Show on the Today page</span>
+        <span>{t('settings.showToday')}</span>
         <Switch checked={config.showOnToday !== false} disabled={saving} onChange={(v) => save({ showOnToday: v })} ariaLabel="Show Family Night on Today" />
       </div>
 
       <div className="set-module-setrow">
-        <span>Show on the calendar</span>
+        <span>{t('settings.showCalendar')}</span>
         <Switch checked={onCalendar} disabled={saving} onChange={toggleCalendar} ariaLabel="Show Family Night on the calendar" />
       </div>
       <div className="set-module-desc" style={{ marginTop: -4, marginBottom: 8 }}>
         Adds a weekly “🏡 Family Night” event to the family calendar (syncs to Google if that calendar is connected). Changing the day or time re-schedules it.
       </div>
 
-      <div className="set-row2-t" style={{ marginTop: 6, marginBottom: 4 }}>Agenda Parts</div>
+      <div className="set-row2-t" style={{ marginTop: 6, marginBottom: 4 }}>{t('settings.agendaParts')}</div>
       <div className="set-module-desc" style={{ marginBottom: 8 }}>
         Roles that rotate among family members each week. Turn off “Rotate” for a part someone always does.
       </div>
@@ -2630,31 +2654,32 @@ function FamilyNightSettings() {
         <div key={i} className="fn-part-edit">
           <input className="fn-part-emoji" value={p.emoji} maxLength={4} onChange={(e) => editPart(i, { emoji: e.target.value })} aria-label="Emoji" />
           <input className="fn-part-label" value={p.label} onChange={(e) => editPart(i, { label: e.target.value })} aria-label="Part name" />
-          <label className="fn-part-rot"><input type="checkbox" checked={p.rotates} onChange={(e) => editPart(i, { rotates: e.target.checked })} /> Rotate</label>
-          <button type="button" className="fn-part-x" aria-label={`Remove ${p.label}`} onClick={() => removePart(i)}>×</button>
+          <label className="fn-part-rot"><input type="checkbox" checked={p.rotates} onChange={(e) => editPart(i, { rotates: e.target.checked })} /> {t('settings.rotate')}</label>
+          <button type="button" className="fn-part-x" aria-label={t('common.remove', { name: p.label })} onClick={() => removePart(i)}>×</button>
         </div>
       ))}
       <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
         <button type="button" className="pill" onClick={addPart}>+ Add part</button>
-        <button type="button" className="pill primary" disabled={saving} onClick={saveParts} style={{ marginLeft: 'auto' }}>Save agenda</button>
+        <button type="button" className="pill primary" disabled={saving} onClick={saveParts} style={{ marginLeft: 'auto' }}>{t('settings.saveAgenda')}</button>
       </div>
     </div>
   )
 }
 
 function AboutPanel() {
+  const { t } = useI18n()
   const { household } = useHousehold()
   return (
     <div className="set-panel">
-      <div className="set-head"><div className="wf-serif set-head-t">About</div></div>
+      <div className="set-head"><div className="wf-serif set-head-t">{t('settings.about')}</div></div>
       <SettingCard>
-        <div className="set-row2-t" style={{ marginBottom: 4 }}>Waffled — Family Hub</div>
+        <div className="set-row2-t" style={{ marginBottom: 4 }}>{t('settings.familyHub')}</div>
         <div className="tiny muted" style={{ fontWeight: 600 }}>
           Self-hosted{household?.name ? ` · ${household.name}` : ''}. Version and storage info land here.
         </div>
       </SettingCard>
       <SettingCard style={{ marginTop: 18 }}>
-        <div className="set-row2-t" style={{ marginBottom: 4 }}>Account</div>
+        <div className="set-row2-t" style={{ marginBottom: 4 }}>{t('settings.accountGroup')}</div>
         <div className="tiny muted" style={{ fontWeight: 600, marginBottom: 16 }}>
           Sign this kiosk out to switch to another family member's account.
         </div>
@@ -2669,6 +2694,7 @@ function AboutPanel() {
 // mints a fresh session for the other membership and does a full reload so the app
 // (and PowerSync) re-establish cleanly against the new household.
 function HouseholdsPanel() {
+  const { t } = useI18n()
   const { household, memberships, pendingInvites } = useHousehold()
   const [switching, setSwitching] = useState<string | null>(null)
   const [accepting, setAccepting] = useState<string | null>(null)
@@ -2696,13 +2722,13 @@ function HouseholdsPanel() {
 
   return (
     <div className="set-panel">
-      <div className="set-head"><div className="wf-serif set-head-t">Households</div></div>
+      <div className="set-head"><div className="wf-serif set-head-t">{t('settings.households')}</div></div>
       <SettingCard>
-        <div className="set-row2-t" style={{ marginBottom: 4 }}>Your Households</div>
+        <div className="set-row2-t" style={{ marginBottom: 4 }}>{t('settings.yourHouseholds')}</div>
         <div className="tiny muted" style={{ fontWeight: 600, marginBottom: 16 }}>
           {soloAndNoInvites
-            ? 'You belong to one household. Invitations to join others will show up here.'
-            : 'Switch between the households you belong to. Switching reloads Waffled for that family.'}
+            ? t('settings.oneHousehold')
+            : t('settings.manyHouseholds')}
         </div>
         {memberships.map((m) => {
           const current = m.householdId === household?.id
@@ -2710,10 +2736,10 @@ function HouseholdsPanel() {
             <div key={m.householdId} className="set-row2" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 10 }}>
               <div className="set-row2-t">{m.householdName}</div>
               {current ? (
-                <span className="tiny muted" style={{ fontWeight: 700 }}>Current</span>
+                <span className="tiny muted" style={{ fontWeight: 700 }}>{t('settings.current')}</span>
               ) : (
                 <button type="button" className="btn btn-primary" disabled={switching === m.householdId} onClick={() => doSwitch(m.householdId)}>
-                  {switching === m.householdId ? 'Switching…' : 'Switch'}
+                  {switching === m.householdId ? t('settings.switching') : t('nav.switch')}
                 </button>
               )}
             </div>
@@ -2722,7 +2748,7 @@ function HouseholdsPanel() {
       </SettingCard>
       {pendingInvites.length > 0 && (
         <SettingCard style={{ marginTop: 18 }}>
-          <div className="set-row2-t" style={{ marginBottom: 4 }}>Pending Invitations</div>
+          <div className="set-row2-t" style={{ marginBottom: 4 }}>{t('settings.pendingInvites')}</div>
           <div className="tiny muted" style={{ fontWeight: 600, marginBottom: 16 }}>
             Accept an invitation to join another household. It then appears above.
           </div>
@@ -2730,7 +2756,7 @@ function HouseholdsPanel() {
             <div key={inv.id} className="set-row2" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 10 }}>
               <div className="set-row2-t">{inv.householdName}</div>
               <button type="button" className="btn btn-primary" disabled={accepting === inv.id} onClick={() => doAccept(inv.id)}>
-                {accepting === inv.id ? 'Accepting…' : 'Accept'}
+                {accepting === inv.id ? t('settings.accepting') : t('settings.accept')}
               </button>
             </div>
           ))}
@@ -2744,6 +2770,7 @@ function HouseholdsPanel() {
 // decide whether password login stays on. Household admins still manage their own
 // kiosk devices below. The client secret is write-only.
 function SecurityPanel() {
+  const { t } = useI18n()
   const [cfg, setCfg] = useState<OidcConfig | null>(null)
   const [forbidden, setForbidden] = useState(false)
   const [enabled, setEnabled] = useState(false)
@@ -2774,16 +2801,16 @@ function SecurityPanel() {
 
   if (forbidden) return (
     <div className="set-panel">
-      <div className="set-head"><div className="wf-serif set-head-t">Sign-in &amp; Security</div></div>
+      <div className="set-head"><div className="wf-serif set-head-t">{t('settings.security')}</div></div>
       <SettingCard>
         <div className="muted" style={{ fontWeight: 600 }}>
-          Only the installation owner can manage login methods and SSO settings.
+          {t('settings.ownerOnly')}
         </div>
       </SettingCard>
       <KioskDevicesSection />
     </div>
   )
-  if (!cfg) return <div className="set-panel"><div className="muted" style={{ padding: 20 }}>Loading…</div></div>
+  if (!cfg) return <div className="set-panel"><div className="muted" style={{ padding: 20 }}>{t('common.loading')}</div></div>
 
   async function test() {
     setTestMsg(null)
@@ -2830,14 +2857,14 @@ function SecurityPanel() {
   return (
     <div className="set-panel">
       <div className="set-head" style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
-        <div className="wf-serif set-head-t">Sign-in &amp; Security</div>
-        {saved && <span className="tiny" style={{ color: 'var(--success)', fontWeight: 700 }}>✓ Saved</span>}
+        <div className="wf-serif set-head-t">{t('settings.security')}</div>
+        {saved && <span className="tiny" style={{ color: 'var(--success)', fontWeight: 700 }}>{t('settings.saved')}</span>}
       </div>
 
       {!cfg.encryptionAvailable && (
         <SettingCard style={{ marginBottom: 16 }}>
           <div className="tiny" style={{ fontWeight: 700, color: 'var(--primary)' }}>
-            Set <code>TOKEN_ENCRYPTION_KEY</code> in the server environment to store the OIDC client secret securely. OIDC can't be enabled until then.
+            {t('settings.encryptionRequired')}
           </div>
         </SettingCard>
       )}
@@ -2848,35 +2875,35 @@ function SecurityPanel() {
         </SettingRow>
 
         <div className="sec-form">
-          <label className="auth-label">Issuer URL</label>
+          <label className="auth-label">{t('settings.issuerUrl')}</label>
           <div style={{ display: 'flex', gap: 8 }}>
             <input className="set-inline-input" style={{ flex: 1, width: 'auto' }} value={issuer} onChange={(e) => setIssuer(e.target.value)} placeholder="https://auth.example.com/application/o/waffled/" />
-            <button type="button" className="btn btn-ghost" onClick={test} disabled={busy || !issuer.trim()}>Test</button>
+            <button type="button" className="btn btn-ghost" onClick={test} disabled={busy || !issuer.trim()}>{t('settings.test')}</button>
           </div>
           {testMsg && <div className="tiny" style={{ fontWeight: 700, marginTop: 6, color: testMsg.ok ? 'var(--success)' : 'var(--primary)' }}>{testMsg.text}</div>}
 
-          <label className="auth-label">Client ID</label>
+          <label className="auth-label">{t('settings.clientId')}</label>
           <input className="set-inline-input" style={{ width: '100%' }} value={clientId} onChange={(e) => setClientId(e.target.value)} placeholder="waffled" />
 
-          <label className="auth-label">Client secret</label>
+          <label className="auth-label">{t('settings.clientSecret')}</label>
           <input className="set-inline-input" style={{ width: '100%' }} type="password" value={secret} onChange={(e) => setSecret(e.target.value)} placeholder={cfg.secretSet ? '•••••••• (leave blank to keep)' : 'Paste the client secret'} />
 
-          <label className="auth-label">Button label</label>
+          <label className="auth-label">{t('settings.buttonLabel')}</label>
           <input className="set-inline-input" style={{ width: '100%' }} value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Sign in with SSO" />
 
-          <label className="auth-label">Scopes</label>
+          <label className="auth-label">{t('settings.scopes')}</label>
           <input className="set-inline-input" style={{ width: '100%' }} value={scopes} onChange={(e) => setScopes(e.target.value)} placeholder="openid email profile" />
 
           <div className="tiny muted" style={{ fontWeight: 600, marginTop: 10 }}>
             Redirect URI to register at your provider: <code>{window.location.origin}/api/auth/oidc/callback</code>. Sign-in is invite-only — the provider's verified email must already belong to a family member.
           </div>
           {error && <div className="auth-error">{error}</div>}
-          <button type="button" className="btn btn-primary" style={{ marginTop: 14 }} onClick={saveOidc} disabled={busy}>Save SSO settings</button>
+          <button type="button" className="btn btn-primary" style={{ marginTop: 14 }} onClick={saveOidc} disabled={busy}>{t('settings.saveSso')}</button>
         </div>
       </SettingCard>
 
       <SettingCard style={{ marginTop: 16 }}>
-        <SettingRow icon="🔑" title="Password login" sub={canDisablePw ? 'Turn off to require everyone to use SSO.' : 'Enable & save SSO before you can turn this off.'}>
+        <SettingRow icon="🔑" title={t('settings.passwordLogin')} sub={canDisablePw ? t('settings.passwordLoginOn') : t('settings.passwordLoginFirst')}>
           <input
             type="checkbox"
             className="set-check"
@@ -2897,6 +2924,7 @@ function SecurityPanel() {
 // a PIN (an admin without one can be claimed by anyone tapping their tile). Uses the
 // in-app ConfirmDialog, never native popups.
 function KioskDevicesSection() {
+  const { t } = useI18n()
   const { members } = useHouseholdSettings()
   const [devices, setDevices] = useState<KioskDevice[] | null>(null)
   const [code, setCode] = useState<{ code: string; expiresAt: string } | null>(null)
@@ -2981,9 +3009,9 @@ function KioskDevicesSection() {
       )}
 
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-        <button type="button" className="btn btn-primary" onClick={() => setDialog({ kind: 'promote' })}>Use this device as a kiosk</button>
+        <button type="button" className="btn btn-primary" onClick={() => setDialog({ kind: 'promote' })}>{t('settings.useKiosk')}</button>
         <button type="button" className="btn btn-ghost" onClick={genCode} disabled={busy}>
-          {busy ? 'Generating…' : 'Generate pairing code'}
+          {busy ? t('settings.generating') : t('settings.generateCode')}
         </button>
       </div>
       {note && <div className="tiny" style={{ fontWeight: 700, color: 'var(--success)', marginTop: 10 }}>{note}</div>}
@@ -2991,8 +3019,8 @@ function KioskDevicesSection() {
         <div style={{ marginTop: 14 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <span className="kp-code kp-code-sel">{code.code}</span>
-            <button type="button" className="btn btn-ghost" onClick={copyCode}>{copied ? '✓ Copied' : 'Copy'}</button>
-            <span className="tiny muted" style={{ fontWeight: 600 }}>Waiting for a device to pair…</span>
+            <button type="button" className="btn btn-ghost" onClick={copyCode}>{copied ? t('settings.copied') : t('settings.copy')}</button>
+            <span className="tiny muted" style={{ fontWeight: 600 }}>{t('settings.waitPair')}</span>
           </div>
           <div className="tiny muted" style={{ fontWeight: 600, marginTop: 8 }}>
             On the new tablet: open this Waffled’s address → “Set up this device as a kiosk” → enter this code. One-time, expires in ~10 minutes.
@@ -3002,16 +3030,16 @@ function KioskDevicesSection() {
       {err && <div className="auth-error" style={{ marginTop: 12 }}>{err}</div>}
 
       <div style={{ marginTop: 16 }}>
-        <div className="set-row2-t" style={{ margin: '2px 2px 4px' }}>Paired Devices</div>
+        <div className="set-row2-t" style={{ margin: '2px 2px 4px' }}>{t('settings.pairedDevices')}</div>
         {devices === null ? (
-          <div className="tiny muted" style={{ fontWeight: 600, padding: '8px 2px' }}>Loading…</div>
+          <div className="tiny muted" style={{ fontWeight: 600, padding: '8px 2px' }}>{t('common.loading')}</div>
         ) : devices.length === 0 ? (
-          <div className="tiny muted" style={{ fontWeight: 600, padding: '8px 2px' }}>No kiosks paired yet.</div>
+          <div className="tiny muted" style={{ fontWeight: 600, padding: '8px 2px' }}>{t('settings.noKiosks')}</div>
         ) : (
           devices.map((d) => (
             <SettingRow key={d.id} icon="🖥️" title={d.label} sub={`Last seen ${fmtWhen(d.lastSeenAt)} · paired ${fmtWhen(d.createdAt)}`}>
-              <button type="button" className="linkbtn" onClick={() => setDialog({ kind: 'rename', device: d })}>Rename</button>
-              <button type="button" className="linkbtn" style={{ color: 'var(--primary)' }} onClick={() => setDialog({ kind: 'remove', device: d })}>Remove</button>
+              <button type="button" className="linkbtn" onClick={() => setDialog({ kind: 'rename', device: d })}>{t('settings.rename')}</button>
+              <button type="button" className="linkbtn" style={{ color: 'var(--primary)' }} onClick={() => setDialog({ kind: 'remove', device: d })}>{t('common.remove', { name: d.label })}</button>
             </SettingRow>
           ))
         )}
@@ -3040,7 +3068,7 @@ function KioskDevicesSection() {
         <ConfirmDialog
           title="Rename device"
           confirmLabel="Save"
-          input={{ label: 'Device name', placeholder: 'Kitchen', initial: dialog.device.label }}
+          input={{ label: t('settings.deviceName'), placeholder: 'Küche', initial: dialog.device.label }}
           onConfirm={runDialog}
           onClose={() => setDialog(null)}
         />
@@ -3063,6 +3091,7 @@ const PHOTO_SOURCE_OPTS: Array<{ key: DisplayConfig['photoSource']; label: strin
 ]
 const INTERVAL_OPTS = [5, 10, 20, 30]
 function DisplayKioskPanel() {
+  const { t } = useI18n()
   const paired = isKioskMode()
   const [displayOn, setDisplayOn] = useState(isDisplayMode())
   const [cfg, setCfg] = useState<DisplayConfig | null>(null)
@@ -3124,13 +3153,13 @@ function DisplayKioskPanel() {
   return (
     <div className="set-panel">
       <div className="set-head" style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
-        <div className="wf-serif set-head-t">Display &amp; Kiosk</div>
+        <div className="wf-serif set-head-t">{t('settings.display')}</div>
         {savedFlash && <span className="tiny" style={{ color: 'var(--success)', fontWeight: 700 }}>✓ Saved</span>}
-        <span className="tiny muted" style={{ marginLeft: 'auto', fontWeight: 600 }}>Screensaver settings save automatically</span>
+        <span className="tiny muted" style={{ marginLeft: 'auto', fontWeight: 600 }}>{t('settings.screensaverAuto')}</span>
       </div>
 
       <SettingCard>
-        <SettingRow icon="🖥️" title="Use this browser as the family display" sub={paired ? 'On — this device is paired as a kiosk.' : 'This device only. Enables the screensaver & keeps the screen awake.'}>
+        <SettingRow icon="🖥️" title={t('settings.familyDisplay')} sub={paired ? t('settings.pinSet') : t('settings.deviceOnly')}>
           <input type="checkbox" className="set-check" checked={displayOn} disabled={paired} onChange={toggleDisplay} />
         </SettingRow>
         {!displayOn && (
@@ -3140,18 +3169,18 @@ function DisplayKioskPanel() {
         )}
       </SettingCard>
 
-      {error && <SettingCard style={{ marginTop: 16 }}><div className="muted" style={{ fontWeight: 600 }}>Couldn’t load display settings.</div></SettingCard>}
+      {error && <SettingCard style={{ marginTop: 16 }}><div className="muted" style={{ fontWeight: 600 }}>{t('settings.displayLoadError')}</div></SettingCard>}
       {cfg && (
         <>
           <SettingCard style={{ marginTop: 16 }}>
-            <div className="flabel" style={{ padding: '14px 16px 4px' }}>SCREENSAVER</div>
+            <div className="flabel" style={{ padding: '14px 16px 4px' }}>{t('settings.screensaver')}</div>
             <SettingRow icon="🌅" title="Screensaver after" sub="Minutes of inactivity before the screensaver appears.">
               <input type="number" min={1} max={120} className="set-inline-input" style={{ width: 80 }} value={cfg.screensaverMinutes} onChange={(e) => update({ screensaverMinutes: Number(e.target.value) || 1 })} />
             </SettingRow>
             <div className="set-row2">
               <div className="set-ic2">🖼️</div>
               <div style={{ flex: 1 }}>
-                <div className="set-row2-t">What it shows</div>
+                <div className="set-row2-t">{t('settings.whatShows')}</div>
                 <div className="tiny muted" style={{ fontWeight: 600 }}>“Photos + clock” is a photo slideshow with the clock, weather &amp; next event overlaid. Photos need a signed-in profile; the picker always shows the clock.</div>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -3160,7 +3189,7 @@ function DisplayKioskPanel() {
                     <button type="button" key={o.key} className={cfg.content === o.key ? 'on' : ''} style={{ cursor: 'pointer' }} onClick={() => update({ content: o.key })}>{o.label}</button>
                   ))}
                 </div>
-                <button type="button" className="btn btn-ghost" disabled={cfg.content === 'off'} onClick={() => setPreview(true)}>Preview</button>
+                <button type="button" className="btn btn-ghost" disabled={cfg.content === 'off'} onClick={() => setPreview(true)}>{t('settings.preview')}</button>
               </div>
             </div>
             <SettingRow icon="🔒" title="Return to profile picker afterward" sub="When the screensaver wakes on a paired kiosk, drop to the profile picker.">
@@ -3172,8 +3201,8 @@ function DisplayKioskPanel() {
                 <div className="set-row2">
                   <div className="set-ic2">📷</div>
                   <div style={{ flex: 1 }}>
-                    <div className="set-row2-t">Photo source</div>
-                    <div className="tiny muted" style={{ fontWeight: 600 }}>Which photos the slideshow plays.</div>
+                    <div className="set-row2-t">{t('settings.photoSource')}</div>
+                    <div className="tiny muted" style={{ fontWeight: 600 }}>{t('settings.photoSourceSub')}</div>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                     <div className="seg" style={{ width: 'fit-content' }}>
@@ -3197,7 +3226,7 @@ function DisplayKioskPanel() {
                         value={cfg.photoAlbum ?? ''}
                         onChange={(e) => update({ photoAlbum: e.target.value || null })}
                       >
-                        <option value="">Choose an album…</option>
+                        <option value="">{t('settings.chooseAlbum')}</option>
                         {albums.map((a) => (
                           <option key={a} value={a}>{a}</option>
                         ))}
@@ -3291,23 +3320,24 @@ function ThemePreview({ label, active, pinned, colors, onSelect }: {
 }
 
 function AppearancePanel() {
+  const { t, preference, setLanguage } = useI18n()
   const { pref, resolved, setPref } = useThemePref()
   const matchSystem = pref === 'system'
   return (
     <div className="set-panel">
-      <div className="set-head"><div className="wf-serif set-head-t">Appearance</div></div>
+      <div className="set-head"><div className="wf-serif set-head-t">{t('settings.appearance')}</div></div>
 
-      <div className="flabel" style={{ padding: '0 2px 10px' }}>THEME</div>
+      <div className="flabel" style={{ padding: '0 2px 10px' }}>{t('settings.theme').toUpperCase()}</div>
       <div className="appr-grid">
         <ThemePreview
-          label="Light"
+          label={t('settings.light')}
           active={resolved === 'light'}
           pinned={pref === 'light'}
           colors={{ bg: '#FAF7F2', card: '#FFFFFF', line: '#C9C3B8' }}
           onSelect={() => setPref('light')}
         />
         <ThemePreview
-          label="Dark"
+          label={t('settings.dark')}
           active={resolved === 'dark'}
           pinned={pref === 'dark'}
           colors={{ bg: '#14110C', card: '#232019', line: '#4A453C' }}
@@ -3316,7 +3346,7 @@ function AppearancePanel() {
       </div>
 
       <SettingCard style={{ marginTop: 4 }}>
-        <SettingRow icon="🌗" title="Match system" sub="Follow your device's light/dark setting automatically.">
+        <SettingRow icon="🌗" title={t('settings.matchSystem')} sub={t('settings.matchSystemSub')}>
           <button
             type="button"
             role="switch"
@@ -3328,14 +3358,23 @@ function AppearancePanel() {
         </SettingRow>
       </SettingCard>
 
+      <SettingCard style={{ marginTop: 12 }}>
+        <SettingRow icon="🌐" title={t('settings.language')} sub={t('settings.languageSub')}>
+          <select className="sel" value={preference} onChange={(e) => setLanguage(e.target.value as LanguagePreference)} aria-label={t('settings.language')}>
+            {LANGUAGE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </select>
+        </SettingRow>
+      </SettingCard>
+
       <div className="tiny muted" style={{ padding: '12px 2px 0', fontWeight: 600 }}>
-        This choice is saved on this device only.
+        {t('settings.deviceOnly')}
       </div>
     </div>
   )
 }
 
 export function Settings() {
+  const { t } = useI18n()
   const { household, person, memberships, pendingInvites } = useHousehold()
   // Tab lives in the URL (?tab=) so a refresh returns to where you were.
   const [params, setParams] = useSearchParams()
@@ -3354,7 +3393,7 @@ export function Settings() {
   }, [])
 
   // Wait until we know who's signed in, so admins don't flash the trimmed nav.
-  if (!household) return <div className="settings-screen"><div className="set-content"><div className="muted" style={{ padding: 20 }}>Loading…</div></div></div>
+  if (!household) return <div className="settings-screen"><div className="set-content"><div className="muted" style={{ padding: 20 }}>{t('common.loading')}</div></div></div>
 
   // Non-admins only see what they can actually use (About + Sign out). Admin-only
   // tabs are hidden rather than shown-then-blocked, so there's nothing to fumble.
@@ -3373,21 +3412,21 @@ export function Settings() {
   return (
     <div className="settings-screen">
       <div className="set-mobile-nav">
-        <select className="sel" aria-label="Settings section" value={activeTab} onChange={(e) => setTab(e.target.value)}>
-          {nav.map((n) => <option key={n.key} value={n.key}>{n.icon} {n.label}</option>)}
+        <select className="sel" aria-label={t('settings.section')} value={activeTab} onChange={(e) => setTab(e.target.value)}>
+          {nav.map((n) => <option key={n.key} value={n.key}>{n.icon} {t(n.labelKey)}</option>)}
         </select>
         <SignOutButton className="set-mobile-signout" />
       </div>
       <div className="set-nav">
-        <div className="flabel" style={{ margin: '2px 2px 8px' }}>SETTINGS</div>
+        <div className="flabel" style={{ margin: '2px 2px 8px' }}>{t('settings.title').toUpperCase()}</div>
         {nav.map((n, i) => {
-          const header = NAV_GROUP_LABELS[n.group] && n.group !== nav[i - 1]?.group ? NAV_GROUP_LABELS[n.group] : null
+          const header = NAV_GROUP_KEYS[n.group] && n.group !== nav[i - 1]?.group ? t(NAV_GROUP_KEYS[n.group]) : null
           return (
             <Fragment key={n.key}>
               {header && <div className="set-navgroup">{header}</div>}
               <button type="button" className={`set-navitem ${activeTab === n.key ? 'on' : ''}`} onClick={() => setTab(n.key)}>
                 <span className="set-navic">{n.icon}</span>
-                {n.label}
+                {t(n.labelKey)}
               </button>
             </Fragment>
           )

@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { api, usePersons, useCurrencies, localToday } from '../../lib/api'
+import { useI18n } from '../../lib/locale-provider'
 
 export interface ChoreDraft {
   id: string
@@ -81,6 +82,7 @@ export function ChoreModal({
   onClose: () => void
   onSaved: () => void
 }) {
+  const { t } = useI18n()
   const editing = !!chore
   const { persons } = usePersons()
   const { currencies, defaultCurrency } = useCurrencies()
@@ -155,21 +157,21 @@ export function ChoreModal({
         <form onSubmit={submit}>
           <div className="field-row">
             <label className="field" style={{ flex: 3 }}>
-              <span>Title</span>
-              <input value={form.title} onChange={(e) => set('title', e.target.value)} placeholder="Feed the dog" autoFocus />
+              <span>{t('tasks.title')}</span>
+              <input value={form.title} onChange={(e) => set('title', e.target.value)} placeholder={t('tasks.titleExample')} autoFocus />
             </label>
             <label className="field" style={{ flex: 1 }}>
-              <span>Emoji</span>
+              <span>{t('tasks.emoji')}</span>
               <input value={form.emoji} onChange={(e) => set('emoji', e.target.value)} placeholder="🐶" maxLength={4} />
             </label>
           </div>
 
           <div className="field" style={{ marginBottom: 10 }}>
-            <span>Repeats</span>
+            <span>{t('tasks.repeats')}</span>
             <div className="seg" style={{ width: 'fit-content' }}>
-              <button type="button" className={form.freq === 'once' ? 'on' : ''} onClick={() => set('freq', 'once')}>Just once</button>
-              <button type="button" className={form.freq === 'daily' ? 'on' : ''} onClick={() => set('freq', 'daily')}>Every day</button>
-              <button type="button" className={form.freq === 'weekly' ? 'on' : ''} onClick={() => set('freq', 'weekly')}>Certain days</button>
+              <button type="button" className={form.freq === 'once' ? 'on' : ''} onClick={() => set('freq', 'once')}>{t('tasks.once')}</button>
+              <button type="button" className={form.freq === 'daily' ? 'on' : ''} onClick={() => set('freq', 'daily')}>{t('tasks.daily')}</button>
+              <button type="button" className={form.freq === 'weekly' ? 'on' : ''} onClick={() => set('freq', 'weekly')}>{t('tasks.days')}</button>
             </div>
             {form.freq === 'weekly' && (
               <div className="chore-days">
@@ -190,20 +192,20 @@ export function ChoreModal({
                 carries forward until done unless rollover is turned off. */}
             {form.freq === 'once' && !editing && (
               <label className="field" style={{ marginTop: 8 }}>
-                <span>On</span>
+                <span>{t('tasks.on')}</span>
                 <input type="date" min={localToday()} value={form.dueOn} onChange={(e) => set('dueOn', e.target.value || localToday())} />
               </label>
             )}
           </div>
 
           <label className="field" style={{ marginBottom: 10 }}>
-            <span>Due time <span className="tiny muted" style={{ fontWeight: 400 }}>· optional</span></span>
+            <span>{t('tasks.dueTime')} <span className="tiny muted" style={{ fontWeight: 400 }}>· {t('tasks.optional')}</span></span>
             <input type="time" value={form.dueTime} onChange={(e) => set('dueTime', e.target.value)} />
           </label>
 
           <div className="field-row">
             <label className="field">
-              <span>Who</span>
+              <span>{t('tasks.who')}</span>
               <select value={form.personId} onChange={(e) => set('personId', e.target.value)}>
                 <option value="">— up for grabs —</option>
                 {pickable.map((p) => (
@@ -228,7 +230,7 @@ export function ChoreModal({
           {/* currency picker — only when the family runs more than one currency */}
           {currencies.length > 1 && (
             <div className="field" style={{ marginBottom: 10 }}>
-              <span>Currency</span>
+              <span>{t('tasks.currency')}</span>
               <div className="rw-cur-pick">
                 {currencies.map((c) => (
                   <button
@@ -253,8 +255,8 @@ export function ChoreModal({
             >
               <span className="chore-approval-check" aria-hidden>{form.requiresApproval ? '✓' : ''}</span>
               <span>
-                <span className="chore-approval-t">Needs a parent’s OK</span>
-                <span className="chore-approval-s">Stars are awarded only after a parent approves.</span>
+                <span className="chore-approval-t">{t('tasks.parentOk')}</span>
+                <span className="chore-approval-s">{t('tasks.parentOkSub')}</span>
               </span>
             </button>
           )}
@@ -266,8 +268,8 @@ export function ChoreModal({
           >
             <span className="chore-approval-check" aria-hidden>{form.requiresPhoto ? '✓' : ''}</span>
             <span>
-              <span className="chore-approval-t">Requires a photo</span>
-              <span className="chore-approval-s">A snapshot of the finished job is needed to complete it.</span>
+              <span className="chore-approval-t">{t('tasks.photoRequired')}</span>
+              <span className="chore-approval-s">{t('tasks.photoRequiredSub')}</span>
             </span>
           </button>
 

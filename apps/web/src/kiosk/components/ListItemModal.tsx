@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { groceryApi, type ListItem, type Person } from '../../lib/api'
 import { PRIORITY_OPTIONS } from './priority'
+import { useI18n } from '../../lib/locale-provider'
 
 // Add or edit a list item — name, quantity (free text like "1 lb" / "×4"),
 // section, and assignee. Touch-friendly (a real form, not a hover affordance).
@@ -19,6 +20,7 @@ export function ListItemModal({
   onClose: () => void
   onSaved: () => void
 }) {
+  const { t } = useI18n()
   const editing = !!item
   const [name, setName] = useState(item?.name ?? '')
   const [quantity, setQuantity] = useState(item?.quantity ?? '')
@@ -57,18 +59,18 @@ export function ListItemModal({
         <form onSubmit={submit}>
           <div className="field-row">
             <label className="field" style={{ flex: 3 }}>
-              <span>Item</span>
-              <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Beach towels" autoFocus />
+              <span>{t('lists.item')}</span>
+              <input value={name} onChange={(e) => setName(e.target.value)} placeholder={t('lists.itemExample')} autoFocus />
             </label>
             <label className="field" style={{ flex: 1 }}>
-              <span>Quantity</span>
+              <span>{t('lists.quantity')}</span>
               <input value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="×4 / 1 lb" />
             </label>
           </div>
 
           <label className="field">
-            <span>Section</span>
-            <input value={section} onChange={(e) => setSection(e.target.value)} placeholder="e.g. Produce, Gear" list="list-sections" />
+            <span>{t('lists.section')}</span>
+            <input value={section} onChange={(e) => setSection(e.target.value)} placeholder={t('lists.sectionExample')} list="list-sections" />
             <datalist id="list-sections">
               {sections.map((s) => (
                 <option key={s} value={s} />
@@ -77,7 +79,7 @@ export function ListItemModal({
           </label>
 
           <div className="field">
-            <span>Priority</span>
+            <span>{t('lists.priority')}</span>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
               {PRIORITY_OPTIONS.map((o) => {
                 const on = priority === o.value
@@ -97,7 +99,7 @@ export function ListItemModal({
           </div>
 
           <div className="field">
-            <span>Assign to (optional)</span>
+            <span>{t('lists.assignOptional')}</span>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
               <button
                 type="button"

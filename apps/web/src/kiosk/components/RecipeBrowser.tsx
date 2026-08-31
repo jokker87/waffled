@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { RecipeModal } from './RecipeModal'
+import { useI18n } from '../../lib/locale-provider'
 import { MealCard } from './MealCard'
 import { mealBuilderApi, type Meal, type Recipe } from '../../lib/api'
 
@@ -84,6 +85,7 @@ export function RecipeBrowser({
   onTrySomething?: () => void
   selectLabel?: string
 }) {
+  const { t } = useI18n()
   const browse = !onPick
   const [filter, setFilter] = useState<'all' | MealType>(browse ? 'all' : slot ?? 'dinner')
   const [q, setQ] = useState('')
@@ -125,10 +127,10 @@ export function RecipeBrowser({
           <div className="rc mp-card" role="button" tabIndex={0} onClick={onEatingOut}>
             <div className="rc-img" style={{ background: 'linear-gradient(135deg,#d9e7f6,#bcd0e9)', fontSize: 34, display: 'grid', placeItems: 'center' }}>🍴</div>
             <div className="rc-b" style={{ padding: '12px 14px 14px' }}>
-              <div className="rc-t" style={{ fontSize: 16 }}>Eating out</div>
-              <div className="rc-m"><span>No cooking tonight</span></div>
+              <div className="rc-t" style={{ fontSize: 16 }}>{t('meals.eatingOut')}</div>
+              <div className="rc-m"><span>{t('meals.noCooking')}</span></div>
               <div className="mp-actions">
-                <button type="button" className="pill btn-primary mp-select" onClick={(e) => { e.stopPropagation(); onEatingOut() }}>Select</button>
+                <button type="button" className="pill btn-primary mp-select" onClick={(e) => { e.stopPropagation(); onEatingOut() }}>{t('recipe.select')}</button>
               </div>
             </div>
           </div>
@@ -137,10 +139,10 @@ export function RecipeBrowser({
           <div className="rc mp-card" role="button" tabIndex={0} onClick={onLeftovers}>
             <div className="rc-img" style={{ background: 'linear-gradient(135deg,#f0e6d2,#e0cfa8)', fontSize: 34, display: 'grid', placeItems: 'center' }}>🥡</div>
             <div className="rc-b" style={{ padding: '12px 14px 14px' }}>
-              <div className="rc-t" style={{ fontSize: 16 }}>Leftovers</div>
-              <div className="rc-m"><span>Finish up a previous meal</span></div>
+              <div className="rc-t" style={{ fontSize: 16 }}>{t('meals.leftovers')}</div>
+              <div className="rc-m"><span>{t('meals.finishPrevious')}</span></div>
               <div className="mp-actions">
-                <button type="button" className="pill btn-primary mp-select" onClick={(e) => { e.stopPropagation(); onLeftovers() }}>Select</button>
+                <button type="button" className="pill btn-primary mp-select" onClick={(e) => { e.stopPropagation(); onLeftovers() }}>{t('recipe.select')}</button>
               </div>
             </div>
           </div>
@@ -149,10 +151,10 @@ export function RecipeBrowser({
           <div className="rc mp-card" role="button" tabIndex={0} onClick={onTrySomething}>
             <div className="rc-img" style={{ background: 'linear-gradient(135deg,#efdcf3,#d9bce9)', fontSize: 34, display: 'grid', placeItems: 'center' }}>✨</div>
             <div className="rc-b" style={{ padding: '12px 14px 14px' }}>
-              <div className="rc-t" style={{ fontSize: 16 }}>Try something new</div>
-              <div className="rc-m"><span>Cook a brand-new dish</span></div>
+              <div className="rc-t" style={{ fontSize: 16 }}>{t('meals.tryNew')}</div>
+              <div className="rc-m"><span>{t('meals.newDish')}</span></div>
               <div className="mp-actions">
-                <button type="button" className="pill btn-primary mp-select" onClick={(e) => { e.stopPropagation(); onTrySomething() }}>Select</button>
+                <button type="button" className="pill btn-primary mp-select" onClick={(e) => { e.stopPropagation(); onTrySomething() }}>{t('recipe.select')}</button>
               </div>
             </div>
           </div>
@@ -169,7 +171,7 @@ export function RecipeBrowser({
               selectLabel={selectLabel ?? 'Select'}
             />
           ))}
-        {loading && <div className="muted picker-empty">Loading recipes…</div>}
+        {loading && <div className="muted picker-empty">{t('meals.loadingRecipes')}</div>}
         {!loading && shown.length === 0 && meals.length === 0 && (
           <div className="muted picker-empty">
             {filter === 'all' ? 'No recipes yet.' : `No ${MEAL_LABEL[filter].toLowerCase()} recipes yet — tag a recipe with this meal to see it here.`}
@@ -185,9 +187,9 @@ export function RecipeBrowser({
                 {r.category && <span>{r.category}</span>}
               </div>
               <div className="mp-actions">
-                <button type="button" className="pill" onClick={(e) => { e.stopPropagation(); onView ? onView(r) : setPreview(r) }}>View</button>
+                <button type="button" className="pill" onClick={(e) => { e.stopPropagation(); onView ? onView(r) : setPreview(r) }}>{t('meals.view')}</button>
                 {onPick && (
-                  <button type="button" className="pill btn-primary mp-select" onClick={(e) => { e.stopPropagation(); onPick(r) }}>Select</button>
+                  <button type="button" className="pill btn-primary mp-select" onClick={(e) => { e.stopPropagation(); onPick(r) }}>{t('recipe.select')}</button>
                 )}
               </div>
             </div>

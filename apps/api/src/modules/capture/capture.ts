@@ -107,6 +107,7 @@ const TARGET_KIND_BY_LOWER = new Map<string, TargetKind>(TARGET_KINDS.map((k) =>
 interface CaptureContext {
   now: string
   timezone: string
+  language?: string | null
   people: string[]
   lists?: string[]
 }
@@ -175,6 +176,7 @@ function systemPrompt(ctx: CaptureContext): string {
     `Right now it is ${ctx.now} (timezone ${ctx.timezone}).`,
     `Family members: ${fam}.`,
     `Custom lists: ${ctx.lists && ctx.lists.length ? ctx.lists.join(', ') : '(none yet)'}.`,
+    `The member's preferred language is ${ctx.language ?? 'the language used in their note'}. Understand notes in ANY language. Preserve the note's language in every human-facing value (title, name, itemName, reason, labels); never translate user content. Schema enums, dates, RRULE values, and JSON property names must remain in their required canonical English form.`,
     '',
     'Kinds: "event" = happens at a date/time; "task" = a chore someone does, maybe recurring; "grocery" = an item to buy (the grocery/shopping list); "pantry" = an item you ALREADY HAVE on hand, stored in the pantry/fridge/freezer (NOT the shopping list); "meal" = a dish for the weekly meal plan; "list" = add an item to a named custom list (packing list, Costco, Target run, etc. — NOT groceries); "countdown" = a future day to count down to (no clock time); "person" = add a new family/household member; "goal" = a personal or shared goal to work toward; "reward" = a reward-shop item kids can spend their stars/points on; "mutate" = act on something that ALREADY EXISTS (mark it done, log progress, move it, reassign it, redeem it, or delete it); "unsupported" = anything else.',
     'Always follow these rules:',
@@ -587,7 +589,7 @@ function scheduleLabel(rrule: string | null): string {
 }
 
 // ── Orchestrator ─────────────────────────────────────────────────────────────
-export async function parseWithProvider(householdId: string, text: string): Promise<{ intent: CaptureIntent; via: Provider }> {
+export async function parseWithProvider(householdId: string, text: string, language?: unknown): Promise<{ intent: CaptureIntent; via: Provider }> {
   const { provider } = await getAiConfig(householdId)
   if (provider === 'heuristic') throw new Error('heuristic provider — defer to client')
 
@@ -603,10 +605,11 @@ export async function parseWithProvider(householdId: string, text: string): Prom
   )
   const tz = rows[0]?.timezone ?? 'UTC'
   // Human-readable local now (with weekday) so the model can resolve "Tue 4pm".
-  const nowLocal = new Date().toLocaleString('en-US', {
+  const languageHint = typeof language === 'string' && /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,3}$/.test(language.trim()) ? language.trim() : null
+  const nowLocal = new Date().toLocaleString(languageHint ?? 'en-US', {
     timeZone: tz, weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit',
   })
-  const ctx: CaptureContext = { now: nowLocal, timezone: tz, people: people.map((p) => p.name), lists: listRows.map((l) => l.name) }
+  const ctx: CaptureContext = { now: nowLocal, timezone: tz, language: languageHint, people: people.map((p) => p.name), lists: listRows.map((l) => l.name) }
 
   // One shared call across providers (honors the household's toggle + keys).
   const { data: raw, via } = await completeJson(householdId, {
@@ -689,10 +692,11 @@ export function registerCaptureRoutes(api: Api): void {
   // Parse free text → intent. On any failure, tell the client to fall back to
   // its on-device heuristic (200 with fallback:true, not an error).
   api.post('/api/capture', tenantRoute(async (tenant, req: Request) => {
-    const text = String((req.body as { text?: unknown })?.text ?? '').trim()
+    const body = (req.body ?? {}) as { text?: unknown; language?: unknown }
+    const text = String(body.text ?? '').trim()
     if (!text) return { intent: null, via: 'heuristic', fallback: true }
     try {
-      const { intent, via } = await parseWithProvider(tenant.householdId, text)
+      const { intent, via } = await parseWithProvider(tenant.householdId, text, body.language)
       return { intent, via, fallback: false }
     } catch (err) {
       return { intent: null, via: 'heuristic', fallback: true, error: (err as Error).message }

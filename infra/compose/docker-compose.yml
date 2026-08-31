@@ -142,9 +142,9 @@ services:
       OPENAI_MODEL: ${OPENAI_MODEL:-}
       # OpenAI-compatible local server (LM Studio / llama.cpp / vLLM): point this at it.
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
-      # Local Ollama (keeps text on your network). On Docker Desktop reach the host
-      # with host.docker.internal; bare Linux: http://172.17.0.1:11434
-      OLLAMA_HOST: ${OLLAMA_HOST:-}
+      # Local Ollama (keeps text on your network). Waffled and the AI Lab share
+      # the external ai-net, so the Ollama service is reachable by DNS name.
+      OLLAMA_HOST: ${OLLAMA_HOST:-http://ollama:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-}
       # --- Google Calendar OAuth (5.2): "Connect your calendar". Independent of Auth0.
       # TOKEN_ENCRYPTION_KEY encrypts the stored refresh token (openssl rand -base64 32).
@@ -191,6 +191,13 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    networks:
+      default:
+      ai-net:
+        aliases:
+          # Stable internal address for Open WebUI tools, independent of the
+          # Compose project name: http://waffled-api:3000
+          - waffled-api
 
   powersync:
     image: journeyapps/powersync-service:1.22.0
@@ -331,3 +338,7 @@ volumes:
   caddy_data:
   caddy_config:
   lgtm_data:         # Grafana/Prometheus/Tempo/Loki state (observability profile)
+
+networks:
+  ai-net:
+    external: true

@@ -279,12 +279,12 @@ export function registerMealRoutes(api: Api): void {
   // description → our markdown → structured draft. Does NOT save. 501 when no AI
   // provider is selected.
   api.post('/api/recipes/ingest/voice', tenantRoute(async (tenant, req: Request, res: Response) => {
-    const body = (req.body ?? {}) as { text?: string }
+    const body = (req.body ?? {}) as { text?: string; language?: string }
     if (!body.text || !body.text.trim()) {
       return res.status(400).json({ error: 'BadRequest', message: 'text is required' })
     }
     try {
-      const { draft, via } = await ingestRecipeFromText(tenant, body.text)
+      const { draft, via } = await ingestRecipeFromText(tenant, body.text, body.language)
       return { ...draft, via }
     } catch (err) {
       if (isAiUnavailable(err)) return res.status(501).json({ error: 'AIUnavailable', message: (err as Error).message })
@@ -296,7 +296,7 @@ export function registerMealRoutes(api: Api): void {
   // our markdown → structured draft. Does NOT save the recipe; source photos are
   // persisted for a short window then swept. 501 when no vision-capable model.
   api.post('/api/recipes/ingest/photo', tenantRoute(async (tenant, req: Request, res: Response) => {
-    const body = (req.body ?? {}) as { images?: IngestPhotoInput[] }
+    const body = (req.body ?? {}) as { images?: IngestPhotoInput[]; language?: string }
     const images = Array.isArray(body.images) ? body.images : []
     if (images.length === 0) {
       return res.status(400).json({ error: 'BadRequest', message: 'at least one image is required' })
@@ -308,7 +308,7 @@ export function registerMealRoutes(api: Api): void {
       return res.status(400).json({ error: 'BadRequest', message: 'each image needs data + contentType' })
     }
     try {
-      const { draft, via, photoKeys } = await ingestRecipeFromPhotos(tenant, images)
+      const { draft, via, photoKeys } = await ingestRecipeFromPhotos(tenant, images, body.language)
       return { ...draft, via, photoKeys }
     } catch (err) {
       if (err instanceof IngestInputError) return res.status(400).json({ error: 'BadRequest', message: err.message })

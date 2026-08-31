@@ -7,7 +7,8 @@ import { useEventColor } from '../lib/event-color'
 import { deleteEventLocal, tombstoneEvent } from '../lib/powersync/events-local'
 import { suggestGoalForEvent } from '../lib/goal-match'
 import { describeRrule } from './components/recurrence'
-import { DOW_FULL, MONTHS, fmtTime, durationMin, eventPeople, localDate, eventDetailPath } from './components/cal-utils'
+import { fmtTime, durationMin, eventPeople, localDate, eventDetailPath } from './components/cal-utils'
+import { useI18n } from '../lib/locale-provider'
 
 function durationLabel(mins: number): string {
   if (mins % 60 === 0) return `${mins / 60} hr`
@@ -29,6 +30,7 @@ function gapLabel(rowStart: string, thisStart: string): string {
 
 // The same-day timeline ("Where it falls today") with this event highlighted.
 function DayTimeline({ event, tz }: { event: AgendaEvent; tz: string }) {
+  const { t } = useI18n()
   const navigate = useNavigate()
   const colorOf = useEventColor('#A6A29B')
   const day = localDate(event.startsAt, tz)
@@ -46,7 +48,7 @@ function DayTimeline({ event, tz }: { event: AgendaEvent; tz: string }) {
 
   return (
     <div className="card ed-fall">
-      <div className="card-h" style={{ marginBottom: 12 }}>Where it falls today</div>
+      <div className="card-h" style={{ marginBottom: 12 }}>{t('event.whereToday')}</div>
       {sorted.map((e) => {
         const me = e.id === event.id
         const color = colorOf(e)
@@ -58,21 +60,22 @@ function DayTimeline({ event, tz }: { event: AgendaEvent; tz: string }) {
             tabIndex={me ? undefined : 0}
             onClick={me ? undefined : () => navigate(eventDetailPath(e))}
           >
-            <div className="ed-fall-time">{e.allDay ? 'all day' : fmtTime(e)}</div>
+            <div className="ed-fall-time">{e.allDay ? t('calendar.allDay').toLocaleLowerCase() : fmtTime(e)}</div>
             <div className="ed-fall-bar" style={{ background: color }} />
             <div className="ed-fall-title">{e.title}</div>
-            {me ? <span className="ed-fall-tag">this event</span> : <span className="muted ed-fall-gap">{gapLabel(e.startsAt, event.startsAt)}</span>}
+            {me ? <span className="ed-fall-tag">{t('event.thisEvent')}</span> : <span className="muted ed-fall-gap">{gapLabel(e.startsAt, event.startsAt)}</span>}
           </div>
         )
       })}
       <div className="ed-fall-foot muted">
-        {conflict ? 'Heads up — this overlaps another event.' : idx >= 0 ? "No conflicts — you're clear right before & after." : ''}
+        {conflict ? t('event.overlap') : idx >= 0 ? t('event.noConflict') : ''}
       </div>
     </div>
   )
 }
 
 export function EventDetail() {
+  const { t, locale, formatDate } = useI18n()
   const { id = '' } = useParams()
   // A recurring occurrence opens its series (id) with the slot in `?on=` — used to
   // show the right date and scope edits/deletes to just this one.
@@ -101,9 +104,9 @@ export function EventDetail() {
     let alive = true
     setInsight(null)
     setRemindShown(false)
-    eventsApi.eventInsight(id).then((d) => alive && setInsight(d)).catch(() => {})
+    eventsApi.eventInsight(id, locale).then((d) => alive && setInsight(d)).catch(() => {})
     return () => { alive = false }
-  }, [id])
+  }, [id, locale])
 
   // Resolve the recipe for a planned-meal event so we can offer "View recipe".
   const isMeal = event?.origin === 'meal_plan'
@@ -145,7 +148,7 @@ export function EventDetail() {
     () => (
       <div className="ed-topbar">
         <button type="button" className="pill" onClick={() => navigate('/calendar')}>
-          ‹ Calendar
+          ‹ {t('nav.calendar')}
         </button>
         <div className="ed-actions">
           {/* A feed event mirrors someone else's calendar — the api refuses to
@@ -154,15 +157,15 @@ export function EventDetail() {
           {!isFeedEvent && (
             <>
               <button type="button" className="pill" onClick={del}>
-                🗑 {confirmDelete ? 'Confirm' : event?.rrule && occurrenceOn ? 'Delete this' : 'Delete'}
+                🗑 {confirmDelete ? t('event.confirm') : event?.rrule && occurrenceOn ? t('event.deleteThis') : t('common.delete')}
               </button>
               <button type="button" className="pill" onClick={() => setEditing(true)}>
-                ✎ Edit
+                ✎ {t('common.edit')}
               </button>
             </>
           )}
           <button type="button" className="btn btn-primary" onClick={() => setRemindShown(true)}>
-            ⏰ Remind me
+            ⏰ {t('event.remind')}
           </button>
         </div>
       </div>
@@ -170,8 +173,8 @@ export function EventDetail() {
     [confirmDelete, deleting, id, event?.rrule, occurrenceOn, isFeedEvent]
   )
 
-  if (loading && !event) return <div className="muted" style={{ padding: 40 }}>Loading…</div>
-  if (notFound || !event) return <div className="muted" style={{ padding: 40 }}>This event no longer exists.</div>
+  if (loading && !event) return <div className="muted" style={{ padding: 40 }}>{t('common.loading')}</div>
+  if (notFound || !event) return <div className="muted" style={{ padding: 40 }}>{t('event.missing')}</div>
 
   // For a recurring occurrence (opened via ?on=), show THIS slot's date/time and
   // carry the series id + slot into edits/deletes — the loaded `event` is the
@@ -194,10 +197,10 @@ export function EventDetail() {
   // calendar may be Google OR Outlook, and a feed event isn't "synced" at all —
   // it's a read-only mirror we re-read on a schedule.
   const calStatus = isFeedEvent
-    ? `${view.calendarName ?? 'Calendar feed'} · from a subscribed calendar feed (read-only)`
+    ? t('event.feedStatus', { name: view.calendarName ?? t('event.calendarFeed') })
     : view.calendarName
-      ? `${view.calendarName}${view.syncState === 'synced' ? ' · synced' : ' · pending sync'}`
-      : 'Waffled only'
+      ? `${view.calendarName}${view.syncState === 'synced' ? ` · ${t('event.synced')}` : ` · ${t('event.pendingSync')}`}`
+      : t('event.waffledOnly')
 
   // Smart suggestion for an untagged, non-meal, single event that looks like a
   // goal. "Link" opens the editor pre-linked so the human confirms (and can pick
@@ -220,12 +223,12 @@ export function EventDetail() {
           <div className="ed-hero-title wf-serif">{view.title}</div>
           <div className="ed-hero-when">
             {view.allDay ? (
-              <span className="ed-hero-time">All day</span>
+              <span className="ed-hero-time">{t('calendar.allDay')}</span>
             ) : (
               <span className="ed-hero-time">{fmtTime(view)}</span>
             )}
             <span className="ed-hero-date">
-              {DOW_FULL[start.getDay()]}, {MONTHS[start.getMonth()]} {start.getDate()}
+              {formatDate(start, { weekday: 'long', month: 'long', day: 'numeric' })}
               {!view.allDay && ` · ${durationLabel(durationMin(view))}`}
             </span>
           </div>
@@ -235,7 +238,7 @@ export function EventDetail() {
           <div className="ed-suggest">
             <span className="ed-suggest-spark">✨</span>
             <span className="ed-suggest-txt">
-              Looks like this counts toward{' '}
+              {t('event.goalSuggest')}{' '}
               <b>{suggestedGoal.emoji ? `${suggestedGoal.emoji} ` : ''}{suggestedGoal.title}</b>
             </span>
             <button
@@ -246,9 +249,9 @@ export function EventDetail() {
                 setEditing(true)
               }}
             >
-              Link it
+              {t('event.link')}
             </button>
-            <button type="button" className="ed-suggest-x" aria-label="Dismiss" onClick={() => setDismissedSuggest(true)}>
+            <button type="button" className="ed-suggest-x" aria-label={t('tasks.dismiss')} onClick={() => setDismissedSuggest(true)}>
               ✕
             </button>
           </div>
@@ -258,40 +261,40 @@ export function EventDetail() {
           {isMeal && recipeId && (
             <button type="button" className="ed-row ed-row-btn" onClick={() => navigate(`/meals/recipe/${recipeId}`)}>
               <span className="ed-row-ic">📖</span>
-              <span className="ed-row-main"><span className="ed-row-k">Recipe</span><span className="ed-row-v">View the recipe</span></span>
+              <span className="ed-row-main"><span className="ed-row-k">{t('event.recipe')}</span><span className="ed-row-v">{t('event.viewRecipe')}</span></span>
               <span className="ed-row-go">›</span>
             </button>
           )}
           {view.location && (
             <div className="ed-row">
               <span className="ed-row-ic">📍</span>
-              <span className="ed-row-main"><span className="ed-row-k">Location</span><span className="ed-row-v">{view.location}</span></span>
+              <span className="ed-row-main"><span className="ed-row-k">{t('event.location')}</span><span className="ed-row-v">{view.location}</span></span>
               <a
                 className="pill ed-row-act"
                 href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(view.location)}`}
                 target="_blank"
                 rel="noreferrer"
               >
-                Directions
+                {t('event.directions')}
               </a>
             </div>
           )}
           <div className="ed-row">
             <span className="ed-row-ic">📅</span>
-            <span className="ed-row-main"><span className="ed-row-k">Calendar</span><span className="ed-row-v">{calStatus}</span></span>
+            <span className="ed-row-main"><span className="ed-row-k">{t('event.calendar')}</span><span className="ed-row-v">{calStatus}</span></span>
             {view.syncState === 'synced' && <span className="ed-dot" style={{ background: color }} />}
           </div>
           {view.rrule && (
             <div className="ed-row">
               <span className="ed-row-ic">🔁</span>
-              <span className="ed-row-main"><span className="ed-row-k">Repeats</span><span className="ed-row-v">{describeRrule(view.rrule, new Date(view.startsAt))}</span></span>
+              <span className="ed-row-main"><span className="ed-row-k">{t('calendar.repeats')}</span><span className="ed-row-v">{describeRrule(view.rrule, new Date(view.startsAt))}</span></span>
             </div>
           )}
           {people.length > 0 && (
             <div className="ed-row">
               <span className="ed-row-ic">👥</span>
               <span className="ed-row-main">
-                <span className="ed-row-k">With</span>
+                <span className="ed-row-k">{t('event.with')}</span>
                 <span className="ed-row-v">{people.map((p) => p.name).filter(Boolean).join(' · ')}</span>
               </span>
               <span className="ed-row-avs">
@@ -307,7 +310,7 @@ export function EventDetail() {
 
         {view.description && (
           <div className="card ed-notes">
-            <div className="card-h" style={{ marginBottom: 8 }}>Notes</div>
+            <div className="card-h" style={{ marginBottom: 8 }}>{t('event.notes')}</div>
             <div className="ed-notes-b">{view.description}</div>
           </div>
         )}
@@ -321,11 +324,11 @@ export function EventDetail() {
               <>
                 <div className="ed-ai-h">{insight.headline}</div>
                 <div className="ed-ai-b">{insight.body}</div>
-                {insight.leaveBy && <div className="ed-ai-chip">🚗 Leave by {insight.leaveBy}</div>}
+                {insight.leaveBy && <div className="ed-ai-chip">🚗 {t('event.leaveBy', { time: insight.leaveBy })}</div>}
               </>
             ) : (
               // Don't assert a headline before the model has decided — shimmer it too.
-              <div className="ai-think" aria-label="Thinking…">
+              <div className="ai-think" aria-label={t('event.thinking')}>
                 <div className="ai-thiwf-bar head" />
                 <div className="ai-thiwf-bar" />
                 <div className="ai-thiwf-bar short" />
@@ -333,8 +336,8 @@ export function EventDetail() {
             )}
             {remindShown && (
               <div className="ed-ai-reminder">
-                ⏰ {insight ? insight.reminder : 'One moment…'}
-                <span className="tiny muted"> · reminders don’t fire yet — coming soon</span>
+                ⏰ {insight ? insight.reminder : t('event.oneMoment')}
+                <span className="tiny muted"> · {t('event.remindersSoon')}</span>
               </div>
             )}
           </div>

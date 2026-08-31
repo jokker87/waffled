@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { usePersons, eventsApi, type AgendaEvent } from '../../lib/api'
 import { useEventColor } from '../../lib/event-color'
 import { Icon } from '../icons'
+import { useI18n } from '../../lib/locale-provider'
 import {
   MONTHS, ymd, addDays, startOfWeek, localDate, fmtTime, eventPeople,
 } from './cal-utils'
@@ -117,27 +118,28 @@ function MiniMonth({ events, tz, colorOf, onPickDate }: { events: AgendaEvent[];
 // deterministic server-side fallback, so it always says something useful). Shows a
 // gentle placeholder while the first response lands.
 function HeadsUpCard({ refreshKey }: { refreshKey: number }) {
+  const { t, locale } = useI18n()
   const [card, setCard] = useState<{ headline: string; body: string } | null>(null)
 
   useEffect(() => {
     let alive = true
     const ws = startOfWeek(new Date())
     eventsApi
-      .headsUp(ymd(ws), ymd(addDays(ws, 6)))
+      .headsUp(ymd(ws), ymd(addDays(ws, 6)), locale)
       .then((d) => alive && setCard({ headline: d.headline, body: d.body }))
       .catch(() => {})
     return () => { alive = false }
-  }, [refreshKey])
+  }, [refreshKey, locale])
 
   return (
     <div className="ag-ai">
       <div className={`ag-ai-icon ${card ? '' : 'thinking'}`}><Icon name="spark" /></div>
       <div className="ed-ai-main">
-        <div className="ag-ai-h">{card?.headline ?? 'Heads up this week'}</div>
+        <div className="ag-ai-h">{card?.headline ?? t('calendar.headsUp')}</div>
         {card ? (
           <div className="ag-ai-b">{card.body}</div>
         ) : (
-          <div className="ai-think" aria-label="Thinking…">
+          <div className="ai-think" aria-label={t('event.thinking')}>
             <div className="ai-thiwf-bar" />
             <div className="ai-thiwf-bar short" />
           </div>
@@ -160,6 +162,7 @@ export function AgendaView({
   onPickDate: (d: Date) => void
   onCreate: (date: string) => void
 }) {
+  const { t, formatDate } = useI18n()
   const { persons = [] } = usePersons()
   // The agenda surfaces use a lighter unassigned grey than the calendar grids.
   const colorOf = useEventColor('#A6A29B')
@@ -209,20 +212,20 @@ export function AgendaView({
   return (
     <div className="ag-screen">
       <div className="ag-list">
-        <div className="wf-serif ag-h">What's coming up</div>
+        <div className="wf-serif ag-h">{t('calendar.upcoming')}</div>
         {/* Quick-add, matching the Day/Week bar — defaults to today. */}
         <button type="button" className="wk-add ag-add" onClick={() => onCreate(todayKey)}>
           <span className="wk-add-plus">＋</span>
-          <span className="wk-add-ph">Add an event…</span>
+          <span className="wk-add-ph">{t('calendar.addEvent')}</span>
         </button>
-        {groups.length === 0 && <div className="muted" style={{ padding: '14px 4px' }}>Nothing upcoming.</div>}
+        {groups.length === 0 && <div className="muted" style={{ padding: '14px 4px' }}>{t('calendar.nothingUpcoming')}</div>}
         {groups.map((g) => (
           <div key={g.key} className="ag-group">
             <div className="ag-group-h">
               <span className="wf-serif">{dayLabel(g.date, todayMid)}</span>
-              <span className="muted">{g.date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</span>
+              <span className="muted">{formatDate(g.date, { weekday: 'short', month: 'short', day: 'numeric' })}</span>
               {/* Add on this specific day — parity with tapping a day elsewhere. */}
-              <button type="button" className="ag-group-add" title={`Add an event on ${g.date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}`} aria-label="Add an event on this day" onClick={() => onCreate(g.key)}>＋</button>
+              <button type="button" className="ag-group-add" title={`${t('calendar.addEvent')} ${formatDate(g.date, { weekday: 'long', month: 'long', day: 'numeric' })}`} aria-label={t('calendar.addOnDay')} onClick={() => onCreate(g.key)}>＋</button>
             </div>
             {g.events.map((e) => (
               <AgendaRow key={e.id} event={e} past={isPastEvent(e, today)} color={colorOf(e)} onClick={() => onOpenEvent(e)} />
@@ -238,7 +241,7 @@ export function AgendaView({
 
         {busy.rows.length > 0 && (
           <div className="card ag-busy">
-            <div className="card-h" style={{ marginBottom: 12 }}>Whose week is busy?</div>
+            <div className="card-h" style={{ marginBottom: 12 }}>{t('calendar.busy')}</div>
             {busy.rows.map(({ person, count }) => {
               const color = person.colorHex ?? '#A6A29B'
               return (

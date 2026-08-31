@@ -140,13 +140,39 @@ Hard rules (do NOT break these):
   fine and expected; fabricating ingredients/steps is not.
 - Return ONLY the markdown, nothing else.`
 
-const PHOTO_SYSTEM = `You transcribe photos of physical or printed recipes into structured Markdown.
-Read every provided image (they may be multiple pages/photos of ONE recipe) and combine them into one recipe.
-${FORMAT_SPEC}`
+export type RecipeIngestMode = 'photo' | 'text'
 
-const VOICE_SYSTEM = `You turn a free-form spoken or typed description of a recipe into structured Markdown.
-The description may be rambling, out of order, or incomplete — organize it into clear ingredients and numbered steps without inventing specifics that weren't said.
+// Browser locales are hints, not trusted prompt text. Limiting the shape prevents a
+// caller from smuggling instructions into the system prompt while accepting normal
+// values such as de-CH, fr-FR, pt-BR, or zh-Hant-TW.
+export function normalizeLanguageHint(language: unknown): string | null {
+  if (typeof language !== 'string') return null
+  const value = language.trim()
+  return /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,3}$/.test(value) ? value : null
+}
+
+export function recipeIngestSystemPrompt(mode: RecipeIngestMode, language?: unknown): string {
+  const locale = normalizeLanguageHint(language)
+  const opening = mode === 'photo'
+    ? 'You transcribe photos of physical or printed recipes into structured Markdown. Read every provided image (they may be multiple pages/photos of ONE recipe) and combine them into one recipe.'
+    : "You turn a free-form spoken or typed description of a recipe into structured Markdown. The description may be rambling, out of order, or incomplete — organize it into clear ingredients and numbered steps without inventing specifics that weren't said."
+  return `${opening}
+
+LANGUAGE RULES:
+- The source can be in ANY language. Understand it in that language; do not assume English.
+- Preserve the source language for the recipe title, ingredient names, section names, instructions, notes, tags, and other human-facing values. Do NOT translate those values to English.
+- The preferred output locale is ${locale ?? 'the language detected from the source'}. If the source language is clear, it takes precedence over this hint.
+- Keep the structural Markdown labels exactly in English (Ingredients, Instructions, Notes, Source, Timer, and the frontmatter keys), because they are machine-readable markers and are not displayed as recipe content.
+
+INGREDIENT NORMALIZATION RULES:
+- Output exactly ONE purchasable ingredient per top-level ingredient bullet. Each bullet becomes one database ingredient.
+- Split combined phrases into separate bullets when they name separate ingredients, including conjunctions, comma lists, slashes, or alternatives used as additions (for example “salt and pepper” becomes two bullets).
+- Do not split a single ingredient's descriptive name or preparation phrase (for example “salted butter”, “red bell pepper”, or “onion, finely chopped”).
+- Never put an instruction, equipment item, or multiple ingredients into one ingredient name.
+- Preserve each ingredient's own amount, unit, and preparation note. If a shared amount cannot safely be divided, repeat the source wording without inventing quantities.
+
 ${FORMAT_SPEC}`
+}
 
 const AI_UNAVAILABLE_RE = /no ai provider|not configured|not selected/i
 
@@ -172,9 +198,9 @@ export function isAiUnavailable(err: unknown): boolean {
 }
 
 // ── Speech / text → recipe ───────────────────────────────────────────────────
-export async function ingestRecipeFromText(tenant: { householdId: string }, text: string): Promise<{ draft: RecipeDraft; via: string }> {
+export async function ingestRecipeFromText(tenant: { householdId: string }, text: string, language?: unknown): Promise<{ draft: RecipeDraft; via: string }> {
   const { data, via } = await completeJson(tenant.householdId, {
-    system: VOICE_SYSTEM,
+    system: recipeIngestSystemPrompt('text', language),
     user: text.trim(),
     schema: INGEST_SCHEMA,
     schemaName: 'recipe_markdown',
@@ -216,7 +242,8 @@ export async function recordIngestPhotos(
 
 export async function ingestRecipeFromPhotos(
   tenant: { householdId: string },
-  photos: IngestPhotoInput[]
+  photos: IngestPhotoInput[],
+  language?: unknown
 ): Promise<{ draft: RecipeDraft; via: string; photoKeys: string[] }> {
   // Validate + decode every image up front. Bad input is a 400 (IngestInputError) and is
   // checked BEFORE the vision gate — it stores nothing, so "gate before store" still holds,
@@ -245,7 +272,7 @@ export async function ingestRecipeFromPhotos(
 
   const images: LlmImage[] = decoded.map((d) => ({ contentType: d.contentType, dataBase64: d.dataBase64 }))
   const { data, via } = await completeJson(tenant.householdId, {
-    system: PHOTO_SYSTEM,
+    system: recipeIngestSystemPrompt('photo', language),
     user: 'Transcribe this recipe into the required markdown format.',
     schema: INGEST_SCHEMA,
     schemaName: 'recipe_markdown',

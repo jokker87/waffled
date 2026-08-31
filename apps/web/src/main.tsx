@@ -11,6 +11,7 @@ import { registerServiceWorker } from './lib/pwa'
 import { connectPowerSync } from './lib/powersync/db'
 import { initTheme } from './lib/theme'
 import { applyEventStyle } from './lib/display'
+import { LanguageProvider } from './lib/locale-provider'
 
 // Apply the saved (or OS-matched) theme before first paint to avoid a flash.
 initTheme()
@@ -22,11 +23,13 @@ applyEventStyle('solid')
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <BrowserRouter>
-      <KioskDisplay>
-        <AuthGate>
-          <KioskRoutes />
-        </AuthGate>
-      </KioskDisplay>
+      <LanguageProvider>
+        <KioskDisplay>
+          <AuthGate>
+            <KioskRoutes />
+          </AuthGate>
+        </KioskDisplay>
+      </LanguageProvider>
     </BrowserRouter>
   </StrictMode>
 )

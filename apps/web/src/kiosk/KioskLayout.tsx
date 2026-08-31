@@ -10,11 +10,13 @@ import { TopbarSlotProvider } from './topbar-slot'
 import { Icon } from './icons'
 import { SCREENS, SETTINGS } from './nav'
 import '../styles/kiosk-profiles.css'
+import { useI18n } from '../lib/locale-provider'
 
 // The persistent kiosk chrome (responsive, fills the viewport). The active
 // screen renders in the Outlet and can fill the topbar's right slot. (Idle /
 // screensaver / keep-awake live in KioskDisplay, which wraps the whole app.)
 export function KioskLayout() {
+  const { t } = useI18n()
   const [navOpen, setNavOpen] = useState(false)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const location = useLocation()
@@ -41,13 +43,13 @@ export function KioskLayout() {
         <header className="mobile-header">
           <Link to="/" className="mobile-brand" aria-label="Waffled home">
             <img src="/logo.png" alt="" />
-            <span>{active?.label ?? 'Waffled'}</span>
+            <span>{active ? t(active.labelKey) : 'Waffled'}</span>
           </Link>
           <button
             ref={triggerRef}
             type="button"
             className="mobile-menu-button"
-            aria-label={navOpen ? 'Close navigation' : 'Open navigation'}
+            aria-label={navOpen ? t('nav.close') : t('nav.open')}
             aria-controls="primary-navigation"
             aria-expanded={navOpen}
             onClick={() => setNavOpen((open) => !open)}
@@ -58,7 +60,7 @@ export function KioskLayout() {
         <button
           type="button"
           className={`mobile-nav-scrim${navOpen ? ' open' : ''}`}
-          aria-label="Close navigation"
+          aria-label={t('nav.close')}
           tabIndex={navOpen ? 0 : -1}
           onClick={() => setNavOpen(false)}
         />

@@ -6,6 +6,9 @@ import { RewardsPanel } from './components/RewardsPanel'
 import { ChoreApprovalsCard, ChoreProofModal } from './components/Approvals'
 import { choresApi, usePersons, useHousehold, can, useDayInstances, useAwaitingChores, useCurrencies, localToday, uploadImage, type ChoreInstance } from '../lib/api'
 import { rewardsEnabled } from '../lib/modules'
+import { useI18n } from '../lib/locale-provider'
+
+type Translator = (key: string, vars?: Record<string, string | number>) => string
 
 // Shift a YYYY-MM-DD by N days (local), and describe a day relative to today.
 function shiftDate(d: string, days: number): string {
@@ -13,49 +16,47 @@ function shiftDate(d: string, days: number): string {
   dt.setDate(dt.getDate() + days)
   return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`
 }
-function dayMeta(d: string): { rel: string; full: string; diff: number; weekday: string } {
+function dayMeta(d: string, locale: string, t: Translator): { rel: string; full: string; diff: number; weekday: string } {
   const dt = new Date(`${d}T00:00:00`)
   const diff = Math.round((dt.getTime() - new Date(`${localToday()}T00:00:00`).getTime()) / 86_400_000)
-  const rel = diff === 0 ? 'Today' : diff === 1 ? 'Tomorrow' : diff === -1 ? 'Yesterday' : diff > 0 ? `In ${diff} days` : `${-diff} days ago`
-  const full = dt.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })
-  const weekday = dt.toLocaleDateString('en-US', { weekday: 'long' })
+  const rel = diff === 0 ? t('tasks.today') : diff === 1 ? t('tasks.tomorrow') : diff === -1 ? t('tasks.yesterday') : diff > 0 ? t('tasks.inDays', { count: diff }) : t('tasks.daysAgo', { count: -diff })
+  const full = dt.toLocaleDateString(locale, { weekday: 'long', month: 'short', day: 'numeric' })
+  const weekday = dt.toLocaleDateString(locale, { weekday: 'long' })
   return { rel, full, diff, weekday }
 }
 
 // Format an "HH:MM" due time as a friendly "4:30 PM". Returns '' for empty input.
-function fmtTime(hhmm: string | null): string {
+function fmtTime(hhmm: string | null, locale: string): string {
   if (!hhmm) return ''
   const [h, m] = hhmm.split(':').map(Number)
   if (Number.isNaN(h) || Number.isNaN(m)) return ''
-  const ampm = h < 12 ? 'AM' : 'PM'
-  const h12 = h % 12 === 0 ? 12 : h % 12
-  return `${h12}:${String(m).padStart(2, '0')} ${ampm}`
+  return new Date(2000, 0, 1, h, m).toLocaleTimeString(locale, { hour: 'numeric', minute: '2-digit' })
 }
 
 // A carried-forward one-off keeps its original due date, so when it shows up on a
 // later day it's overdue. Describe how long ago it was due ("since Mon", or a date
 // once it's more than a week old). Returns null when it's not actually overdue.
-function overdueLabel(dueOn: string, viewing: string): string | null {
+function overdueLabel(dueOn: string, viewing: string, locale: string, t: Translator): string | null {
   const due = new Date(`${dueOn}T00:00:00`)
   const ref = new Date(`${viewing}T00:00:00`)
   const diff = Math.round((ref.getTime() - due.getTime()) / 86_400_000)
   if (diff <= 0) return null
-  if (diff === 1) return 'since yesterday'
-  if (diff < 7) return `since ${due.toLocaleDateString('en-US', { weekday: 'short' })}`
-  return `since ${due.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
+  if (diff === 1) return t('tasks.sinceYesterday')
+  if (diff < 7) return t('tasks.sinceDate', { date: due.toLocaleDateString(locale, { weekday: 'short' }) })
+  return t('tasks.sinceDate', { date: due.toLocaleDateString(locale, { month: 'short', day: 'numeric' }) })
 }
 
 // A future-dated one-off shows on the list from the day it's added, so mark that it's
 // not due yet ("due tomorrow", "due Fri", or a date further out). Returns null when the
 // due date is today or already past (that's the overdue case above).
-function upcomingLabel(dueOn: string, viewing: string): string | null {
+function upcomingLabel(dueOn: string, viewing: string, locale: string, t: Translator): string | null {
   const due = new Date(`${dueOn}T00:00:00`)
   const ref = new Date(`${viewing}T00:00:00`)
   const diff = Math.round((due.getTime() - ref.getTime()) / 86_400_000)
   if (diff <= 0) return null
-  if (diff === 1) return 'due tomorrow'
-  if (diff < 7) return `due ${due.toLocaleDateString('en-US', { weekday: 'short' })}`
-  return `due ${due.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
+  if (diff === 1) return t('tasks.dueTomorrow')
+  if (diff < 7) return t('tasks.dueDate', { date: due.toLocaleDateString(locale, { weekday: 'short' }) })
+  return t('tasks.dueDate', { date: due.toLocaleDateString(locale, { month: 'short', day: 'numeric' }) })
 }
 
 type Column = { key: string; name: string; items: ChoreInstance[]; emoji?: string | null; color?: string | null }
@@ -97,6 +98,7 @@ function draftFrom(i: ChoreInstance): ChoreDraft {
 // The Tasks screen: today's chores per person. Tick to complete/uncomplete;
 // click a chore to edit; add chores per person or via New.
 export function Tasks() {
+  const { t, locale } = useI18n()
   const [date, setDate] = useState(() => localToday())
   const { instances, loading, error, setDone, assign, refetch } = useDayInstances(date)
   const { persons } = usePersons()
@@ -123,7 +125,7 @@ export function Tasks() {
   const [proofErr, setProofErr] = useState<string | null>(null)
   // The awaiting chore whose photo proof is open in the review modal.
   const [review, setReview] = useState<ChoreInstance | null>(null)
-  const meta = dayMeta(date)
+  const meta = dayMeta(date, locale, t)
   const isToday = meta.diff === 0
 
   // Drag-and-drop to reassign a chore between columns. Pointer events (not HTML5
@@ -225,32 +227,32 @@ export function Tasks() {
     <div className="tasks-page">
       <div className="tasks-head">
         <div className="card-h wf-serif" style={{ fontSize: 26, fontWeight: 600 }}>
-          {tab === 'chores' ? `${Math.abs(meta.diff) <= 1 ? meta.rel : meta.weekday}’s chores` : 'Reward Shop'}
+          {tab === 'chores' ? t('tasks.dayChores', { day: Math.abs(meta.diff) <= 1 ? meta.rel : meta.weekday }) : t('tasks.rewardShop')}
         </div>
         {rewardsOn && (
           <div className="seg" style={{ marginLeft: 'auto' }}>
-            <button className={tab === 'chores' ? 'on' : ''} style={{ cursor: 'pointer' }} onClick={() => setTab('chores')}>Chores</button>
-            <button className={tab === 'rewards' ? 'on' : ''} style={{ cursor: 'pointer' }} onClick={() => setTab('rewards')}>Rewards</button>
+            <button className={tab === 'chores' ? 'on' : ''} style={{ cursor: 'pointer' }} onClick={() => setTab('chores')}>{t('tasks.chores')}</button>
+            <button className={tab === 'rewards' ? 'on' : ''} style={{ cursor: 'pointer' }} onClick={() => setTab('rewards')}>{t('tasks.rewards')}</button>
           </div>
         )}
         {tab === 'chores' && (
           <button type="button" className="pill" style={{ cursor: 'pointer' }} onClick={() => setModal({})}>
             <Icon name="plus" />
-            <span>New chore</span>
+            <span>{t('tasks.new')}</span>
           </button>
         )}
       </div>
 
       {tab === 'chores' && (
         <div className="tasks-datenav">
-          <button type="button" className="dn-arrow" aria-label="Previous day" onClick={() => setDate(shiftDate(date, -1))}>‹</button>
+          <button type="button" className="dn-arrow" aria-label={t('tasks.previousDay')} onClick={() => setDate(shiftDate(date, -1))}>‹</button>
           <div className="dn-label">
             <span className="dn-full">{meta.full}</span>
             <span className="dn-rel">{meta.rel}</span>
           </div>
-          <button type="button" className="dn-arrow" aria-label="Next day" onClick={() => setDate(shiftDate(date, 1))}>›</button>
+          <button type="button" className="dn-arrow" aria-label={t('tasks.nextDay')} onClick={() => setDate(shiftDate(date, 1))}>›</button>
           {!isToday && (
-            <button type="button" className="dn-today" onClick={() => setDate(localToday())}>Today</button>
+            <button type="button" className="dn-today" onClick={() => setDate(localToday())}>{t('tasks.today')}</button>
           )}
         </div>
       )}
@@ -259,7 +261,7 @@ export function Tasks() {
         <div style={{ padding: '0 30px 12px' }}>
           <div className="card" role="alert" style={{ padding: '10px 14px', display: 'flex', gap: 10, alignItems: 'center', borderColor: 'var(--danger)' }}>
             <span style={{ flex: 1, fontSize: 14 }}>{proofErr}</span>
-            <button type="button" className="pill" onClick={() => setProofErr(null)}>Dismiss</button>
+            <button type="button" className="pill" onClick={() => setProofErr(null)}>{t('tasks.dismiss')}</button>
           </div>
         </div>
       )}
@@ -274,8 +276,8 @@ export function Tasks() {
 
       {tab === 'chores' && (
       <div className="tasks-screen">
-        {loading && <div className="muted" style={{ padding: 20 }}>Loading…</div>}
-        {error && <div className="muted" style={{ padding: 20 }}>Couldn't load chores — try reloading or signing in again.</div>}
+        {loading && <div className="muted" style={{ padding: 20 }}>{t('common.loading')}</div>}
+        {error && <div className="muted" style={{ padding: 20 }}>{t('tasks.loadingError')}</div>}
         {!loading && !error && groups.map((g) => {
           const done = g.items.filter((i) => i.status === 'done').length
           const upForGrabs = g.key === 'unassigned'
@@ -287,7 +289,7 @@ export function Tasks() {
                   {upForGrabs ? (
                     <>
                       <span className="chore-ava grabs">🙌</span>
-                      Up for grabs
+                      {t('tasks.available')}
                     </>
                   ) : (
                     <>
@@ -296,12 +298,12 @@ export function Tasks() {
                     </>
                   )}
                 </span>
-                <span className="badge" title="Chores done">
+                <span className="badge" title={t('tasks.done')}>
                   <Check size={13} /> {done}/{g.items.length}
                 </span>
               </div>
               {upForGrabs && g.items.length > 0 && (
-                <div className="tiny muted chore-grabs-hint">Tap a chore to claim it — whoever does it gets the stars.</div>
+                <div className="tiny muted chore-grabs-hint">{t('tasks.claimHint')}</div>
               )}
               {g.items.length === 0 && (
                 <div className="tiny muted chore-empty">
@@ -339,16 +341,16 @@ export function Tasks() {
                         {i.choreTitle}
                         {i.streak >= 2 && <span className="chore-streak" title={`${i.streak}-day streak`}>🔥 {i.streak}</span>}
                         {!isComplete && (() => {
-                          const od = overdueLabel(i.dueOn, date)
+                          const od = overdueLabel(i.dueOn, date, locale, t)
                           if (od) return <span className="chore-overdue" title={`Was due ${i.dueOn}`}>overdue · {od}</span>
-                          const up = upcomingLabel(i.dueOn, date)
+                          const up = upcomingLabel(i.dueOn, date, locale, t)
                           return up ? <span className="chore-upcoming" title={`Due ${i.dueOn}`}>{up}</span> : null
                         })()}
                       </div>
                       <div className="star">
                         <span style={{ fontSize: 12 }}>{(i.rewardCurrency ? cur.byKey[i.rewardCurrency] : cur.defaultCurrency)?.symbol ?? '⭐'}</span> {i.rewardAmount ?? 0}
-                        {i.dueTime && <span className="chore-time" title={`Due at ${fmtTime(i.dueTime)}`}>🕒 {fmtTime(i.dueTime)}</span>}
-                        {isAwaiting && <span className="chore-awaiting-tag">Needs OK</span>}
+                        {i.dueTime && <span className="chore-time" title={t('tasks.dueAt', { time: fmtTime(i.dueTime, locale) })}>🕒 {fmtTime(i.dueTime, locale)}</span>}
+                        {isAwaiting && <span className="chore-awaiting-tag">{t('tasks.needsOk')}</span>}
                       </div>
                     </div>
                     {isAwaiting && canApprove && (
@@ -362,15 +364,15 @@ export function Tasks() {
                           </button>
                         ) : (
                           <>
-                            <button type="button" className="ca-reject" onClick={() => reject(i.id)}>Reject</button>
-                            <button type="button" className="ca-approve" onClick={() => approve(i.id)}>Approve</button>
+                            <button type="button" className="ca-reject" onClick={() => reject(i.id)}>{t('tasks.reject')}</button>
+                            <button type="button" className="ca-approve" onClick={() => approve(i.id)}>{t('tasks.approve')}</button>
                           </>
                         )}
                       </div>
                     )}
                     {upForGrabs && picking && (
                       <div className="claim-pick" onClick={(e) => e.stopPropagation()}>
-                        <span className="claim-pick-q">Who did it?</span>
+                        <span className="claim-pick-q">{t('tasks.whoDid')}</span>
                         {persons.map((p) => (
                           <button key={p.id} type="button" className="claim-p" title={`${p.name} did it`} onClick={() => (i.requiresPhoto ? startProof(i.id, p.id) : claimAndComplete(i.id, p.id))}>
                             {p.avatarEmoji ?? '🙂'}

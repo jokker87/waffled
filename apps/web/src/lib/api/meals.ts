@@ -343,11 +343,11 @@ export const mealsApi = {
   // needs any provider; `vision` (photo → recipe) needs a vision-capable model.
   ingestConfig: () => apiGet<{ text: boolean; vision: boolean }>('/api/recipes/ingest/config'),
   // Free-form spoken/typed description → structured recipe draft (does NOT save).
-  ingestVoice: (text: string) => apiSend<ParsedRecipe>('POST', '/api/recipes/ingest/voice', { text }),
+  ingestVoice: (text: string, language?: string) => apiSend<ParsedRecipe>('POST', '/api/recipes/ingest/voice', { text, language }),
   // Photo(s) of a physical recipe → structured recipe draft (does NOT save). Source
   // photos are held server-side briefly then auto-deleted.
-  ingestPhoto: (images: Array<{ data: string; contentType: string }>) =>
-    apiSend<ParsedRecipe>('POST', '/api/recipes/ingest/photo', { images }),
+  ingestPhoto: (images: Array<{ data: string; contentType: string }>, language?: string) =>
+    apiSend<ParsedRecipe>('POST', '/api/recipes/ingest/photo', { images, language }),
   suggestMetadata: (input: { title: string; ingredients: string[]; steps: string[] }) =>
     apiSend<{ suggestion: RecipeMetadataSuggestion | null; via: string; error?: string }>('POST', '/api/recipes/suggest-metadata', input),
 }

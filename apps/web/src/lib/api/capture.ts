@@ -52,11 +52,11 @@ interface ServerParse {
 export const captureApi = {
   // Returns the parsed intent and which provider produced it. `via` is 'on-device'
   // whenever we used the local heuristic (server deferral, error, or offline).
-  resolve: async (text: string, names: string[], lists: string[] = []): Promise<{ intent: ParsedIntent | null; via: string }> => {
+  resolve: async (text: string, names: string[], lists: string[] = [], language?: string): Promise<{ intent: ParsedIntent | null; via: string }> => {
     const local = () => ({ intent: parseCapture(text, names, new Date(), lists), via: 'on-device' })
     if (typeof navigator !== 'undefined' && navigator.onLine === false) return local()
     try {
-      const r = await apiSend<ServerParse>('POST', '/api/capture', { text })
+      const r = await apiSend<ServerParse>('POST', '/api/capture', { text, language })
       if (r.fallback || !r.intent) return local()
       // TIER 2 — normalize a mutate's verb args onto intent.args (accept both spellings);
       // dropping them turned "give the dishes to Wally" into a reassign with no assignee.

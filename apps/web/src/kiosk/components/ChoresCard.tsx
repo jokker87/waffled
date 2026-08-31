@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link } from 'react-router'
 import { useChoresToday, useCurrencies, useHousehold, can, type PersonChores } from '../../lib/api'
 import { SpotAwardModal } from './SpotAwardModal'
+import { useI18n } from '../../lib/locale-provider'
 
 // Per-person progress ring, colored by the member's own color. `sym` is the
 // household default currency symbol (renders ⭐ / 💵 / etc. from the catalog).
@@ -49,6 +50,7 @@ function Ring({ person, sym }: { person: PersonChores; sym: string }) {
 }
 
 function UpForGrabsRow({ count }: { count: number }) {
+  const { t } = useI18n()
   return (
     <Link
       to="/tasks"
@@ -71,9 +73,9 @@ function UpForGrabsRow({ count }: { count: number }) {
         🙌
       </div>
       <div style={{ flex: 1 }}>
-        <div style={{ fontSize: 15, fontWeight: 700 }}>Up for grabs</div>
+        <div style={{ fontSize: 15, fontWeight: 700 }}>{t('tasks.available')}</div>
         <div className="tiny muted">
-          {count} {count === 1 ? 'chore' : 'chores'} available
+          {count} {t(count === 1 ? 'tasks.chore' : 'tasks.choresLower')} {t('tasks.availableLower')}
         </div>
       </div>
     </Link>
@@ -81,6 +83,7 @@ function UpForGrabsRow({ count }: { count: number }) {
 }
 
 export function ChoresCard() {
+  const { t } = useI18n()
   const { people, upForGrabs, loading, error } = useChoresToday()
   const { defaultCurrency, currencies } = useCurrencies()
   const { person: me } = useHousehold()
@@ -94,18 +97,18 @@ export function ChoresCard() {
     <div className="card" style={{ padding: '18px 20px' }}>
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: 4 }}>
         <div className="card-h" style={{ fontSize: 17 }}>
-          Family Chores
+          {t('tasks.familyChores')}
         </div>
         <Link to="/tasks" className="tiny muted" style={{ marginLeft: 'auto', textDecoration: 'none', color: 'var(--ink-2)' }}>
-          Today ›
+          {t('tasks.today')} ›
         </Link>
       </div>
-      {loading && <div className="tiny muted" style={{ padding: '8px 0' }}>Loading…</div>}
+      {loading && <div className="tiny muted" style={{ padding: '8px 0' }}>{t('common.loading')}</div>}
       {error && (
-        <div className="tiny muted" style={{ padding: '8px 0' }}>Couldn't load chores — reload or sign in.</div>
+        <div className="tiny muted" style={{ padding: '8px 0' }}>{t('tasks.shortLoadError')}</div>
       )}
       {!loading && !error && withChores.length === 0 && upForGrabs === 0 && (
-        <div className="tiny muted" style={{ padding: '8px 0' }}>No chores yet.</div>
+        <div className="tiny muted" style={{ padding: '8px 0' }}>{t('tasks.noChores')}</div>
       )}
       {upForGrabs > 0 && <UpForGrabsRow count={upForGrabs} />}
       {withChores.map((p) => (
