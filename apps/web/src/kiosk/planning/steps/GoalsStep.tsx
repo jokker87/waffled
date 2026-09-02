@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router'
 import {
   planningGoalsApi,
   planningGoalsDecision,
@@ -15,6 +14,7 @@ import {
   type PlanningGoalsView,
 } from '../../../lib/api'
 import { CATEGORIES } from '../../categories'
+import { GoalCreate } from '../../GoalCreate'
 import type { PlanningStepModule, StepBodyProps } from '../registry'
 import '../../../styles/planning-goals.css'
 
@@ -32,9 +32,12 @@ import '../../../styles/planning-goals.css'
 // this body mirrors it back through `setDecisionData` so pressing the primary (which
 // REPLACES the step's data) writes back what is already there.
 //
-// "＋ New goal for this week" routes into the app's own goal editor with the group
-// preselected AND `featured=1`, so the goal you leave to create comes back as this
-// week's focus rather than needing a second trip.
+// "＋ New goal for this week" opens the app's own goal editor as a MODAL over the week,
+// not a route. Navigating to /goals/new abandoned the session — nothing brought the
+// family back, so a fifteen-second answer ejected them from the whole thing. Embedded,
+// the group they were looking at is fixed (not re-offered, so it can't be answered for
+// the wrong group by accident) and the goal is created already pinned, which is what
+// makes it come back as this week's focus without a second trip.
 
 const TYPE_LABEL: Record<string, string> = { count: 'Count', total: 'Total', habit: 'Habit', checklist: 'Checklist' }
 
@@ -132,7 +135,6 @@ function GoalOption({ goal, checked, disabled, onPick }: {
 }
 
 function Body({ sessionId, setDecisionData, refresh, busy }: StepBodyProps) {
-  const navigate = useNavigate()
   const { person } = useHousehold()
   const canManageGoals = can(person, 'goal.manage')
   const [view, setView] = useState<PlanningGoalsView | null>(null)
@@ -142,6 +144,9 @@ function Body({ sessionId, setDecisionData, refresh, busy }: StepBodyProps) {
   // The list a write is in flight for. Only one answer is ever in flight — a second
   // click while the first is landing would race two reads of the same session crumb.
   const [saving, setSaving] = useState<string | null>(null)
+  // The group the new-goal modal is open for, or null. Holding the LIST ID (not the
+  // group object) keeps it right across a refetch that replaces every group.
+  const [newForId, setNewForId] = useState<string | null>(null)
 
   useEffect(() => {
     let alive = true
@@ -188,14 +193,36 @@ function Body({ sessionId, setDecisionData, refresh, busy }: StepBodyProps) {
     }
   }
 
-  // Mirrors the goals screen: carry the list prefill only when the caller could
-  // actually target it, otherwise the editor silently drops it and the preselect reads
-  // as a bug. (goal.manage holders for any list; everyone else only their own.)
-  // `featured=1` rides along with the list — it is meaningless without one.
-  function newGoalFor(g: PlanningGoalGroup) {
-    const canTarget = canManageGoals || (g.members.length === 1 && g.members[0].personId === person?.id)
-    navigate(`/goals/new${canTarget ? `?list=${g.listId}&featured=1` : ''}`)
+  // Whose goals this viewer may actually add to — the goals module's own rule:
+  // goal.manage holders for any group, everyone else only a group that is just them.
+  // Offering the editor for a group the server would refuse is show-then-403; the button
+  // says why instead.
+  const canTarget = (g: PlanningGoalGroup) =>
+    canManageGoals || (g.members.length === 1 && g.members[0].personId === person?.id)
+
+  // The new goal was created already pinned, so re-reading the step is all it takes for
+  // it to arrive as the group's focus (the server adopts a lone pin — see
+  // steps/goals.ts). Deliberately NOT a `setFocus` call: creating a goal is not the
+  // family confirming it for the week, so the tab stays unstarred until they say so.
+  async function goalCreated() {
+    setNewForId(null)
+    try {
+      setView(await planningGoalsApi.get(sessionId))
+    } catch {
+      /* keep the last good answer on screen; the goal itself was saved */
+    }
+    // The flag lives in the goals module — the agenda sheet and the counter should agree.
+    refresh()
   }
+
+  // Esc closes the editor, the way every other modal in the app behaves. Clicking the
+  // scrim deliberately does NOT: this one holds a half-typed goal.
+  useEffect(() => {
+    if (!newForId) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setNewForId(null) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [newForId])
 
   if (loading) return <div className="wpg-note">Reading your goal groups…</div>
   if (failed) return <div className="wpg-note">Couldn’t read your goals — reload, or skip this step.</div>
@@ -295,9 +322,26 @@ function Body({ sessionId, setDecisionData, refresh, busy }: StepBodyProps) {
               : 'No focus this week — that’s allowed'}
           </div>
 
-          <button type="button" className="btn btn-ghost wpg-new" disabled={busy} onClick={() => newGoalFor(active)}>
+          <button
+            type="button"
+            className="btn btn-ghost wpg-new"
+            disabled={busy || !canTarget(active)}
+            title={canTarget(active) ? undefined : `Adding a goal to ${active.name} needs permission to manage goals`}
+            onClick={() => setNewForId(active.listId)}
+          >
             ＋ New goal for this week
           </button>
+        </div>
+      )}
+
+      {/* The app's real goal editor, over the week rather than instead of it. The group
+          is fixed to the tab they were on and the goal is pinned on the way in. */}
+      {newForId && (
+        <div className="modal-overlay wpg-modal" data-testid="wpg-modal">
+          <div className="modal-card wpg-modal-card" role="dialog" aria-modal="true" aria-label="New goal for this week">
+            <button type="button" className="modal-close" aria-label="Close" onClick={() => setNewForId(null)}>×</button>
+            <GoalCreate embed={{ listId: newForId, featured: true, onCreated: goalCreated }} />
+          </div>
         </div>
       )}
     </div>

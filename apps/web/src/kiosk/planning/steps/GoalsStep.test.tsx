@@ -92,9 +92,22 @@ const VIEW = () => ({
 
 const calls: { url: string; method: string; body: Record<string, unknown> | null }[] = []
 
+// The double serves the goals module's OWN endpoints too, because the step now embeds
+// the app's real goal editor: it reads /api/goal-lists and /api/goals, and creating
+// POSTs /api/goals. The POST re-derives the view the way the server does — the new goal
+// arrives featured, and a group adopts a pin as its focus only when it has exactly one
+// (two pins are ambiguous and adopt neither), so nothing here can pass for the wrong
+// reason.
 function mockApi(view = VIEW()) {
   calls.length = 0
   const state = JSON.parse(JSON.stringify(view)) as ReturnType<typeof VIEW>
+  const reFocus = () => {
+    for (const g of state.groups) {
+      if (g.settled) continue
+      const pinned = g.goals.filter((x) => x.isFeatured)
+      g.focusGoalId = pinned.length === 1 ? pinned[0].id : null
+    }
+  }
   globalThis.fetch = vi.fn(async (url: string, init?: RequestInit) => {
     const u = String(url)
     const method = init?.method ?? 'GET'
@@ -110,6 +123,36 @@ function mockApi(view = VIEW()) {
       g.focusGoalId = body.goalId ?? null
       for (const x of g.goals) x.isFeatured = x.id === body.goalId
       return { ok: true, json: async () => JSON.parse(JSON.stringify(state)) }
+    }
+    if (u.includes('/api/weekly-planning/goals')) {
+      return { ok: true, json: async () => JSON.parse(JSON.stringify(state)) }
+    }
+    if (u.includes('/api/goal-lists')) {
+      return {
+        ok: true,
+        json: async () => ({
+          lists: state.groups.map((g) => ({
+            id: g.listId, name: g.name, emoji: g.emoji, colorHex: g.colorHex,
+            isPrivate: g.isPrivate, sortOrder: g.sortOrder, goalCount: g.goals.length,
+            members: g.members.map(({ personId, name, avatarEmoji, colorHex }) => ({ personId, name, avatarEmoji, colorHex })),
+          })),
+        }),
+      }
+    }
+    if (method === 'POST' && u.endsWith('/api/goals')) {
+      const g = state.groups.find((x) => x.listId === body.goalListId)!
+      g.goals.push(goal({
+        id: 'g-new', goalListId: g.listId, title: body.title, emoji: null, goalType: 'total',
+        unit: body.unit, target: body.targetValue, totalProgress: 0, periodDone: 0,
+        isFeatured: !!body.isFeatured, pace: null,
+      }))
+      reFocus()
+      return { ok: true, json: async () => ({ goal: { id: 'g-new' } }) }
+    }
+    if (u.includes('/api/goals')) {
+      const listId = new URL(u, 'http://x').searchParams.get('listId')
+      const goals = state.groups.filter((g) => !listId || g.listId === listId).flatMap((g) => g.goals)
+      return { ok: true, json: async () => ({ goals: JSON.parse(JSON.stringify(goals)) }) }
     }
     return { ok: true, json: async () => JSON.parse(JSON.stringify(state)) }
   }) as unknown as typeof fetch
@@ -293,14 +336,74 @@ describe('GoalsStep · picking the week’s focus', () => {
   })
 })
 
-describe('GoalsStep · when the honest answer does not exist yet', () => {
-  it('opens the app’s own goal editor with the group preselected and the goal pre-pinned', async () => {
+// When the honest answer doesn't exist yet.
+//
+// This used to navigate to /goals/new. That ejected the family from the session — a
+// fifteen-second detour with nothing to bring them back — so the editor now opens as a
+// modal OVER the week: same component, no route change, and the group they were looking
+// at is the group the goal belongs to.
+describe('GoalsStep · making the goal that does not exist yet', () => {
+  const openModal = async (group: string) => {
     renderStep()
     await waitFor(() => expect(screen.getAllByRole('tab')).toHaveLength(3))
-    fireEvent.click(tab('Lottie'))
+    fireEvent.click(tab(group))
     fireEvent.click(await screen.findByRole('button', { name: /New goal for this week/ }))
-    // `featured=1` is why the new goal comes back as the week's focus instead of
-    // needing a second trip through the picker.
-    await waitFor(() => expect(screen.getByTestId('loc').textContent).toBe('/goals/new?list=l-lottie&featured=1'))
+    return await screen.findByTestId('wpg-modal')
+  }
+
+  it('opens the editor in place, with the group they were on already fixed', async () => {
+    const modal = await openModal('Lottie')
+    // Stated, not offered: the tab they were on IS the target, and there is no picker
+    // to knock it off by accident.
+    expect(within(modal).getByTestId('ge-who-locked')).toHaveTextContent('Lottie')
+    expect(within(modal).queryByRole('button', { name: /＋ New group/ })).not.toBeInTheDocument()
+    // The session is still on screen behind it — no navigation happened.
+    expect(screen.getByTestId('loc').textContent).toBe('/planning/goals')
+    expect(screen.getAllByRole('tab')).toHaveLength(3)
+  })
+
+  it('creates the goal featured, closes, and leaves it selected as that group’s focus', async () => {
+    const modal = await openModal('Lottie')
+    fireEvent.change(within(modal).getByPlaceholderText('e.g. 750 Hours Outside'), { target: { value: 'Walk after dinner' } })
+    fireEvent.click(within(modal).getByRole('button', { name: 'Create goal' }))
+
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.url.endsWith('/api/goals'))).toBe(true))
+    const post = calls.find((c) => c.method === 'POST' && c.url.endsWith('/api/goals'))!
+    // The group is the one they were on, and the goal is pinned on the way in — that is
+    // what makes it come back as the week's focus.
+    expect(post.body).toMatchObject({ title: 'Walk after dinner', goalListId: 'l-lottie', isFeatured: true })
+
+    // Modal gone, session untouched, and the new goal is the one on screen.
+    await waitFor(() => expect(screen.queryByTestId('wpg-modal')).not.toBeInTheDocument())
+    expect(screen.getByTestId('loc').textContent).toBe('/planning/goals')
+    expect(await screen.findByRole('radio', { name: /Walk after dinner/ })).toBeChecked()
+    // Still on Lottie's tab, and it is NOT starred: a pin the session merely adopted is
+    // a focus to confirm, not a decision the session made for them.
+    expect(tab('Lottie')).toHaveAttribute('aria-selected', 'true')
+    expect(tab('Lottie')).not.toHaveAttribute('data-settled', 'true')
+    expect(screen.getByText(/Pinned already · Walk after dinner/)).toBeInTheDocument()
+  })
+
+  it('closes without creating anything', async () => {
+    const modal = await openModal('Lottie')
+    fireEvent.click(within(modal).getByRole('button', { name: 'Close' }))
+    await waitFor(() => expect(screen.queryByTestId('wpg-modal')).not.toBeInTheDocument())
+    expect(calls.some((c) => c.method === 'POST')).toBe(false)
+  })
+
+  // Render-if-capable, not show-then-403: a shared group is only a legal target for a
+  // goal.manage holder, and the server would refuse the create.
+  it('offers no new goal for a group this viewer may not target', async () => {
+    globalThis.fetch = vi.fn(async (url: string) => {
+      const u = String(url)
+      if (u.includes('/api/household')) {
+        return { ok: true, json: async () => ({ household: { id: 'h1', name: 'Sites' }, person: { id: 'p1', name: 'Kevin', capabilities: [] }, memberships: [], pendingInvites: [] }) }
+      }
+      return { ok: true, json: async () => VIEW() }
+    }) as unknown as typeof fetch
+    renderStep()
+    await waitFor(() => expect(screen.getAllByRole('tab')).toHaveLength(3))
+    // "Family" has two members — not theirs to add to.
+    await waitFor(() => expect(screen.getByRole('button', { name: /New goal for this week/ })).toBeDisabled())
   })
 })

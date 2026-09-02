@@ -125,3 +125,36 @@
   .wpg-tally { margin-left: 0; flex-basis: 100%; }
   .wpg-opt-num { max-width: none; }
 }
+
+/* ── the new-goal modal ───────────────────────────────────────────────────────
+   The app's real goal editor, over the week rather than instead of it. The card is
+   only chrome: it hands the editor a fixed box and gets out of the way, because
+   `.goal-create` is a two-pane grid whose panes do their own scrolling (a card that
+   scrolled as well would give the form two scrollbars). Everything here is scoped
+   under .wpg-modal — the standalone /goals/new page is untouched. */
+.wpg-modal-card {
+  max-width: min(1180px, 94vw);
+  max-height: none;
+  overflow: hidden;
+  padding: 20px 0 0;
+}
+.wpg-modal .ge-embed {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: min(74vh, 720px);
+}
+/* The bar is the modal's header; the × sits at its right, so leave it room. */
+.wpg-modal .ge-topbar { padding: 0 62px 14px 30px; border-bottom: 1px solid var(--hair-2); }
+.wpg-modal .ge-title { font-size: 24px; }
+.wpg-modal .goal-create { min-height: 0; }
+/* The editor's page padding is generous for a full screen and wasteful in a card. */
+.wpg-modal .ge-col { padding: 8px 30px 40px; }
+/* The group is stated, not offered — flat, unclickable, and clearly the answer. */
+.ge-who-locked { cursor: default; }
+
+@media (max-width: 900px) {
+  /* Too narrow for the preview pane; the form is the part you need. */
+  .wpg-modal .goal-create { grid-template-columns: minmax(0, 1fr); }
+  .wpg-modal .ge-pvpane { display: none; }
+}

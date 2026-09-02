@@ -140,13 +140,32 @@ const CheckIcon = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth={3.5} strokeLinecap="round" strokeLinejoin="round"><path d="M4 12l5 5L20 6" /></svg>
 )
 
-export function GoalCreate() {
+// Render the editor INSIDE something else instead of on its own route — what Weekly
+// Planning's Goals step does, so making a goal for the week doesn't eject the family
+// from the session. It is purely additive: every route behaviour below is unchanged when
+// `embed` is absent.
+export interface GoalCreateEmbed {
+  // The group the goal belongs to. Fixed, and shown rather than offered — the host
+  // already asked the question ("which group's focus?"), so re-asking it here is only a
+  // way to answer the wrong one by accident.
+  listId: string
+  // Start on the Pinned tier, the same thing `?featured=1` means on the route.
+  featured?: boolean
+  // Created and saved. There is no `onCancel` twin: embedded, "cancel" means closing the
+  // host's own container, which is the host's own control — a second one in this bar
+  // would just be a way to lose a half-typed goal twice.
+  onCreated: () => void
+}
+
+export function GoalCreate({ embed }: { embed?: GoalCreateEmbed } = {}) {
   const navigate = useNavigate()
   const { id } = useParams()
-  const editing = !!id
+  // Embedded, there is no route to read an id from — and the HOST's route params are
+  // none of this editor's business, so they can never turn it into an edit form.
+  const editing = !embed && !!id
   const { lists, refetch: refetchLists } = useGoalLists()
-  const { goal: editGoal } = useGoalDetail(id ?? null)
-  const { person } = useHousehold()
+  const { goal: editGoal } = useGoalDetail(editing ? id ?? null : null)
+  const { household, person } = useHousehold()
   // Without goal.manage you can still make a goal that's just yours — so the
   // "Who's it for?" picker is limited to lists where you're the sole member
   // (a self-only/unassigned goal). Picking a group = assigning others = needs
@@ -159,10 +178,11 @@ export function GoalCreate() {
   const [searchParams] = useSearchParams()
 
   const [form, setForm] = useState({
-    title: editing ? '' : (searchParams.get('title') ?? ''),
+    // Embedded, the host's URL is not this editor's URL — its params must not leak in.
+    title: editing || embed ? '' : (searchParams.get('title') ?? ''),
     // Pre-select the list you came from (?list=) so a goal made while viewing
     // "Kevin" / "Mom & Dad" starts in that group; falls to the picker otherwise.
-    goalListId: editing ? '' : (searchParams.get('list') ?? ''),
+    goalListId: embed ? embed.listId : editing ? '' : (searchParams.get('list') ?? ''),
     category: 'physical',
     // Default matches the mock: "Each tracks their own" (per-person), so the ring and
     // the shared/each toggle start consistent. Users flip to "One shared total" + a
@@ -185,7 +205,7 @@ export function GoalCreate() {
     // upstream: Weekly Planning's Goals step sends it when the week's focus doesn't
     // exist yet, so the goal you came here to make comes back already pinned to the
     // group you came from instead of needing a second trip. Absent ⇒ unchanged.
-    isFeatured: !editing && searchParams.get('featured') === '1',
+    isFeatured: embed ? !!embed.featured : !editing && searchParams.get('featured') === '1',
     isSpotlight: false,
     hasRewards: false,
     weeklyCheckIn: true,
@@ -284,12 +304,19 @@ export function GoalCreate() {
   // a prefilled ?list=<group> (e.g. arriving from a shared group's "New goal"), or
   // a multi-member group just made via the modal, so Create never enables on a
   // target that would 403 — render-if-capable, not show-then-403.
+  //
+  // `!household` is the load-order gate, and it is load-bearing. The lists and the
+  // household are two independent fetches; `canAssignOthers` reads the household, so
+  // until it answers a perfectly capable viewer looks capability-less. When the lists
+  // won that race this effect fired against a viewer we didn't know yet and threw away a
+  // legal `?list=` — permanently, since nothing re-applies the param. A capability check
+  // is only honest once there is a viewer to check.
   useEffect(() => {
-    if (editing || canAssignOthers || !form.goalListId || lists.length === 0) return
+    if (editing || !household || canAssignOthers || !form.goalListId || lists.length === 0) return
     const l = lists.find((x) => x.id === form.goalListId)
     const selfOnly = !!l && l.members.length === 1 && l.members[0].personId === person?.id
     if (!selfOnly) setForm((f) => ({ ...f, goalListId: '' }))
-  }, [editing, canAssignOthers, form.goalListId, lists, person?.id])
+  }, [editing, household, canAssignOthers, form.goalListId, lists, person?.id])
 
   const selectedList = useMemo(() => lists.find((l) => l.id === form.goalListId) ?? null, [lists, form.goalListId])
 
@@ -310,27 +337,31 @@ export function GoalCreate() {
   const backToGoals = editing ? `/goals/${id}` : `/goals${cameFromList ? `?list=${cameFromList}` : ''}`
 
   const submitRef = useRef<() => void>(() => {})
-  // Replace the whole topbar (no date/clock/weather) with the editor's own bar:
-  // a big "New goal" title (sized to match the Today date) + Cancel + Create.
-  useTopbarFull(
-    () => (
-      <div className="ge-topbar">
-        <div className="ge-title">{editing ? 'Edit goal' : 'New goal'}</div>
-        <div className="ge-sp" />
+  // The editor's own bar: a big "New goal" title (sized to match the Today date) +
+  // Cancel + Create. Embedded it is the modal's header instead of the app topbar, and it
+  // drops Cancel — "cancel" there means "go back to /goals", a route the modal isn't on;
+  // the host's own close control is the way out.
+  const bar = (
+    <div className="ge-topbar">
+      <div className="ge-title">{editing ? 'Edit goal' : 'New goal'}</div>
+      <div className="ge-sp" />
+      {!embed && (
         <button type="button" className="ge-cancel" onClick={() => navigate(backToGoals, { replace: true })}>Cancel</button>
-        <button
-          type="button"
-          className="ge-create"
-          disabled={!canSave}
-          title={canSave ? undefined : 'Add a name, pick who it’s for, and fill in the measurement'}
-          onClick={() => submitRef.current()}
-        >
-          {editing ? 'Save changes' : 'Create goal'}
-        </button>
-      </div>
-    ),
-    [navigate, editing, canSave, backToGoals]
+      )}
+      <button
+        type="button"
+        className="ge-create"
+        disabled={!canSave}
+        title={canSave ? undefined : 'Add a name, pick who it’s for, and fill in the measurement'}
+        onClick={() => submitRef.current()}
+      >
+        {editing ? 'Save changes' : 'Create goal'}
+      </button>
+    </div>
   )
+  // Replace the whole topbar (no date/clock/weather) — but never when embedded: the host
+  // owns its own chrome, and hijacking it from inside a modal is not this editor's call.
+  useTopbarFull(() => (embed ? null : bar), [navigate, editing, canSave, backToGoals, embed])
 
   async function submit() {
     if (!canSave) return
@@ -367,6 +398,9 @@ export function GoalCreate() {
     try {
       if (editing) await api.updateGoal(id!, payload)
       else await api.createGoal(payload)
+      // Embedded, going anywhere is the bug: the host put this on screen over its own
+      // page and is left to close it and re-read the goal it now owns.
+      if (embed) { embed.onCreated(); return }
       // Land on the goal's final list — if they retargeted it (e.g. Mom & Dad →
       // Wally), that's where the new goal lives, so that's where we go.
       navigate(editing ? `/goals/${id}` : `/goals${form.goalListId ? `?list=${form.goalListId}` : ''}`, { replace: true })
@@ -442,7 +476,7 @@ export function GoalCreate() {
       : isChecklist ? 'The number is percent complete — 100 = all steps done.'
         : `The number is the amount reached${unit ? ` in ${unit}` : ''}.`
 
-  return (
+  const editor = (
     <div className="goal-create ge">
       {/* LEFT · focused form */}
       <div className="ge-formpane">
@@ -458,20 +492,40 @@ export function GoalCreate() {
           {/* 2 · who */}
           <div className="ge-sec">
             <div className="ge-sec-t">Who’s it for?</div>
-            <div className="ge-sec-h">Pick a goal list — the people in it share this goal.</div>
-            <div className="ge-who">
-              {pickableLists.map((l: GoalList) => (
-                <button key={l.id} type="button" className={`ge-who-chip ${form.goalListId === l.id ? 'on' : ''}`} onClick={() => set('goalListId', l.id)}>
+            <div className="ge-sec-h">
+              {embed
+                ? 'The group you’re planning for — this goal joins it.'
+                : 'Pick a goal list — the people in it share this goal.'}
+            </div>
+            {/* Embedded, the host already asked which group this is about, so the group
+                is STATED. Re-offering the picker here would only be a way to answer a
+                different group's question by accident. */}
+            {embed ? (
+              <div className="ge-who">
+                <span className="ge-who-chip on ge-who-locked" data-testid="ge-who-locked">
                   <span className="ge-avstack">
-                    {l.members.slice(0, 4).map((m) => (
+                    {(selectedList?.members ?? []).slice(0, 4).map((m) => (
                       <span key={m.personId} className="ge-av" style={{ background: `${m.colorHex ?? '#8a857c'}22` }}>{m.avatarEmoji ?? '🙂'}</span>
                     ))}
                   </span>
-                  {l.name}
-                </button>
-              ))}
-              <button type="button" className="ge-who-chip dashed" onClick={() => setShowListModal(true)}>＋ New group</button>
-            </div>
+                  {selectedList?.name ?? 'This group'}
+                </span>
+              </div>
+            ) : (
+              <div className="ge-who">
+                {pickableLists.map((l: GoalList) => (
+                  <button key={l.id} type="button" className={`ge-who-chip ${form.goalListId === l.id ? 'on' : ''}`} onClick={() => set('goalListId', l.id)}>
+                    <span className="ge-avstack">
+                      {l.members.slice(0, 4).map((m) => (
+                        <span key={m.personId} className="ge-av" style={{ background: `${m.colorHex ?? '#8a857c'}22` }}>{m.avatarEmoji ?? '🙂'}</span>
+                      ))}
+                    </span>
+                    {l.name}
+                  </button>
+                ))}
+                <button type="button" className="ge-who-chip dashed" onClick={() => setShowListModal(true)}>＋ New group</button>
+              </div>
+            )}
           </div>
 
           {/* 3 · measure */}
@@ -724,6 +778,16 @@ export function GoalCreate() {
           }}
         />
       )}
+    </div>
+  )
+
+  // On its own route the bar lives in the app topbar and the editor fills the page.
+  // Embedded, the two travel together so the host can drop them into a card.
+  if (!embed) return editor
+  return (
+    <div className="ge-embed">
+      {bar}
+      {editor}
     </div>
   )
 }
