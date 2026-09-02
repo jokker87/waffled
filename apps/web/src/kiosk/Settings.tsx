@@ -2672,7 +2672,9 @@ function WeeklyPlanningSettings() {
           <select className="sel" value={config.dayOfWeek} disabled={saving} onChange={(e) => save({ dayOfWeek: Number(e.target.value) })}>
             {FN_DAYS.map((d) => <option key={d} value={d}>{planningDayName(d)}</option>)}
           </select>
-          <input className="set-inline-input" type="time" value={config.time} disabled={saving} onChange={(e) => save({ time: e.target.value })} style={{ width: 120 }} />
+          {/* 140, not the 120 the Family Night row uses — a 12-hour locale renders
+              "05:00 PM" plus the clock affordance and clips at 120. */}
+          <input className="set-inline-input" type="time" value={config.time} disabled={saving} onChange={(e) => save({ time: e.target.value })} style={{ width: 140 }} />
         </div>
       </div>
       <div className="set-module-desc" style={{ marginTop: -4, marginBottom: 8 }}>

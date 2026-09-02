@@ -22,16 +22,22 @@
 .wp-empty { color: var(--ink-3); font-weight: 600; padding: 24px 2px; max-width: 62ch; line-height: 1.5; }
 
 /* ── In session ─────────────────────────────────────────────────────────────── */
-/* The session fills the frame and never scrolls the page: a header row, the body,
-   and a footer pinned to the bottom, so the primary button is in the same place on
-   every step. `100dvh` (not vh) because the phone browser's chrome moves. */
+/* The session fills the frame and never scrolls the page: a header row, the body, and
+   a footer pinned to the bottom, so the primary button is in the same place on every
+   step.
+
+   It sizes to `.kiosk-main` (a flex column of definite height) — NOT to 100dvh. The
+   kiosk shell already owns the viewport and puts a topbar above this, so a viewport-
+   height child overflows by exactly the topbar and pushes the footer off screen. Note
+   `ScreenBoundary` renders its children directly, so this really is a flex child of
+   `.kiosk-main`; `min-height: 0` is what lets the middle row scroll instead of
+   stretching the grid. */
 .wp-in {
   padding: 0;
   display: grid;
   grid-template-rows: auto 1fr auto;
-  min-height: 100%;
-  height: 100dvh;
-  max-height: 100dvh;
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -62,7 +68,9 @@
 }
 .wp-prog > div { height: 100%; background: var(--primary); transition: width 0.25s ease; }
 
-.wp-body { padding: 26px 28px 8px; min-height: 0; overflow-y: auto; }
+/* A column so a step body can stretch; the placeholder centres itself in it via
+   `margin: auto` rather than the container forcing centring on real step content. */
+.wp-body { padding: 26px 28px 8px; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
 
 .wp-foot {
   display: flex; align-items: center; gap: 12px;
@@ -82,7 +90,7 @@
 
 /* ── Step body placeholder (removed as each step lands) ─────────────────────── */
 .wp-placeholder {
-  max-width: 620px; margin: 0 auto; text-align: center;
+  max-width: 620px; margin: auto; text-align: center; flex: none;
   border: 1.5px dashed var(--hair); border-radius: var(--r-lg);
   padding: 44px 32px; background: var(--card-2);
 }
@@ -170,7 +178,9 @@
   .wp-week { display: none; }
   .wp-body { padding: 18px 18px 6px; }
   .wp-foot { padding: 12px 18px; gap: 8px; }
-  .wp-primary { flex: 1; justify-content: center; font-size: 15px; padding: 13px 18px; }
+  /* nowrap: the affirmative is short but not one word ("Save the week"), and letting
+     it wrap turns the primary into a two-line block that dwarfs the footer. */
+  .wp-primary { flex: 1; justify-content: center; font-size: 15px; padding: 13px 18px; white-space: nowrap; }
   /* The next-step hint is the first thing to go when the button gets tight. */
   .wp-next { display: none; }
   .wp-skip { font-size: 14px; padding: 12px 2px; }
