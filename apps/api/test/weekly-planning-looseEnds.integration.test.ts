@@ -389,7 +389,11 @@ describe('loose ends · unchecked list items', () => {
     expect((await read()).notDone.map((i) => i.id)).not.toContain(rows[0].id)
   })
 
-  it('does NOT surface a checked item, a suggestion, or a grocery row keyed to the week being planned', async () => {
+  // The third case is the week-key guard: a row keyed to the week being planned (or a
+  // later one) is that week's work, not last week's leftover. `week_start` is a grocery
+  // concept and grocery can no longer reach this read at all, so the clause is now a
+  // guard for any future surface that keys a custom row to a week.
+  it('does NOT surface a checked item, a suggestion, or a row keyed to the week being planned', async () => {
     const week = await currentWeekStart()
     const planned = await plannedWeekStart()
     const mk = async (cols: string, vals: unknown[]) => {
@@ -433,6 +437,72 @@ describe('loose ends · unchecked list items', () => {
     expect((await resolve({ kind: 'list', id: rows[0].id, action: 'done' })).statusCode).toBe(403)
     await setModules({ lists: true })
     await query(`update list_items set deleted_at = now() where id = $1`, [rows[0].id])
+  })
+})
+
+// ── "Not done" · which LISTS even count ───────────────────────────────────────
+// The step reads only the lists a person actually keeps: `list_type = 'custom'`.
+//
+//   · GROCERY rebuilds itself from the meal plan every week. An unchecked "Whole milk"
+//     is a shopping list, not a loose end — routing it to the Tasks step is nonsense,
+//     and a dozen of them bury the things that genuinely are open. A hand-typed
+//     grocery row ("Marble rye") goes for the same reason: it is still shopping.
+//   · TEMPLATES store their items checked=false permanently — that IS the blueprint
+//     (0072) — and templates aren't even in the Lists rail (listLists filters them
+//     out), so a user could not see where the flood was coming from.
+describe('loose ends · which lists count', () => {
+  let groceryAutoId: string
+  let groceryTypedId: string
+  let templateItemId: string
+  let customItemId: string
+
+  beforeAll(async () => {
+    const week = await currentWeekStart()
+    const mkList = async (name: string, type: string, autoBuilt = false) => {
+      const { rows } = await query(
+        `insert into lists (household_id, name, list_type, is_auto_built) values ($1,$2,$3,$4) returning id`,
+        [householdId, name, type, autoBuilt]
+      )
+      return rows[0].id as string
+    }
+    // Seeded so that every OTHER clause in the read passes them — `week_start` NULL and
+    // a `created_at` well before the current week — or an existing filter would take
+    // the credit and this would prove nothing.
+    const mkItem = async (listId: string, name: string, source = 'manual') => {
+      const { rows } = await query(
+        `insert into list_items (household_id, list_id, name, source, created_at)
+         values ($1,$2,$3,$4, $5::date - interval '9 days') returning id`,
+        [householdId, listId, name, source, week]
+      )
+      return rows[0].id as string
+    }
+    const grocery = await mkList('Grocery', 'grocery', true)
+    groceryAutoId = await mkItem(grocery, 'Whole milk', 'auto')
+    groceryTypedId = await mkItem(grocery, 'Marble rye', 'manual')
+    const template = await mkList('Camping trip', 'template')
+    templateItemId = await mkItem(template, 'Sleeping bags')
+    const custom = await mkList('Garage', 'custom')
+    customItemId = await mkItem(custom, 'Patch the drywall')
+  })
+
+  it('leaves the grocery list out of "not done" — it rebuilds itself from the meal plan', async () => {
+    const ids = (await read()).notDone.map((i) => i.id)
+    expect(ids).not.toContain(groceryAutoId)
+    // Not only the derived rows: a typed grocery row is still shopping.
+    expect(ids).not.toContain(groceryTypedId)
+  })
+
+  it('leaves list templates out — their items are unchecked BY DESIGN', async () => {
+    expect((await read()).notDone.map((i) => i.id)).not.toContain(templateItemId)
+  })
+
+  it('still surfaces an ordinary custom list, and counts only what it shows', async () => {
+    const view = await read()
+    expect(view.notDone.map((i) => i.id)).toContain(customItemId)
+    // The switch and both see-all headers render this tally, so nothing excluded from
+    // the rows may still be inside the number.
+    expect(view.counts.notDone).toBe(view.notDone.length)
+    expect(view.notDone.filter((i) => i.kind === 'list').map((i) => i.id)).toContain(customItemId)
   })
 })
 

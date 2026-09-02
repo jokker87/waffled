@@ -234,8 +234,11 @@ describe('loose ends · the group switch', () => {
     renderStep()
     expect(await screen.findByRole('button', { name: /Not done 2/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Parked 1/ })).toBeInTheDocument()
-    // The switch is the entire explanation, so the note travels with it.
+    // The switch is the entire explanation, so the note travels with it — including
+    // the one exclusion a user would otherwise ask about ("even grocery?"), since a
+    // list that rebuilds itself from the meal plan is shopping, not a leftover.
     expect(screen.getByText(/computed from your modules/i)).toBeInTheDocument()
+    expect(screen.getByText(/grocery list is left out/i)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /Parked 1/ }))
     expect(await screen.findByText(/exists nowhere else yet/i)).toBeInTheDocument()
   })

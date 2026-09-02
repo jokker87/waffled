@@ -9,10 +9,12 @@
 // and the distinction between them is the whole design:
 //
 //   NOT DONE is COMPUTED from the modules that already own the work — overdue
-//     chore_instances, unchecked list_items, rhythms past due, habit goals short for
-//     the week. Nobody typed those; they are simply still open, which is why there is
-//     no lookback logic anywhere and no copy of them in any planning table. Its
-//     destinations are Tasks / Calendar / Kids / Goals.
+//     chore_instances, unchecked items on the household's own (custom) lists, rhythms
+//     past due, habit goals short for the week. Nobody typed those; they are simply
+//     still open, which is why there is no lookback logic anywhere and no copy of them
+//     in any planning table. Its destinations are Tasks / Calendar / Kids / Goals.
+//     NOT the grocery list: it rebuilds itself from the meal plan every week, so an
+//     unchecked row there is shopping, not a loose end (see staleListItems).
 //
 //   PARKED is what somebody wrote down during the week and that exists nowhere else
 //     yet, so it gets the one table this step owns (0100_planning_parked_items). Same
@@ -225,14 +227,32 @@ async function overdueChores(householdId: string, today: string): Promise<LooseE
   }))
 }
 
-// Unchecked list items that were ALREADY open before this week began.
+// Unchecked items on the lists a person actually KEEPS, that were already open before
+// this week began.
 //
-// The anchor is the household's CURRENT week start, not the week being planned. That
-// distinction is load-bearing: the planned week is always today or later, so nothing
-// that exists now was created after it — anchoring there filters nothing and the read
-// floods with every unchecked row in the household. Anchored at the current week,
-// "typed this week" is the week you are living in and "still unchecked from before it"
-// is exactly what the step's question asks about.
+// ONLY `list_type = 'custom'` — an allowlist, not a denylist, because the other two
+// kinds are noise for two different reasons and a new kind should have to argue its way
+// in rather than flood by default:
+//
+//   · GROCERY is a list that REBUILDS ITSELF from the meal plan every week (source
+//     'auto' rows are derived; nobody typed them). An unchecked "Whole milk" says
+//     nothing about the week that just ended, and routing it to the Tasks step is
+//     nonsense. Hand-typed grocery rows ('recipe'/'manual') go too — an off-plan
+//     "Marble rye" is still shopping, so filtering on `source` would only half-fix it.
+//     Left in, a shopping list is also the biggest thing in the household, so under
+//     `order by created_at` + PER_SOURCE_LIMIT it can crowd out the genuine leftovers
+//     entirely.
+//   · TEMPLATES keep their items `checked = false` permanently — that IS the blueprint
+//     (0072) — so every row on every template would be a loose end forever. Worse, the
+//     Lists rail hides templates (`listLists` filters `list_type <> 'template'`), so a
+//     user could not see where the flood came from.
+//
+// The age anchor is the household's CURRENT week start, not the week being planned.
+// That distinction is load-bearing: the planned week is always today or later, so
+// nothing that exists now was created after it — anchoring there filters nothing and
+// the read floods with every unchecked row in the household. Anchored at the current
+// week, "typed this week" is the week you are living in and "still unchecked from
+// before it" is exactly what the step's question asks about.
 async function staleListItems(householdId: string, currentWeek: string, plannedWeek: string): Promise<LooseEnd[]> {
   const { rows } = await query<{
     id: string
@@ -247,13 +267,17 @@ async function staleListItems(householdId: string, currentWeek: string, plannedW
        join households h on h.id = li.household_id
       where li.household_id = $1
         and li.deleted_at is null
+        -- The allowlist. Grocery rebuilds itself; a template is unchecked by design.
+        and l.list_type = 'custom'
         and li.checked = false
         -- 'suggested' rows are a proposal nobody has accepted; they are not open work.
         and li.status = 'active'
         and li.created_at < ($2::date::timestamp at time zone h.timezone)
-        -- A grocery row keyed to the week being planned (or a later one) is this
-        -- week's shopping, not last week's leftover. NULL = a global/manual row,
-        -- which belongs to no week and so is judged on its age alone.
+        -- A row keyed to the week being planned (or a later one) is that week's work,
+        -- not last week's leftover. NULL = a row that belongs to no week, judged on
+        -- its age alone — which is every custom-list row today, since week_start is a
+        -- grocery column. The clause stays as the guard for any future surface that
+        -- keys a custom row to a week.
         and (li.week_start is null or li.week_start < $3::date)
       order by li.created_at
       limit ${PER_SOURCE_LIMIT}`,
@@ -590,8 +614,9 @@ export async function getLooseEnds(householdId: string, weekStart: string, sessi
     listParked(householdId),
     sessionId ? listRoutes(sessionId) : Promise.resolve([]),
   ])
-  // Chores first, then the week's shopping, then the slow-burning maintenance, then
-  // the habits: roughly most-urgent to least, which is the order the deck walks.
+  // Chores first, then what's still open on the lists, then the slow-burning
+  // maintenance, then the habits: roughly most-urgent to least, which is the order the
+  // deck walks.
   const notDone = [...chores, ...lists, ...rhythms, ...goals]
   return {
     weekStart,

@@ -6,10 +6,11 @@
 // done already" and, on a parked note only, "Drop it".
 //
 // Two groups, one card. "Not done" is COMPUTED by the server from the modules that own
-// the work (overdue chores, unchecked list items, rhythms past due, habit goals short
-// for the week) — nobody typed those. "Parked" is what somebody wrote down during the
-// week and exists nowhere else yet, which is why it gets a table, a capture bar, and
-// Drop.
+// the work (overdue chores, unchecked items on the household's own lists — never the
+// grocery list, which rebuilds itself from the meal plan — rhythms past due, habit
+// goals short for the week) — nobody typed those. "Parked" is what somebody wrote down
+// during the week and exists nowhere else yet, which is why it gets a table, a capture
+// bar, and Drop.
 //
 // THE CROSS-STEP CONTRACT lives here: `LooseEndRoute`. Routes are persisted on step
 // 1's own `planning_session_steps.data` as `{ routes: [...] }`, so steps 2 / 6 / 8 / 9
@@ -96,7 +97,10 @@ export const LOOSE_END_GROUPS = [
   {
     key: 'notDone' as const,
     label: 'Not done',
-    note: 'Computed from your modules — overdue chores, unchecked list items, rhythms past due, habit goals short for the week. Nobody typed these; they are simply still open.',
+    // Names the grocery list specifically, because seeing "Whole milk" here is exactly
+    // what made the step feel wrong: a shopping list that rebuilds itself every week
+    // isn't a leftover, and a dozen of its rows bury the things that are.
+    note: 'Computed from your modules — overdue chores, unchecked items on your lists, rhythms past due, habit goals short for the week. Nobody typed these; they are simply still open. Your grocery list is left out: it rebuilds itself from the meal plan.',
   },
   {
     key: 'parked' as const,
