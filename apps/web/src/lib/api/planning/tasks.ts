@@ -53,6 +53,10 @@ export interface PlanningTasksBoard {
   // The week the server resolved (snapped and floored) — echoed so nothing client-side
   // has to do week arithmetic of its own.
   weekStart: string
+  // The day a task added during this session should land on — inside the week being
+  // planned, and today when today is inside it. Server-owned, so adding a task on a
+  // Wednesday while planning next week can't quietly date it to that Wednesday.
+  newTaskDay: string
   people: PlanningTasksPerson[]
   unassigned: PlanningTasksChore[]
 }

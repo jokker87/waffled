@@ -51,7 +51,8 @@ function initialForm(
   personId?: string | null,
   canAssignOthers = true,
   selfPersonId?: string | null,
-  defaultFreq?: Freq
+  defaultFreq?: Freq,
+  defaultDueOn?: string
 ) {
   const sched = parseRrule(chore?.rrule, !!chore, defaultFreq)
   // Restricted users (no chore.manage) can only target themselves or up-for-grabs;
@@ -66,8 +67,10 @@ function initialForm(
     freq: sched.freq,
     days: sched.days,
     // One-off (freq === 'once') only: which day the single task lands on. New
-    // one-offs default to today; editing can't move an already-materialized one.
-    dueOn: localToday(),
+    // one-offs default to today unless the surface opening the modal knows a better
+    // day — Weekly Planning passes the week it is planning, so a task added there
+    // doesn't quietly land on today. Editing can't move an already-materialized one.
+    dueOn: defaultDueOn || localToday(),
     // Optional time-of-day the chore is due (HH:MM). Applies to one-offs and each
     // recurring occurrence; empty = no specific time.
     dueTime: (chore?.dueTime ?? '').slice(0, 5),
@@ -81,6 +84,7 @@ export function ChoreModal({
   chore,
   personId,
   defaultFreq,
+  defaultDueOn,
   canAssignOthers = true,
   selfPersonId,
   onClose,
@@ -92,6 +96,10 @@ export function ChoreModal({
   // a surface where most additions are one-offs (Weekly Planning's Tasks step) passes
   // 'once'. Ignored when editing — an existing chore's cadence is its own.
   defaultFreq?: Freq
+  // Which day a NEW one-off starts on (YYYY-MM-DD). Omit it for today; a surface
+  // planning a different week passes that week's day, so the task lands where the
+  // person is looking. Still editable in the modal, and ignored when editing.
+  defaultDueOn?: string
   // Without chore.manage, restrict the assignee picker to self + up-for-grabs.
   canAssignOthers?: boolean
   selfPersonId?: string | null
@@ -101,7 +109,7 @@ export function ChoreModal({
   const editing = !!chore
   const { persons } = usePersons()
   const { currencies, defaultCurrency } = useCurrencies()
-  const [form, setForm] = useState(() => initialForm(chore, personId, canAssignOthers, selfPersonId, defaultFreq))
+  const [form, setForm] = useState(() => initialForm(chore, personId, canAssignOthers, selfPersonId, defaultFreq, defaultDueOn))
   // Restricted users see only themselves; everyone else sees the full member list.
   const pickable = canAssignOthers ? persons : persons.filter((p) => p.id === selfPersonId)
   // A parent doesn't need another parent's OK: hide the approval toggle when the

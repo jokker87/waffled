@@ -80,4 +80,29 @@ describe('ChoreModal', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Tap again to delete' }))
     await waitFor(() => expect(deleted).toHaveLength(1))
   })
+  // The surface that opens the modal can say what a NEW chore should start as. Nothing
+  // else changes: leave the props off and the Chores screen gets what it always got.
+  it('a new chore still defaults to Every day, dated by the modal itself', async () => {
+    const created: unknown[] = []
+    mockApi({ created })
+    render(<ChoreModal personId="p1" onClose={vi.fn()} onSaved={vi.fn()} />)
+    expect(screen.getByRole('button', { name: 'Every day' }).className).toContain('on')
+    fireEvent.change(screen.getByPlaceholderText('Feed the dog'), { target: { value: 'Tidy room' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add chore' }))
+    await waitFor(() => expect(created).toHaveLength(1))
+    // Recurring, so no day is sent at all — the rrule decides.
+    expect(created[0]).toMatchObject({ rrule: 'FREQ=DAILY' })
+    expect((created[0] as { dueOn?: string }).dueOn).toBeUndefined()
+  })
+
+  it('takes a starting cadence and day from the surface that opened it', async () => {
+    const created: unknown[] = []
+    mockApi({ created })
+    render(<ChoreModal personId="p1" defaultFreq="once" defaultDueOn="2099-03-04" onClose={vi.fn()} onSaved={vi.fn()} />)
+    expect(screen.getByRole('button', { name: 'Just once' }).className).toContain('on')
+    fireEvent.change(screen.getByPlaceholderText('Feed the dog'), { target: { value: 'Book the sitter' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add chore' }))
+    await waitFor(() => expect(created).toHaveLength(1))
+    expect(created[0]).toMatchObject({ rrule: null, dueOn: '2099-03-04' })
+  })
 })

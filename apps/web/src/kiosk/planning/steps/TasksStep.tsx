@@ -440,12 +440,15 @@ function Body({ weekStart, setDecisionData, refresh, busy }: StepBodyProps) {
       {/* The app's existing New chore modal, with Who already prefilled — never a
           second chore form of this step's own. '' prefills nobody (up for grabs).
           Planning a week is mostly one-offs ("book the sitter", "return the books"),
-          so this surface defaults the modal to Just once; the Chores screen, where a
-          new chore is usually a standing one, keeps its own default. */}
+          so this surface defaults the modal to Just once, dated to the week being
+          planned rather than to whatever day this browser thinks it is. The Chores
+          screen, where a new chore is usually a standing one due today, keeps its own
+          defaults — both of these are props, not a change to the modal. */}
       {adding !== null && (
         <ChoreModal
           personId={adding || null}
           defaultFreq="once"
+          defaultDueOn={board.newTaskDay}
           canAssignOthers={canAssign}
           selfPersonId={person?.id ?? null}
           onClose={() => setAdding(null)}

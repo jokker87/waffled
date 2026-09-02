@@ -49,7 +49,8 @@ const json = (r: { body: string }) => JSON.parse(r.body)
 
 interface BoardChore { id: string; title: string; cadence: string; days: string[]; dueOn: string | null; carriedOver: boolean; pendingInstanceIds: string[] }
 interface BoardPerson { id: string; name: string; recurringChores: number; chores: BoardChore[] }
-const board = async () => json(await call('GET', '/api/weekly-planning/tasks', kevin)) as { weekStart: string; people: BoardPerson[]; unassigned: BoardChore[] }
+interface Board { weekStart: string; newTaskDay: string; people: BoardPerson[]; unassigned: BoardChore[] }
+const board = async () => json(await call('GET', '/api/weekly-planning/tasks', kevin)) as Board
 const strip = (b: { unassigned: BoardChore[] }) => b.unassigned.map((c) => c.title)
 const who = (b: { people: BoardPerson[] }, name: string) => b.people.find((p) => p.name === name)!
 
@@ -471,5 +472,43 @@ describe('planning · tasks · the step decision', () => {
     const step = json(res).steps.find((s: { key: string }) => s.key === 'tasks')
     expect(step.status).toBe('done')
     expect(step.data).toEqual({ assigned: 2, leftUpForGrabs: 1 })
+  })
+})
+
+// A task added DURING the session belongs to the week being planned, not to whatever
+// day somebody happened to open the board on. The board therefore names that day
+// itself — the week boundary is the server's, and so is "today".
+describe('planning · tasks · the day a new task lands on', () => {
+  const householdToday = async () => {
+    const { query } = await import('../src/platform/db')
+    const { rows } = await query<{ d: string }>(
+      `select (now() at time zone h.timezone)::date::text as d from households h where h.id = $1`,
+      [householdId]
+    )
+    return rows[0].d
+  }
+
+  it('is the start of the week when that week is still ahead of us', async () => {
+    const b = await board()
+    const d = new Date(`${b.weekStart}T00:00:00Z`)
+    d.setUTCDate(d.getUTCDate() + 28)
+    const far = json(await call('GET', `/api/weekly-planning/tasks?weekStart=${d.toISOString().slice(0, 10)}`, kevin)) as Board
+    expect(far.newTaskDay).toBe(far.weekStart)
+  })
+
+  it('is today when the session is planning the week today falls in', async () => {
+    const today = await householdToday()
+    // resolveWeekStart snaps today to its own week start, so this is the current week.
+    const now = json(await call('GET', `/api/weekly-planning/tasks?weekStart=${today}`, kevin)) as Board
+    expect(now.newTaskDay).toBe(today)
+    expect(now.newTaskDay >= now.weekStart).toBe(true)
+  })
+
+  it('always lands inside the week it names', async () => {
+    const b = await board()
+    const end = new Date(`${b.weekStart}T00:00:00Z`)
+    end.setUTCDate(end.getUTCDate() + 6)
+    expect(b.newTaskDay >= b.weekStart).toBe(true)
+    expect(b.newTaskDay <= end.toISOString().slice(0, 10)).toBe(true)
   })
 })

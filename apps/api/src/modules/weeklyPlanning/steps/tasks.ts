@@ -107,6 +107,12 @@ export interface TasksBoardPerson {
 
 export interface TasksBoard {
   weekStart: string
+  // The day a task ADDED during this session should land on. Server-owned for the same
+  // reason the week boundary is: a client that picked its own would use the browser's
+  // today, and "add a task" during a Wednesday session planning next week would quietly
+  // date it to the Wednesday. The week being planned if it's still ahead of us; today
+  // when the session is planning the week today falls in.
+  newTaskDay: string
   people: TasksBoardPerson[]
   unassigned: TasksBoardChore[]
 }
@@ -285,5 +291,8 @@ export async function getTasksBoard(householdId: string, weekStart: string): Pro
     ),
   }))
 
-  return { weekStart, people, unassigned }
+  // Inside the week, always: today when today is in it, otherwise the day it starts.
+  const newTaskDay = today >= dates[0] && today <= dates[6] ? today : dates[0]
+
+  return { weekStart, newTaskDay, people, unassigned }
 }

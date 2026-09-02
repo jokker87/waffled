@@ -49,6 +49,9 @@ const chore = (over: Partial<Card> & { id: string; title: string }): Card => ({
 // Shaped like the real /api/weekly-planning/tasks payload, day chips included.
 const BOARD = {
   weekStart: WEEK,
+  // The day the server says a task added during this session belongs on: inside the
+  // week being planned, never whatever day the board happened to be opened on.
+  newTaskDay: WEEK,
   people: [
     {
       id: 'p1', name: 'Kevin', avatarEmoji: '🧔', colorHex: '#7A5AF8', memberType: 'adult', isAdmin: true,
@@ -399,5 +402,21 @@ describe('TasksStep', () => {
     expect(screen.getByRole('button', { name: 'Every day' }).className).not.toContain('on')
     // …which means the modal offers the day, too.
     expect(screen.getByText('On')).toBeTruthy()
+  })
+  // "I added a task for next week and it landed today." The modal is told which day
+  // the week being planned starts on, so a new one-off lands inside that week.
+  it('a task added here lands in the week being planned, not on today', async () => {
+    mockApi()
+    render(<Body {...props()} />)
+    await waitFor(() => expect(screen.getByText(/Sweep the porch/)).toBeTruthy())
+
+    fireEvent.click(within(strip()).getByRole('button', { name: /Add a task/ }))
+    await waitFor(() => expect(screen.getByText('New chore')).toBeTruthy())
+    fireEvent.change(screen.getByPlaceholderText('Feed the dog'), { target: { value: 'Book the sitter' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add chore' }))
+
+    await waitFor(() => expect(wrote('POST', '/api/chores')).toHaveLength(1))
+    // One-off (the planning default) AND dated to the planned week, in one write.
+    expect(wrote('POST', '/api/chores')[0].body).toMatchObject({ title: 'Book the sitter', rrule: null, dueOn: WEEK })
   })
 })
