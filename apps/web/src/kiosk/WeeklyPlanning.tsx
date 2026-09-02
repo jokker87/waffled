@@ -12,6 +12,7 @@ import {
 } from '../lib/api'
 import { STEP_MODULES, type PlanningStepModule, type StepBodyProps } from './planning/registry'
 import { StepPlaceholder } from './planning/StepPlaceholder'
+import { StepErrorBoundary } from './planning/StepErrorBoundary'
 import '../styles/planning.css'
 
 // Weekly Planning — the session shell.
@@ -333,7 +334,12 @@ export function WeeklyPlanning() {
       </div>
 
       <div className="wp-body">
-        {current && (stepMod ? <stepMod.Body {...stepProps!} /> : <StepPlaceholder step={current} />)}
+        {current && (
+          // Keyed on the step so moving on retries rather than inheriting a failure.
+          <StepErrorBoundary key={current.key} title={current.title}>
+            {stepMod ? <stepMod.Body {...stepProps!} /> : <StepPlaceholder step={current} />}
+          </StepErrorBoundary>
+        )}
       </div>
 
       <div className="wp-foot">

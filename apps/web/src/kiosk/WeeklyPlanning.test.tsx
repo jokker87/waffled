@@ -51,6 +51,12 @@ function mockApi(view: Record<string, unknown>) {
     calls.push({ url: u, method, body: init?.body ? JSON.parse(String(init.body)) : null })
 
     if (u.includes('/api/weekly-planning') && method === 'GET') return { ok: true, json: async () => state }
+    // Real step bodies now load in place of the stubs, and they read other modules.
+    // The shell's tests aren't about their content, but they must not crash on a reply
+    // shaped like nothing — a step body that throws is covered separately, below.
+    if (method === 'GET') {
+      return { ok: true, json: async () => ({ events: [], persons: [], chores: [], instances: [], items: [], goals: [], groups: [], meals: [], entries: [], recipes: [] }) }
+    }
     if (method === 'POST' && u.endsWith('/complete')) {
       state.session = { ...(state.session as object), status: 'completed', completedAt: '2026-09-06T17:40:00.000Z' }
     }
