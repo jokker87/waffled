@@ -181,7 +181,11 @@ export function GoalCreate() {
     autoFromCalendar: true,
     // Tier defaults to Normal — elevating to Featured/Spotlight is an intentional choice
     // (auto-featuring everything is exactly what the old single flag got wrong).
-    isFeatured: false,
+    // `?featured=1` is the one exception, and it IS that intentional choice made
+    // upstream: Weekly Planning's Goals step sends it when the week's focus doesn't
+    // exist yet, so the goal you came here to make comes back already pinned to the
+    // group you came from instead of needing a second trip. Absent ⇒ unchanged.
+    isFeatured: !editing && searchParams.get('featured') === '1',
     isSpotlight: false,
     hasRewards: false,
     weeklyCheckIn: true,
