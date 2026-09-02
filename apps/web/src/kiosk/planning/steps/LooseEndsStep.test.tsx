@@ -245,11 +245,12 @@ describe('loose ends · the group switch', () => {
     renderStep()
     expect(await screen.findByRole('button', { name: /Not done 2/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Parked 1/ })).toBeInTheDocument()
-    // The switch is the entire explanation, so the note travels with it — including
-    // the one exclusion a user would otherwise ask about ("even grocery?"), since a
-    // list that rebuilds itself from the meal plan is shopping, not a leftover.
+    // The switch is the entire explanation, so the note travels with it.
     expect(screen.getByText(/computed from your modules/i)).toBeInTheDocument()
-    expect(screen.getByText(/grocery list is left out/i)).toBeInTheDocument()
+    // And the note says what the step DOES read, not what it doesn't. The grocery
+    // sentence was an answer to a question the bug provoked; with groceries gone
+    // there is no question, and a screen narrating what it isn't showing is noise.
+    expect(screen.queryByText(/grocery/i)).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /Parked 1/ }))
     expect(await screen.findByText(/exists nowhere else yet/i)).toBeInTheDocument()
   })
@@ -355,6 +356,41 @@ describe('loose ends · see all', () => {
     fireEvent.click(screen.getByRole('button', { name: /see all/i }))
     await screen.findByRole('heading', { name: /Parked/ })
     await waitFor(() => expect(scrolled).toEqual(['wp-le-sec-parked']))
+  })
+
+  // "See all" reads as the FULLER screen, so it must not be the one place you cannot
+  // drop a new note. The bar is attached to the Parked section, which is what it adds
+  // to — the same reason the section headings had to carry the counts.
+  it('keeps the capture bar reachable, attached to the Parked section', async () => {
+    mockApi()
+    renderStep()
+    fireEvent.click(await screen.findByRole('button', { name: /see all/i }))
+    const input = await screen.findByLabelText('Park something new')
+    expect(input.closest('#wp-le-sec-parked')).toBeTruthy()
+
+    fireEvent.change(input, { target: { value: 'Renew the passports' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Park it' }))
+    await waitFor(() => expect(parkCalls()).toHaveLength(1))
+    expect(parkCalls()[0].body).toEqual({ note: 'Renew the passports', sessionId: 's1' })
+    // Still on the see-all screen, with the new note counted into the section it
+    // landed in — parking is not a reason to be thrown back to the deck.
+    expect(await screen.findByRole('heading', { name: /Parked 2/ })).toBeInTheDocument()
+  })
+
+  // One bar, one piece of state, two places it can appear — so a half-typed note must
+  // not evaporate when you change your mind about the view. That is the same class of
+  // bug as the switch that looked like it filtered.
+  it('carries a half-typed note across the mode switch', async () => {
+    mockApi()
+    renderStep()
+    fireEvent.click(await screen.findByRole('button', { name: /Parked 1/ }))
+    fireEvent.change(await screen.findByLabelText('Park something new'), {
+      target: { value: 'Renew the pass' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /see all/i }))
+    expect(await screen.findByLabelText('Park something new')).toHaveValue('Renew the pass')
+    fireEvent.click(screen.getByRole('button', { name: /one at a time/i }))
+    expect(await screen.findByLabelText('Park something new')).toHaveValue('Renew the pass')
   })
 
   it('routes from the list too, without leaving it', async () => {

@@ -39,10 +39,11 @@ import '../../../styles/planning-looseEnds.css'
 // the group you were on survives the round trip because nothing here resets it.
 //
 // THREE THINGS WRITE, AND ONLY THREE. "It's done already" and "Drop it" go to the
-// module / our own table; the capture bar parks a new note. Everything else is either
-// a route (recorded on the session) or "leave it open" / "keep it parked", which
-// writes nothing at all — that is exactly what keeps per-item state out of any
-// planning table.
+// module / our own table; the capture bar parks a new note — and it is reachable in
+// BOTH modes, since "See all" reads as the fuller screen and must not be the one place
+// you cannot write something down. Everything else is either a route (recorded on the
+// session) or "leave it open" / "keep it parked", which writes nothing at all — that
+// is exactly what keeps per-item state out of any planning table.
 
 const KIND_LABEL: Record<LooseEnd['kind'], string> = {
   chore: 'Chore',
@@ -294,6 +295,30 @@ function Body({ step, sessionId, weekStart, setDecisionData, busy }: StepBodyPro
   // key for a step whose module is off (a route can outlive the toggle).
   const stepName = (to: string) => view.destinations.notDone.find((d) => d.to === to)?.label ?? to
 
+  // Group B captures. So step 1 does create parked items after all: the board is where
+  // "one more thing" goes when it belongs to no module yet.
+  //
+  // Built once and rendered in BOTH modes. It used to be card-mode only, which made
+  // "See all" — the screen that reads as the fuller one — the single place you could
+  // not drop a note. In see-all it sits inside the Parked section rather than at the
+  // foot of the screen, so what it adds to is never in question.
+  const captureBar = (
+    <form className="wp-le-capture" onSubmit={park}>
+      <span className="wp-le-capture-p" aria-hidden>＋</span>
+      <input
+        className="wp-le-capture-in"
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
+        disabled={disabled}
+        placeholder="Drop something new on the board — one line is enough"
+        aria-label="Park something new"
+      />
+      <button type="submit" className="btn btn-primary wp-le-capture-go" disabled={disabled || !note.trim()}>
+        Park it
+      </button>
+    </form>
+  )
+
   return (
     <div className="wp-le">
       <div className="wp-le-bar">
@@ -396,6 +421,7 @@ function Body({ step, sessionId, weekStart, setDecisionData, busy }: StepBodyPro
                   ))}
                 </ul>
               )}
+              {g.key === 'parked' && captureBar}
             </section>
           ))}
         </div>
@@ -443,24 +469,8 @@ function Body({ step, sessionId, weekStart, setDecisionData, busy }: StepBodyPro
         </div>
       )}
 
-      {/* Group B captures. So step 1 does create parked items after all: the board is
-          where "one more thing" goes when it belongs to no module yet. */}
-      {group === 'parked' && !seeAll && (
-        <form className="wp-le-capture" onSubmit={park}>
-          <span className="wp-le-capture-p" aria-hidden>＋</span>
-          <input
-            className="wp-le-capture-in"
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            disabled={disabled}
-            placeholder="Drop something new on the board — one line is enough"
-            aria-label="Park something new"
-          />
-          <button type="submit" className="btn btn-primary wp-le-capture-go" disabled={disabled || !note.trim()}>
-            Park it
-          </button>
-        </form>
-      )}
+      {/* In card mode it belongs to group B's deck, so it shows with it. */}
+      {group === 'parked' && !seeAll && captureBar}
     </div>
   )
 }

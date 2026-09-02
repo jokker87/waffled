@@ -25,6 +25,7 @@
                 .wp-le-quiet .wp-le-quiet-b
      Trail    — .wp-le-trail .wp-le-trail-i .wp-le-undo
      Capture  — .wp-le-capture .wp-le-capture-p .wp-le-capture-in .wp-le-capture-go
+                (both modes: card-mode footer, and inside see-all's Parked section)
      Cleared  — .wp-le-clear .wp-le-check .wp-le-clear-t .wp-le-clear-s
      See all  — .wp-le-list .wp-le-disclaimer .wp-le-sec .wp-le-sec-h .wp-le-sec-cap
                 .wp-le-rows .wp-le-row
@@ -194,6 +195,11 @@
 .wp-le-capture-in::placeholder { color: var(--ink-3); font-weight: 600; }
 .wp-le-capture-go { flex: none; padding: 9px 18px; font-size: 13.5px; }
 .wp-le-capture-go:disabled { opacity: 0.5; cursor: default; }
+/* In see-all the same bar sits INSIDE the Parked section instead of at the foot of the
+   screen, so what it adds to is never in question. It rides the section's measure (the
+   frame rule's own max-width would be redundant here) and takes the row list's gap
+   above it so it reads as the last thing in that section, not as a stray control. */
+.wp-le-sec .wp-le-capture { max-width: none; margin-top: 12px; }
 
 /* ── The cleared state ──────────────────────────────────────────────────────── */
 .wp-le-clear {

@@ -100,10 +100,12 @@ export const LOOSE_END_GROUPS = [
     key: 'notDone' as const,
     label: 'Not done',
     caption: 'already in the app',
-    // Names the grocery list specifically, because seeing "Whole milk" here is exactly
-    // what made the step feel wrong: a shopping list that rebuilds itself every week
-    // isn't a leftover, and a dozen of its rows bury the things that are.
-    note: 'Computed from your modules — overdue chores, unchecked items on your lists, rhythms past due, habit goals short for the week. Nobody typed these; they are simply still open. Your grocery list is left out: it rebuilds itself from the meal plan.',
+    // Says what the step DOES read, and stops. It briefly also named the grocery list
+    // as left out — but that sentence only ever answered a question the bug provoked
+    // ("is this pulling from ALL my lists?"), and now that groceries aren't there, a
+    // screen narrating what it isn't showing is just noise. The exclusion and the
+    // reasoning for it live in the server read, which is what owns the decision.
+    note: 'Computed from your modules — overdue chores, unchecked items on your lists, rhythms past due, habit goals short for the week. Nobody typed these; they are simply still open.',
   },
   {
     key: 'parked' as const,
