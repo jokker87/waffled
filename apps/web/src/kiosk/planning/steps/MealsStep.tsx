@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react'
-import { mealsApi, planningMealsApi, type Recipe } from '../../../lib/api'
+import { mealsApi, personsApi, planningMealsApi, type Person, type Recipe } from '../../../lib/api'
 import { isEatingOut } from '../../components/MealsColumn'
 import type {
   PlanningMealsView,
@@ -7,6 +7,7 @@ import type {
   PlanningNightDinner,
   PlanningNightEvent,
   PlanningFilledNight,
+  PlanningShoppingTrip,
 } from '../../../lib/api'
 import type { PlanningStepModule, StepBodyProps } from '../registry'
 import '../../../styles/planning-meals.css'
@@ -54,9 +55,11 @@ interface StepState {
   // count before the fill against the count after.
   groceryAdded: number | null
   recipes: Recipe[] | null
+  // The household, for the shopper picker. Loaded on demand like the recipes.
+  people: Person[] | null
 }
 
-const EMPTY: StepState = { key: '', view: null, loading: true, error: null, busy: false, filled: [], autoMarks: [], kept: [], groceryAdded: null, recipes: null }
+const EMPTY: StepState = { key: '', view: null, loading: true, error: null, busy: false, filled: [], autoMarks: [], kept: [], groceryAdded: null, recipes: null, people: null }
 
 let state: StepState = EMPTY
 const listeners = new Set<() => void>()
@@ -76,7 +79,7 @@ function crumbDates(data: Record<string, unknown> | undefined): string[] {
 }
 
 async function load(key: string, weekStart: string, seed: string[]) {
-  set({ ...EMPTY, key, recipes: state.recipes })
+  set({ ...EMPTY, key, recipes: state.recipes, people: state.people })
   try {
     const view = await planningMealsApi.get(weekStart)
     if (state.key !== key) return // a later week won the race
@@ -92,8 +95,22 @@ async function load(key: string, weekStart: string, seed: string[]) {
 
 async function reread(weekStart: string) {
   const key = state.key
-  const view = await planningMealsApi.get(weekStart)
+  // Pass the trip's chore id back: it is what keeps a chore renamed on the Tasks
+  // board recognised as this week's trip instead of spawning a second one.
+  const view = await planningMealsApi.get(weekStart, state.view?.shopping?.choreId ?? null)
   if (state.key === key) set({ view })
+}
+
+async function setShopper(weekStart: string, t: { dueOn: string | null; personId: string | null; dueTime: string | null }, refresh: () => void) {
+  if (state.busy) return
+  set({ busy: true, error: null })
+  try {
+    const r = await planningMealsApi.setShopper(weekStart, { ...t, choreId: state.view?.shopping?.choreId ?? null })
+    set({ view: r.view, busy: false })
+  } catch {
+    set({ busy: false, error: "That didn't take — try again." })
+  }
+  refresh()
 }
 
 // A date is settled by hand (or taken back): it is no longer an auto-fill, in either
@@ -224,6 +241,15 @@ function attribution(d: PlanningNightDinner, auto: boolean, out: boolean): React
   return null
 }
 
+// The shopper pill. Assigned it names the person; planned but unassigned it says so,
+// because leaving the trip up for grabs is a real answer and not a blank.
+function tripLabel(t: PlanningShoppingTrip | null): string {
+  if (!t) return "Who's shopping?"
+  const when = `${dow(t.dueOn)}${t.dueTime ? ` ${t.dueTime}` : ''}`
+  if (!t.personName) return `Up for grabs · ${when}`
+  return `${t.personAvatar ?? '\u{1F464}'} ${t.personName} shops ${when}`
+}
+
 // "Undo the three" is the design's own phrasing, so small counts read as words.
 const WORDS = ['none', 'one', 'two', 'three', 'four', 'five', 'six', 'seven']
 const countWord = (n: number) => WORDS[n] ?? String(n)
@@ -233,6 +259,7 @@ const countWord = (n: number) => WORDS[n] ?? String(n)
 function Body(p: StepBodyProps) {
   const s = useMealsStep(p, true)
   const [editing, setEditing] = useState<string | null>(null)
+  const [shopping, setShopping] = useState(false)
   // A night is marked whether its ✨ came from this session's fill or from the crumb
   // of an earlier visit — the mark says "the app picked this", which stays true.
   const autoDates = useMemo(
@@ -249,7 +276,7 @@ function Body(p: StepBodyProps) {
   }, [autoDates])
 
   // The week changed under us — close a modal that names a night in the old one.
-  useEffect(() => { setEditing(null) }, [s.key])
+  useEffect(() => { setEditing(null); setShopping(false) }, [s.key])
 
   if (s.loading) return <div className="wpm-msg">Reading the week…</div>
   if (!s.view) return <div className="wpm-msg">{s.error ?? "Couldn't read this week's meals."}</div>
@@ -282,7 +309,33 @@ function Body(p: StepBodyProps) {
             {s.view.groceries.items} items · aisle order
             {s.view.groceries.checked > 0 ? ` · ${s.view.groceries.checked} ticked` : ''}
           </span>
+          {/* The shopper pill is only here because the trip is REAL — a one-off chore
+              that shows on the Tasks board as "Groceries · from the Meals step". With
+              the chores module off there is nowhere for it to live, so the control
+              goes away rather than sitting there dead. */}
+          {s.view.choresOn && (
+            <button
+              type="button"
+              className={`wpm-gro-pill wpm-shop${s.view.shopping ? '' : ' open'}`}
+              disabled={p.busy || s.busy}
+              onClick={() => setShopping(true)}
+            >
+              {tripLabel(s.view.shopping)}
+            </button>
+          )}
         </div>
+      )}
+
+      {shopping && s.view.choresOn && (
+        <ShopperModal
+          weekStart={p.weekStart}
+          nights={s.view.nights}
+          trip={s.view.shopping}
+          people={s.people}
+          busy={s.busy}
+          onClose={() => setShopping(false)}
+          onSave={(t) => { setShopping(false); void setShopper(p.weekStart, t, p.refresh) }}
+        />
       )}
 
       {s.kept.length > 0 && (
@@ -433,6 +486,101 @@ function NightModal({ night, recipes, busy, onClose, onPick, onClear }: {
           <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
           <button type="button" className="btn btn-primary" disabled={busy || !title.trim()} onClick={() => onPick({ title: title.trim(), recipeId: null })}>
             Plan it
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Who's shopping, and when. Saving writes a real one-off chore, so this is the same
+// decision the Tasks step would make — taken here because this is where you can see
+// what the week needs bought.
+function ShopperModal({ weekStart, nights, trip, people, busy, onClose, onSave }: {
+  weekStart: string
+  nights: PlanningMealsNight[]
+  trip: PlanningShoppingTrip | null
+  people: Person[] | null
+  busy: boolean
+  onClose: () => void
+  onSave: (t: { dueOn: string | null; personId: string | null; dueTime: string | null }) => void
+}) {
+  const [personId, setPersonId] = useState<string | null>(trip?.personId ?? null)
+  // Default to the last night of the week: a trip that hasn't been decided is more
+  // useful pencilled in than blank, and the day is one tap to change.
+  const [dueOn, setDueOn] = useState<string>(trip?.dueOn ?? nights[nights.length - 1]?.date ?? weekStart)
+  const [dueTime, setDueTime] = useState<string>(trip?.dueTime ?? '')
+
+  useEffect(() => {
+    if (people) return
+    let alive = true
+    personsApi.persons().then((r) => { if (alive) set({ people: r.persons }) }).catch(() => { if (alive) set({ people: [] }) })
+    return () => { alive = false }
+  }, [people])
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-card wpm-modal" onClick={(e) => e.stopPropagation()}>
+        <button type="button" className="modal-close" onClick={onClose} aria-label="Close">×</button>
+        <div className="wpm-modal-t wf-serif">The shopping trip</div>
+        <div className="wpm-modal-s">
+          It lands on the Tasks board as a real assignment — leaving it up for grabs is a real answer.
+        </div>
+
+        <div className="wpm-modal-h">Who's going</div>
+        <div className="wpm-picks">
+          <button
+            type="button"
+            className={`wpm-pick${personId === null ? ' on' : ''}`}
+            onClick={() => setPersonId(null)}
+          >
+            Up for grabs
+          </button>
+          {people === null && <div className="wpm-msg">Loading…</div>}
+          {people?.map((pp) => (
+            <button
+              key={pp.id}
+              type="button"
+              className={`wpm-pick${personId === pp.id ? ' on' : ''}`}
+              onClick={() => setPersonId(pp.id)}
+            >
+              <span aria-hidden>{pp.avatarEmoji ?? '\u{1F464}'}</span> {pp.name}
+            </button>
+          ))}
+        </div>
+
+        <div className="wpm-modal-h">Which day</div>
+        <div className="wpm-picks">
+          {nights.map((n) => (
+            <button
+              key={n.date}
+              type="button"
+              className={`wpm-pick${dueOn === n.date ? ' on' : ''}`}
+              onClick={() => setDueOn(n.date)}
+            >
+              {dow(n.date)}
+            </button>
+          ))}
+        </div>
+
+        <label className="field">
+          <span>What time (optional)</span>
+          <input type="time" value={dueTime} onChange={(e) => setDueTime(e.target.value)} />
+        </label>
+
+        <div className="wpm-modal-f">
+          {trip && (
+            <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => onSave({ dueOn: null, personId: null, dueTime: null })}>
+              No trip this week
+            </button>
+          )}
+          <div className="wpm-modal-sp" />
+          <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          <button
+            type="button" className="btn btn-primary" disabled={busy}
+            onClick={() => onSave({ dueOn, personId, dueTime: dueTime || null })}
+          >
+            {trip ? 'Update the trip' : 'Add it to Tasks'}
           </button>
         </div>
       </div>

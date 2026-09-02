@@ -29,6 +29,7 @@ import {
   removePrepReminderForEntry,
 } from '../../meals/meal-events'
 import { rangeEvents } from '../../events/events'
+import { createChore, updateChore, softDeleteChore } from '../../chores/chores.service'
 import { groceryBoard, rebuildGroceryFromWeek } from '../../lists/lists.service'
 import type { PlanCard } from '../../meals/meals.types'
 
@@ -40,6 +41,25 @@ const MEAL_TYPE = 'dinner'
 // (origin='meal_prep') are the *output* of this plan, so showing them as the night's
 // context would put "Dinner · Pasta bake" directly above the Pasta bake card.
 const MIRROR_ORIGINS = new Set(['meal_plan', 'meal_prep'])
+
+// The shopping trip is a REAL chore, so it shows up on the Tasks board as a genuine
+// assignment ("Groceries · from the Meals step · Sat 9am") rather than as a label this
+// step invented. It gets no table and no column of its own — the chore IS the record.
+//
+// WHICH chore, then? Identity is server-side and derived, because a crumb on the
+// session can't be trusted to be there: it is only persisted when the step is
+// ANSWERED, so assigning a shopper and walking away would lose the pointer and the
+// next visit would create a second trip. The key is:
+//
+//   the household's non-deleted, ONE-OFF (rrule is null) chore titled exactly
+//   GROCERY_CHORE_TITLE whose single instance is due inside the planned week.
+//
+// A caller may also pass the `choreId` the view just handed it, which wins when it
+// still resolves to a one-off chore of this household — so renaming the chore on the
+// Tasks board doesn't orphan it and cause a duplicate. Between the two, revisiting the
+// step, changing the shopper and changing the day all land on the same one row.
+const GROCERY_CHORE_TITLE = 'Groceries'
+const GROCERY_CHORE_EMOJI = '🛒'
 
 export const addDays = (iso: string, n: number): string => {
   const d = new Date(`${iso}T00:00:00Z`)
@@ -98,6 +118,24 @@ export interface MealsStepView {
   // Groceries are ONE LINE, not a panel: the board already builds itself from this
   // plan. null when the lists module is off (then there is no line to show).
   groceries: { items: number; checked: number } | null
+  // Whether the shopping trip can be assigned at all. Meals is gated on `meals`, not
+  // `chores`, so a household with the chores module off gets the plain grocery line
+  // and NO control — the same rule that kept an unsourced shopper pill off the bar.
+  choresOn: boolean
+  // This week's shopping trip, read back off the chore. null ⇒ no trip planned;
+  // `personId: null` ⇒ planned but up for grabs, which is a real answer.
+  shopping: ShoppingTrip | null
+}
+
+export interface ShoppingTrip {
+  choreId: string
+  personId: string | null
+  personName: string | null
+  personAvatar: string | null
+  personColor: string | null
+  dueOn: string
+  dueTime: string | null
+  status: string
 }
 
 // What a fill wrote, and everything an undo needs to prove the night is still the one
@@ -110,10 +148,12 @@ export interface FilledNight {
   title: string | null
 }
 
-const listsOn = async (householdId: string): Promise<boolean> => {
+const moduleOn = async (householdId: string, key: 'lists' | 'chores'): Promise<boolean> => {
   const { rows } = await query<{ settings: unknown }>(`select settings from households where id = $1`, [householdId])
-  return moduleEnabled(rows[0]?.settings, 'lists')
+  return moduleEnabled(rows[0]?.settings, key)
 }
+const listsOn = (householdId: string) => moduleOn(householdId, 'lists')
+const choresOn = (householdId: string) => moduleOn(householdId, 'chores')
 
 const householdTz = async (householdId: string): Promise<string> => {
   const { rows } = await query<{ timezone: string | null }>(`select timezone from households where id = $1`, [householdId])
@@ -126,15 +166,64 @@ const householdTz = async (householdId: string): Promise<string> => {
 const localDay = (at: Date | string, tz: string): string =>
   new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(at))
 
-// The seven columns for `weekStart`: that night's calendar events, then its dinner.
-export async function mealsStepView(tenant: Tenant, weekStart: string): Promise<MealsStepView> {
+// This week's shopping trip, if there is one. `hintChoreId` is the id the client last
+// saw; it wins when it still names a one-off chore of this household, so a chore
+// renamed on the Tasks board is still found. Otherwise the title+week key finds it.
+export async function findShoppingTrip(householdId: string, weekStart: string, hintChoreId?: string | null): Promise<ShoppingTrip | null> {
   const weekEnd = addDays(weekStart, 6)
-  const [entries, events, tz, groceries] = await Promise.all([
+  const { rows } = await query<{
+    chore_id: string
+    person_id: string | null
+    person_name: string | null
+    person_avatar: string | null
+    person_color: string | null
+    due_on: string
+    due_time: string | null
+    status: string
+    is_hint: boolean
+  }>(
+    `select c.id as chore_id, ci.person_id, p.name as person_name, p.avatar_emoji as person_avatar,
+            p.color_hex as person_color, to_char(ci.due_on,'YYYY-MM-DD') as due_on,
+            to_char(c.due_time,'HH24:MI') as due_time, ci.status,
+            (c.id = $4::uuid) as is_hint
+       from chores c
+       join chore_instances ci on ci.chore_id = c.id and ci.deleted_at is null
+       left join persons p on p.id = ci.person_id and p.deleted_at is null
+      where c.household_id = $1 and c.deleted_at is null and c.rrule is null
+        and (c.id = $4::uuid or (lower(c.title) = lower($5) and ci.due_on between $2::date and $3::date))
+      order by is_hint desc, ci.due_on
+      limit 1`,
+    [householdId, weekStart, weekEnd, hintChoreId && UUID_RE.test(hintChoreId) ? hintChoreId : null, GROCERY_CHORE_TITLE]
+  )
+  const r = rows[0]
+  if (!r) return null
+  return {
+    choreId: r.chore_id,
+    personId: r.person_id,
+    personName: r.person_name,
+    personAvatar: r.person_avatar,
+    personColor: r.person_color,
+    dueOn: r.due_on,
+    dueTime: r.due_time,
+    status: r.status,
+  }
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+// The seven columns for `weekStart`: that night's calendar events, then its dinner.
+export async function mealsStepView(tenant: Tenant, weekStart: string, hintChoreId?: string | null): Promise<MealsStepView> {
+  const weekEnd = addDays(weekStart, 6)
+  const [entries, events, tz, groceries, chores] = await Promise.all([
     weekEntries(tenant.householdId, weekStart, 7),
     rangeEvents(tenant.householdId, weekStart, weekEnd, tenant.personId ?? null),
     householdTz(tenant.householdId),
     groceryLine(tenant, weekStart),
+    choresOn(tenant.householdId),
   ])
+  // Only read the trip when the module that owns it is on — otherwise the bar shows
+  // the plain line and the control is absent rather than dead.
+  const shopping = chores ? await findShoppingTrip(tenant.householdId, weekStart, hintChoreId) : null
 
   const dinnerByDate = new Map<string, NightDinner>()
   for (const e of entries) {
@@ -182,6 +271,8 @@ export async function mealsStepView(tenant: Tenant, weekStart: string): Promise<
     nights,
     emptyDates: nights.filter((n) => !n.dinner).map((n) => n.date),
     groceries,
+    choresOn: chores,
+    shopping,
   }
 }
 
@@ -328,6 +419,91 @@ export async function undoFilledDinners(tenant: Tenant, weekStart: string, claim
   cleared.sort()
   kept.sort()
   return { weekStart, cleared, kept, view: await mealsStepView(tenant, weekStart) }
+}
+
+// ── The shopping trip ────────────────────────────────────────────────────────────
+
+export class ShoppingDayOutOfWeekError extends Error {
+  statusCode = 400
+  constructor() {
+    super('the shopping day must be inside the week being planned')
+    this.name = 'BadRequest'
+  }
+}
+
+export interface ShoppingTripInput {
+  // The day of the trip. null ⇒ there is no trip: the chore is removed rather than
+  // left behind as an orphan on somebody's Tasks board.
+  dueOn: string | null
+  // Who's going. null ⇒ up for grabs, which is a real answer — the same thing the
+  // Tasks step means by "nobody".
+  personId: string | null
+  dueTime: string | null
+  // The chore id the client last saw, so a chore renamed on the Tasks board is still
+  // recognised as this week's trip.
+  choreId: string | null
+}
+
+export interface ShoppingResult {
+  weekStart: string
+  shopping: ShoppingTrip | null
+  view: MealsStepView
+}
+
+// Create, move, reassign or remove the week's shopping trip — always the SAME chore.
+// Every path here goes through the chores service (createChore / updateChore /
+// softDeleteChore); the one direct write is moving the pending instance's due_on,
+// which updateChore has no field for and which mirrors what it already does to
+// instances when the assignee changes.
+export async function setShoppingTrip(tenant: Tenant, weekStart: string, input: ShoppingTripInput): Promise<ShoppingResult> {
+  const weekEnd = addDays(weekStart, 6)
+  const existing = await findShoppingTrip(tenant.householdId, weekStart, input.choreId)
+
+  // No day ⇒ no trip. Clearing removes the chore instead of leaving one nobody
+  // planned sitting on the board.
+  if (!input.dueOn) {
+    if (existing) await softDeleteChore(tenant.householdId, existing.choreId)
+    return finish(tenant, weekStart, null)
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.dueOn) || input.dueOn < weekStart || input.dueOn > weekEnd) {
+    // Silently moving somebody's shopping day would be worse than refusing it.
+    throw new ShoppingDayOutOfWeekError()
+  }
+
+  if (!existing) {
+    const chore = await createChore(tenant, {
+      title: GROCERY_CHORE_TITLE,
+      emoji: GROCERY_CHORE_EMOJI,
+      personId: input.personId,
+      dueOn: input.dueOn,
+      dueTime: input.dueTime,
+      rrule: null,
+      // A shopping trip that didn't happen still needs doing, so it carries forward.
+      rollover: true,
+    })
+    return finish(tenant, weekStart, chore.id)
+  }
+
+  // Reassigning follows through to the pending instance inside updateChore.
+  if (existing.personId !== input.personId || existing.dueTime !== input.dueTime) {
+    await updateChore(tenant.householdId, existing.choreId, { personId: input.personId, dueTime: input.dueTime })
+  }
+  // Moving the day. Only a PENDING instance moves: a trip somebody already did is
+  // history, and rewriting its date would say the shopping happened on a day it
+  // didn't. The (chore_id, due_on) unique index is safe here — a one-off has one.
+  if (existing.dueOn !== input.dueOn) {
+    await query(
+      `update chore_instances set due_on = $3::date
+        where household_id = $1 and chore_id = $2 and deleted_at is null and status = 'pending'`,
+      [tenant.householdId, existing.choreId, input.dueOn]
+    )
+  }
+  return finish(tenant, weekStart, existing.choreId)
+}
+
+async function finish(tenant: Tenant, weekStart: string, choreId: string | null): Promise<ShoppingResult> {
+  const view = await mealsStepView(tenant, weekStart, choreId)
+  return { weekStart, shopping: view.shopping, view }
 }
 
 // Whatever came off the wire, shaped into undo claims. A claim naming no date is

@@ -39,6 +39,20 @@ export interface PlanningMealsNight {
   dinner: PlanningNightDinner | null
 }
 
+// This week's shopping trip, read back off a real one-off chore — so it also shows on
+// the Tasks board as a genuine assignment. null ⇒ no trip; `personId: null` ⇒ planned
+// but up for grabs, which is a real answer.
+export interface PlanningShoppingTrip {
+  choreId: string
+  personId: string | null
+  personName: string | null
+  personAvatar: string | null
+  personColor: string | null
+  dueOn: string
+  dueTime: string | null
+  status: string
+}
+
 export interface PlanningMealsView {
   // The week the SERVER named. Never recompute a week from this — pass it back.
   weekStart: string
@@ -46,6 +60,10 @@ export interface PlanningMealsView {
   emptyDates: string[]
   // One line, not a panel. null ⇒ the lists module is off and there is no line.
   groceries: { items: number; checked: number } | null
+  // False ⇒ the chores module is off, so there is nowhere for a shopping trip to
+  // live: the bar shows the plain line and no control, rather than a dead affordance.
+  choresOn: boolean
+  shopping: PlanningShoppingTrip | null
 }
 
 // What a fill wrote — and everything the undo needs to prove a night is still that.
@@ -71,8 +89,12 @@ export interface PlanningMealsUndo {
 }
 
 export const planningMealsApi = {
-  get: (weekStart: string) =>
-    apiGet<PlanningMealsView>(`/api/weekly-planning/meals?weekStart=${encodeURIComponent(weekStart)}`),
+  // `choreId` is the shopping chore the client last saw — a hint that keeps a chore
+  // renamed on the Tasks board recognised as this week's trip.
+  get: (weekStart: string, choreId?: string | null) =>
+    apiGet<PlanningMealsView>(
+      `/api/weekly-planning/meals?weekStart=${encodeURIComponent(weekStart)}${choreId ? `&choreId=${encodeURIComponent(choreId)}` : ''}`
+    ),
   // "Plan the rest for me" — fills only the nights with no dinner.
   fill: (weekStart: string) =>
     apiSend<PlanningMealsFill>('POST', '/api/weekly-planning/meals/fill', { weekStart })
@@ -80,4 +102,10 @@ export const planningMealsApi = {
   undo: (weekStart: string, filled: PlanningFilledNight[]) =>
     apiSend<PlanningMealsUndo>('POST', '/api/weekly-planning/meals/undo', { weekStart, filled })
       .then((r) => { emit('meals'); emit('grocery'); return r }),
+  // Assign the shopping trip (or clear it with `dueOn: null`). One chore per week, so
+  // this is an upsert however many times the family changes its mind.
+  setShopper: (weekStart: string, t: { dueOn: string | null; personId: string | null; dueTime: string | null; choreId: string | null }) =>
+    apiSend<{ weekStart: string; shopping: PlanningShoppingTrip | null; view: PlanningMealsView }>(
+      'PUT', '/api/weekly-planning/meals/shopper', { weekStart, ...t }
+    ).then((r) => { emit('chores'); return r }),
 }

@@ -121,14 +121,32 @@
   background: var(--panel); border-radius: var(--r-md); padding: 11px 14px;
 }
 .wpm-gro-i { font-size: 17px; line-height: 1; flex: none; }
-.wpm-gro-m { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.wpm-gro-m { flex: 1; display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .wpm-gro-m b { font-size: 13.5px; font-weight: 750; color: var(--ink); letter-spacing: -0.01em; }
 .wpm-gro-s { font-size: 11.5px; font-weight: 600; color: var(--ink-3); }
 .wpm-gro-pill {
-  margin-left: auto; flex: none; white-space: nowrap;
+  flex: none; white-space: nowrap;
   font-size: 11.5px; font-weight: 700; color: var(--ink-2);
   background: var(--card); border-radius: 999px; padding: 6px 12px;
 }
+
+/* The shopper pill is a control, because the trip it names is a real chore somebody
+   has to be given. Unassigned it reads as an invitation, not as a gap. */
+.wpm-shop { font: inherit; font-size: 11.5px; font-weight: 700; border: 0; cursor: pointer; }
+.wpm-shop:hover { color: var(--ink); }
+.wpm-shop:disabled { opacity: 0.55; cursor: default; }
+.wpm-shop.open { background: transparent; border: 1px dashed var(--line); color: var(--ink-3); }
+
+/* Person / day pickers in the modals — the pill vocabulary, not raw radios. */
+.wpm-picks { display: flex; flex-wrap: wrap; gap: 7px; }
+.wpm-pick {
+  display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+  font: inherit; font-size: 13px; font-weight: 650;
+  background: var(--panel); color: var(--ink); border: 1px solid transparent;
+  border-radius: 999px; padding: 8px 14px;
+}
+.wpm-pick:hover { border-color: var(--hair-2); }
+.wpm-pick.on { background: var(--primary-t); border-color: var(--primary); color: var(--ink); }
 
 .wpm-note { font-size: 12.5px; font-weight: 600; color: var(--ink-3); padding: 0 2px; }
 .wpm-note-bad { color: var(--danger); }

@@ -67,11 +67,21 @@ interface Night {
     minutes: number | null
   } | null
 }
+interface Trip {
+  choreId: string
+  personId: string | null
+  personName: string | null
+  dueOn: string
+  dueTime: string | null
+  status: string
+}
 interface StepView {
   weekStart: string
   nights: Night[]
   emptyDates: string[]
   groceries: { items: number; checked: number }
+  choresOn: boolean
+  shopping: Trip | null
 }
 interface Filled { date: string; entryId: string; recipeId: string | null; title: string | null }
 
@@ -306,6 +316,112 @@ describe('weekly planning · meals · plan the rest for me', () => {
     })
     expect(res.statusCode).toBe(200)
     expect(json(res).cleared).toEqual([])
+  })
+})
+
+describe('weekly planning · meals · who is shopping', () => {
+  // The trip is a REAL chore, so it lands on the Tasks board as a genuine assignment
+  // instead of a label this step made up. What matters here is that there is exactly
+  // ONE of them per week however many times somebody changes their mind.
+  const shopperChores = async () => {
+    const { query } = await import('../src/platform/db')
+    const { rows } = await query<{ id: string; person_id: string | null; due_on: string; due_time: string | null }>(
+      `select c.id, ci.person_id, to_char(ci.due_on,'YYYY-MM-DD') as due_on, to_char(c.due_time,'HH24:MI') as due_time
+         from chores c join chore_instances ci on ci.chore_id = c.id and ci.deleted_at is null
+        where c.household_id = $1 and c.deleted_at is null and lower(c.title) = 'groceries'
+        order by ci.due_on`,
+      [householdId]
+    )
+    return rows
+  }
+  const setShopper = (body: Record<string, unknown>) =>
+    call('PUT', '/api/weekly-planning/meals/shopper', kevin, { weekStart, ...body })
+
+  it('starts with no trip and no invented shopper', async () => {
+    const view = await stepView()
+    expect(view.choresOn).toBe(true)
+    expect(view.shopping).toBeNull()
+    expect(await shopperChores()).toHaveLength(0)
+  })
+
+  it('assigning creates exactly one chore for the week', async () => {
+    const res = await setShopper({ personId: ownerId, dueOn: days[6], dueTime: '09:00' })
+    expect(res.statusCode).toBe(200)
+    expect(json(res).shopping).toMatchObject({ personId: ownerId, personName: 'Kevin', dueOn: days[6], dueTime: '09:00' })
+
+    const chores = await shopperChores()
+    expect(chores).toHaveLength(1)
+    expect(chores[0]).toMatchObject({ person_id: ownerId, due_on: days[6], due_time: '09:00' })
+    // …and the step reads it back off the chore, not off any record of its own.
+    expect((await stepView()).shopping?.choreId).toBe(chores[0].id)
+  })
+
+  it('changing the shopper or the day updates the one chore, never duplicates it', async () => {
+    const first = (await shopperChores())[0].id
+
+    // A different day.
+    expect((await setShopper({ personId: ownerId, dueOn: days[5], dueTime: '09:00' })).statusCode).toBe(200)
+    expect(await shopperChores()).toHaveLength(1)
+    expect((await shopperChores())[0]).toMatchObject({ id: first, due_on: days[5] })
+
+    // Up for grabs — a real answer, not a cleared trip: the chore stays, unassigned.
+    const res = await setShopper({ personId: null, dueOn: days[5], dueTime: '09:00' })
+    expect(json(res).shopping).toMatchObject({ choreId: first, personId: null, dueOn: days[5] })
+    expect(await shopperChores()).toHaveLength(1)
+    expect((await shopperChores())[0].person_id).toBeNull()
+
+    // Back to a person, and a third day.
+    expect((await setShopper({ personId: ownerId, dueOn: days[3], dueTime: '17:30' })).statusCode).toBe(200)
+    const chores = await shopperChores()
+    expect(chores).toHaveLength(1)
+    expect(chores[0]).toMatchObject({ id: first, person_id: ownerId, due_on: days[3], due_time: '17:30' })
+  })
+
+  it('finds the same trip again after the chore is renamed on the Tasks board', async () => {
+    const before = (await shopperChores())[0].id
+    expect((await call('PATCH', `/api/chores/${before}`, kevin, { title: 'Costco run' })).statusCode).toBe(200)
+
+    // The title key can't see it any more, so the client's `choreId` hint is what
+    // keeps a renamed chore from becoming a second trip.
+    expect(json(await call('GET', `/api/weekly-planning/meals?weekStart=${weekStart}&choreId=${before}`, kevin)).shopping?.choreId).toBe(before)
+    expect((await setShopper({ personId: ownerId, dueOn: days[2], choreId: before })).statusCode).toBe(200)
+    const rows = await shopperChores()
+    expect(rows.filter((r) => r.id === before)).toHaveLength(0) // renamed out of the title key
+    expect(rows).toHaveLength(0) // …and no second "Groceries" was created
+
+    await call('PATCH', `/api/chores/${before}`, kevin, { title: 'Groceries' })
+    expect(await shopperChores()).toHaveLength(1)
+  })
+
+  it('refuses a shopping day outside the week rather than silently moving it', async () => {
+    const res = await setShopper({ personId: ownerId, dueOn: addDays(weekStart, 20) })
+    expect(res.statusCode).toBe(400)
+    expect(await shopperChores()).toHaveLength(1)
+  })
+
+  it('clearing the trip removes the chore rather than orphaning it', async () => {
+    const res = await setShopper({ personId: null, dueOn: null })
+    expect(res.statusCode).toBe(200)
+    expect(json(res).shopping).toBeNull()
+    expect(await shopperChores()).toHaveLength(0)
+    expect((await stepView()).shopping).toBeNull()
+  })
+
+  it('drops the whole thing when the chores module is off — read still works', async () => {
+    expect((await setShopper({ personId: ownerId, dueOn: days[6] })).statusCode).toBe(200)
+    expect((await call('PATCH', '/api/household/modules', kevin, { chores: false })).statusCode).toBe(200)
+
+    // Meals is gated on `meals`, not `chores`, so the week still reads — it just has
+    // no control and no trip, rather than a dead affordance.
+    const view = await stepView()
+    expect(view.choresOn).toBe(false)
+    expect(view.shopping).toBeNull()
+    expect(view.nights).toHaveLength(7)
+    // …and the write is refused outright.
+    expect((await setShopper({ personId: ownerId, dueOn: days[6] })).statusCode).toBe(403)
+
+    await call('PATCH', '/api/household/modules', kevin, { chores: true })
+    expect((await stepView()).choresOn).toBe(true)
   })
 })
 

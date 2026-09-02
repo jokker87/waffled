@@ -1,8 +1,10 @@
 import type createAPI from 'lambda-api'
 import type { Request } from 'lambda-api'
 import { moduleRoutes, requireModule } from '../../../platform/route-guards'
+import { requireCapability } from '../../../platform/permissions'
+import { assertPersonInHousehold } from '../../../platform/household-refs'
 import { resolveWeekStart } from '../weeklyPlanning'
-import { mealsStepView, fillEmptyDinners, undoFilledDinners, parseFilledNights } from './meals'
+import { mealsStepView, fillEmptyDinners, undoFilledDinners, parseFilledNights, setShoppingTrip } from './meals'
 
 type Api = ReturnType<typeof createAPI>
 
@@ -23,7 +25,10 @@ export function registerMealsStepRoutes(api: Api): void {
   api.get('/api/weekly-planning/meals', tenantRoute(async (tenant, req: Request) => {
     await requireModule(tenant, 'meals')
     const weekStart = await resolveWeekStart(tenant.householdId, req.query?.weekStart)
-    return mealsStepView(tenant, weekStart)
+    // `choreId` is the shopping chore the client last saw — a hint, never a
+    // requirement; without it the trip is still found by title + week.
+    const hint = typeof req.query?.choreId === 'string' ? req.query.choreId : null
+    return mealsStepView(tenant, weekStart, hint)
   }))
 
   // "Plan the rest for me" — fills ONLY the nights with no dinner, and hands back
@@ -42,5 +47,34 @@ export function registerMealsStepRoutes(api: Api): void {
     const body = (req.body ?? {}) as { weekStart?: unknown; filled?: unknown }
     const weekStart = await resolveWeekStart(tenant.householdId, body.weekStart)
     return undoFilledDinners(tenant, weekStart, parseFilledNights(body.filled))
+  }))
+
+  // Who's shopping, and when. The trip is a real one-off chore, so it lands on the
+  // Tasks board as a genuine assignment — this route only decides which chore that is
+  // and keeps it to ONE per week (see `setShoppingTrip`).
+  //
+  // Gated on `chores` as well as `meals`: the module that owns the record has to be on
+  // for the record to exist, and the client drops the control when the view says so.
+  //
+  // Permissions follow the chores module's own rule rather than inventing one — a
+  // carve-out, exactly as route-guards.ts describes: handing the trip to somebody
+  // ELSE (or taking it off them) is `chore.manage`; putting it on yourself, or leaving
+  // it up for grabs, is not.
+  api.put('/api/weekly-planning/meals/shopper', tenantRoute(async (tenant, req: Request) => {
+    await requireModule(tenant, 'meals')
+    await requireModule(tenant, 'chores')
+    const b = (req.body ?? {}) as { weekStart?: unknown; dueOn?: unknown; personId?: unknown; dueTime?: unknown; choreId?: unknown }
+    const weekStart = await resolveWeekStart(tenant.householdId, b.weekStart)
+
+    const personId = typeof b.personId === 'string' && b.personId ? b.personId : null
+    if (personId) await assertPersonInHousehold(tenant.householdId, personId)
+    if (personId !== null && personId !== tenant.personId) await requireCapability(tenant, 'chore.manage')
+
+    return setShoppingTrip(tenant, weekStart, {
+      dueOn: typeof b.dueOn === 'string' && b.dueOn ? b.dueOn : null,
+      personId,
+      dueTime: typeof b.dueTime === 'string' && /^\d{2}:\d{2}$/.test(b.dueTime) ? b.dueTime : null,
+      choreId: typeof b.choreId === 'string' ? b.choreId : null,
+    })
   }))
 }

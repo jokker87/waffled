@@ -1,7 +1,7 @@
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import mealsStep from './MealsStep'
 import type { StepBodyProps } from '../registry'
-import type { PlanningMealsView } from '../../../lib/api'
+import type { PlanningMealsView, PlanningShoppingTrip } from '../../../lib/api'
 
 // Step 7 · Meals — seven columns for the week, each night's events above its dish,
 // "Plan the rest for me" in the footer and the undo that replaces it.
@@ -53,6 +53,20 @@ const baseView = (): PlanningMealsView => ({
   ],
   emptyDates: [day(3), day(5), day(6)],
   groceries: { items: 24, checked: 3 },
+  choresOn: true,
+  shopping: null,
+})
+
+const trip = (over: Partial<PlanningShoppingTrip> = {}): PlanningShoppingTrip => ({
+  choreId: 'ch-1',
+  personId: 'p-kelly',
+  personName: 'Kelly',
+  personAvatar: '🦊',
+  personColor: '#e07a3f',
+  dueOn: day(6),
+  dueTime: '09:00',
+  status: 'pending',
+  ...over,
 })
 
 // The view after a fill: the three empties now hold auto-picked dishes.
@@ -82,6 +96,13 @@ function mockApi(opts: { view?: PlanningMealsView; recipes?: { id: string; title
 
     if (u.includes('/api/recipes')) {
       return { ok: true, json: async () => ({ recipes: opts.recipes ?? [{ id: 'r-9', title: 'Chili', emoji: '🌶️' }] }) }
+    }
+    if (u.includes('/api/persons')) {
+      return { ok: true, json: async () => ({ persons: [{ id: 'p-kelly', name: 'Kelly', avatarEmoji: '🦊' }, { id: 'p-kevin', name: 'Kevin', avatarEmoji: '🐻' }] }) }
+    }
+    if (u.includes('/api/weekly-planning/meals/shopper')) {
+      view = { ...view, shopping: body?.dueOn ? trip({ dueOn: body.dueOn as string, personId: (body.personId as string) ?? null, personName: body.personId ? 'Kelly' : null }) : null }
+      return { ok: true, json: async () => ({ weekStart: WEEK, shopping: view.shopping, view }) }
     }
     if (u.includes('/api/weekly-planning/meals/fill')) {
       view = filledView()
@@ -213,6 +234,68 @@ describe('meals step · the week as it stands', () => {
     // every column carries the events block that keeps the dishes on one line.
     expect(document.querySelectorAll('.wpm-ev-none')).toHaveLength(5)
     expect(document.querySelectorAll('.wpm-night > .wpm-events')).toHaveLength(7)
+  })
+})
+
+describe('meals step · who is shopping', () => {
+  it('offers the trip as a control, and names the person once it is assigned', async () => {
+    mockApi()
+    draw()
+    await screen.findByText('Pasta bake')
+    // Unassigned it reads as an invitation, not a fabricated shopper.
+    const pill = within(screen.getByTestId('body')).getByRole('button', { name: /who's shopping/i })
+    expect(pill.className).toContain('wpm-shop')
+    fireEvent.click(pill)
+
+    const card = document.querySelector('.modal-card') as HTMLElement
+    fireEvent.click(await within(card).findByRole('button', { name: /kelly/i }))
+    fireEvent.click(within(card).getByRole('button', { name: /sat/i }))
+    fireEvent.click(within(card).getByRole('button', { name: /add it to tasks/i }))
+
+    await waitFor(() => expect(sent('PUT', '/meals/shopper')).toHaveLength(1))
+    // One chore per week, so the client always hands back the id it last saw.
+    expect(sent('PUT', '/meals/shopper')[0].body).toMatchObject({ weekStart: WEEK, personId: 'p-kelly', dueOn: day(6), choreId: null })
+    // …and the pill now renders from the chore.
+    expect(await screen.findByRole('button', { name: /Kelly shops/ })).toBeTruthy()
+  })
+
+  it('says so when the trip is planned but up for grabs', async () => {
+    mockApi({ view: { ...baseView(), shopping: trip({ personId: null, personName: null, personAvatar: null }) } })
+    draw()
+    await screen.findByText('Pasta bake')
+    expect(screen.getByRole('button', { name: /up for grabs/i })).toBeTruthy()
+  })
+
+  it('passes the chore id back so a renamed chore is not duplicated', async () => {
+    mockApi({ view: { ...baseView(), shopping: trip() } })
+    draw()
+    await screen.findByText('Pasta bake')
+    fireEvent.click(screen.getByRole('button', { name: /Kelly shops/ }))
+    const card = document.querySelector('.modal-card') as HTMLElement
+    fireEvent.click(await within(card).findByRole('button', { name: /update the trip/i }))
+    await waitFor(() => expect(sent('PUT', '/meals/shopper')).toHaveLength(1))
+    expect(sent('PUT', '/meals/shopper')[0].body).toMatchObject({ choreId: 'ch-1' })
+  })
+
+  it('clears the trip rather than leaving an orphan chore', async () => {
+    mockApi({ view: { ...baseView(), shopping: trip() } })
+    draw()
+    await screen.findByText('Pasta bake')
+    fireEvent.click(screen.getByRole('button', { name: /Kelly shops/ }))
+    const card = document.querySelector('.modal-card') as HTMLElement
+    fireEvent.click(await within(card).findByRole('button', { name: /no trip this week/i }))
+    await waitFor(() => expect(sent('PUT', '/meals/shopper')).toHaveLength(1))
+    expect(sent('PUT', '/meals/shopper')[0].body).toMatchObject({ dueOn: null, personId: null })
+    await waitFor(() => expect(screen.getByRole('button', { name: /who's shopping/i })).toBeTruthy())
+  })
+
+  it('drops the control entirely when the chores module is off', async () => {
+    mockApi({ view: { ...baseView(), choresOn: false } })
+    draw()
+    await screen.findByText('Pasta bake')
+    // No dead affordance — and the plain grocery line is still there.
+    expect(document.querySelector('.wpm-shop')).toBeNull()
+    expect(document.querySelector('.wpm-gro-pill')!.textContent).toContain('24 items')
   })
 })
 
