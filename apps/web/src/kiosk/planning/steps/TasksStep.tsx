@@ -90,8 +90,19 @@ function carriesLabel(n: number): string {
   return `Carries ${n} recurring chore${n === 1 ? '' : 's'}`
 }
 
-// One card. `owner` is the column it sits in (null = the up-for-grabs strip), which is
-// what decides which faces are worth offering and whether 🙌 means anything.
+// One card, and FOUR regions that must never be mistaken for each other:
+//
+//   the grip (right)   pointer-down starts a drag — and only a drag: it preventDefaults,
+//                      so the browser fires no click behind it
+//   the day chip       opens the day picker, the fast path for the one field a board
+//                      like this changes most
+//   the faces          hand it over / take it back
+//   the title block    opens the app's own chore editor — the part of the card that
+//                      was inert, made into the affordance for everything else
+//
+// They are SIBLINGS, not nested: the editor's tap target is its own button around the
+// title and provenance line rather than the whole card body, so no click has to be
+// stopped from reaching a parent and no region can swallow another's tap.
 function ChoreCard({
   chore,
   owner,
@@ -102,6 +113,7 @@ function ChoreCard({
   onPickDay,
   onSetDay,
   onGive,
+  onEdit,
   onDragStart,
   symbol,
 }: {
@@ -114,6 +126,8 @@ function ChoreCard({
   onPickDay: () => void
   onSetDay: (dueOn: string) => void
   onGive: (personId: string | null) => void
+  // Absent when this viewer can't save an edit anyway (see canAssign).
+  onEdit?: () => void
   onDragStart: (e: React.PointerEvent) => void
   symbol: (currency: string | null) => string
 }) {
@@ -125,11 +139,30 @@ function ChoreCard({
   return (
     <div className="chore wpt-card">
       <div className="body">
-        <div className="t">
-          {chore.emoji ? `${chore.emoji} ` : ''}
-          {chore.title}
-        </div>
-        <div className="wpt-sub">{provenance(chore)}</div>
+        {onEdit ? (
+          <button
+            type="button"
+            className="wpt-open"
+            aria-label={`Edit ${chore.title}`}
+            title="Edit this task"
+            disabled={frozen}
+            onClick={onEdit}
+          >
+            <span className="t">
+              {chore.emoji ? `${chore.emoji} ` : ''}
+              {chore.title}
+            </span>
+            <span className="wpt-sub">{provenance(chore)}</span>
+          </button>
+        ) : (
+          <>
+            <div className="t">
+              {chore.emoji ? `${chore.emoji} ` : ''}
+              {chore.title}
+            </div>
+            <div className="wpt-sub">{provenance(chore)}</div>
+          </>
+        )}
         <div className="wpt-chip-row">
           {settable ? (
             <button
@@ -222,6 +255,9 @@ function Body({ weekStart, setDecisionData, refresh, busy }: StepBodyProps) {
   const [adding, setAdding] = useState<string | null>(null)
   // Which card's day picker is open (chore id), if any.
   const [pickingDay, setPickingDay] = useState<string | null>(null)
+  // The card whose chore is open in the EDITOR, with the column it sits in (a chore's
+  // "Who" isn't on the card payload — the column it's in is that fact).
+  const [editing, setEditing] = useState<{ chore: PlanningTasksChore; owner: string | null } | null>(null)
   // The net number of chores this sitting handed over — the only thing worth
   // remembering locally, because the board itself can no longer tell you what moved
   // today. A take-back undoes its own tally, or the recap would over-report.
@@ -364,6 +400,11 @@ function Body({ weekStart, setDecisionData, refresh, busy }: StepBodyProps) {
     onPickDay: () => setPickingDay(pickingDay === chore.id ? null : chore.id),
     onSetDay: (dueOn: string) => setDay(chore, dueOn),
     onGive: (personId: string | null) => give(chore, personId),
+    // Editing a chore is PATCH /api/chores/:id, which the chores module gates on
+    // chore.manage — the same rule the kiosk board applies when it decides whether a
+    // card opens the editor. No looser rule here: a modal that 403s on Save is worse
+    // than no modal.
+    onEdit: canAssign ? () => setEditing({ chore, owner }) : undefined,
     onDragStart: (e: React.PointerEvent) => startDrag(e, chore, owner),
     symbol,
   })
@@ -452,6 +493,41 @@ function Body({ weekStart, setDecisionData, refresh, busy }: StepBodyProps) {
           canAssignOthers={canAssign}
           selfPersonId={person?.id ?? null}
           onClose={() => setAdding(null)}
+          onSaved={savedChore}
+        />
+      )}
+
+      {/* The same modal in its OTHER half: editing the chore this card stands for, so a
+          typo, the wrong stars or "actually this repeats weekly" is fixed here instead
+          of sending someone to the Chores screen mid-session.
+
+          The day is deliberately NOT in it — ChoreModal only offers "On" on create, and
+          the chip beside the title is the faster answer anyway.
+
+          DELETE IS OFF (canDelete={false}). The step asks who does what, not which
+          chores should exist: removing one here would reach far outside the week being
+          planned, and the Meals step's shopping trip is a real chore on this very board
+          whose identity other steps resolve by id. "Up for grabs" — one tap on 🙌 — is
+          the answer to "not this person", and the Chores screen still deletes. */}
+      {editing && (
+        <ChoreModal
+          chore={{
+            id: editing.chore.id,
+            title: editing.chore.title,
+            emoji: editing.chore.emoji,
+            // The column IS the assignee; the strip means nobody.
+            personId: editing.owner,
+            rewardAmount: editing.chore.rewardAmount,
+            rewardCurrency: editing.chore.rewardCurrency,
+            rrule: editing.chore.rrule,
+            dueTime: editing.chore.dueTime,
+            requiresApproval: editing.chore.requiresApproval,
+            requiresPhoto: editing.chore.requiresPhoto,
+          }}
+          canAssignOthers={canAssign}
+          canDelete={false}
+          selfPersonId={person?.id ?? null}
+          onClose={() => setEditing(null)}
           onSaved={savedChore}
         />
       )}

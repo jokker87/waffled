@@ -105,4 +105,14 @@ describe('ChoreModal', () => {
     await waitFor(() => expect(created).toHaveLength(1))
     expect(created[0]).toMatchObject({ rrule: null, dueOn: '2099-03-04' })
   })
+  it('hides Delete where removal isn’t on offer', async () => {
+    const deleted: string[] = []
+    mockApi({ deleted })
+    // Weekly Planning edits a chore without offering to remove it — deleting one
+    // reaches far outside the week the session is deciding.
+    render(<ChoreModal chore={chore} canDelete={false} onClose={vi.fn()} onSaved={vi.fn()} />)
+    expect(screen.queryByRole('button', { name: 'Delete' })).toBeNull()
+    // The rest of the editor is untouched.
+    expect(screen.getByRole('button', { name: 'Save' })).toBeTruthy()
+  })
 })

@@ -47,7 +47,7 @@ function call(method: string, path: string, token?: string, body?: unknown) {
 const kevin = mint('dev|kevin')
 const json = (r: { body: string }) => JSON.parse(r.body)
 
-interface BoardChore { id: string; title: string; cadence: string; days: string[]; dueOn: string | null; carriedOver: boolean; pendingInstanceIds: string[] }
+interface BoardChore { id: string; title: string; cadence: string; days: string[]; dueOn: string | null; carriedOver: boolean; pendingInstanceIds: string[]; requiresApproval: boolean; requiresPhoto: boolean }
 interface BoardPerson { id: string; name: string; recurringChores: number; chores: BoardChore[] }
 interface Board { weekStart: string; newTaskDay: string; people: BoardPerson[]; unassigned: BoardChore[] }
 const board = async () => json(await call('GET', '/api/weekly-planning/tasks', kevin)) as Board
@@ -510,5 +510,29 @@ describe('planning · tasks · the day a new task lands on', () => {
     end.setUTCDate(end.getUTCDate() + 6)
     expect(b.newTaskDay >= b.weekStart).toBe(true)
     expect(b.newTaskDay <= end.toISOString().slice(0, 10)).toBe(true)
+  })
+})
+
+// The card doesn't draw "Needs a parent's OK" or photo proof, but the chore editor
+// opened from it does — and a client that can't see a flag can only send it back as
+// false. So the board states them.
+describe('planning · tasks · what the card can be edited from', () => {
+  it('carries the flags the editor prefills, not just the ones it draws', async () => {
+    const created = await call('POST', '/api/chores', kevin, {
+      title: 'Scrub the tub', personId: lottieId, rrule: 'FREQ=DAILY',
+      requiresApproval: true, requiresPhoto: true,
+    })
+    expect(created.statusCode).toBe(201)
+
+    const card = who(await board(), 'Lottie').chores.find((c) => c.title === 'Scrub the tub')!
+    expect(card.requiresApproval).toBe(true)
+    expect(card.requiresPhoto).toBe(true)
+  })
+
+  it('and states them false when they are, rather than leaving them out', async () => {
+    await call('POST', '/api/chores', kevin, { title: 'Fluff the cushions', personId: null, rrule: null })
+    const card = (await board()).unassigned.find((c) => c.title === 'Fluff the cushions')!
+    expect(card.requiresApproval).toBe(false)
+    expect(card.requiresPhoto).toBe(false)
   })
 })

@@ -85,6 +85,7 @@ export function ChoreModal({
   personId,
   defaultFreq,
   defaultDueOn,
+  canDelete = true,
   canAssignOthers = true,
   selfPersonId,
   onClose,
@@ -100,6 +101,11 @@ export function ChoreModal({
   // planning a different week passes that week's day, so the task lands where the
   // person is looking. Still editable in the modal, and ignored when editing.
   defaultDueOn?: string
+  // Whether editing may also DELETE the chore. Defaults to true (the Chores screen,
+  // which is where a chore's existence is managed); a surface with a narrower question
+  // than "should this chore exist" — Weekly Planning's Tasks step asks only who does
+  // what — passes false, and gets an editor without the removal it isn't offering.
+  canDelete?: boolean
   // Without chore.manage, restrict the assignee picker to self + up-for-grabs.
   canAssignOthers?: boolean
   selfPersonId?: string | null
@@ -297,7 +303,7 @@ export function ChoreModal({
           </button>
 
           <div style={{ display: 'flex', gap: 9, marginTop: 6, alignItems: 'center' }}>
-            {editing && (
+            {editing && canDelete && (
               <button
                 type="button"
                 onClick={del}

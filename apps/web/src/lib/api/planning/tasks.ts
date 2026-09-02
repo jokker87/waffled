@@ -26,6 +26,11 @@ export interface PlanningTasksChore {
   carriedOver: boolean
   rewardAmount: number
   rewardCurrency: string | null
+  // Not drawn on the card, but carried so the chore editor opened from it prefills
+  // honestly — ChoreModal reads a missing flag as false, which would turn approval or
+  // photo proof off the moment somebody fixed a typo.
+  requiresApproval: boolean
+  requiresPhoto: boolean
   // Every day of this chore already sitting on a board still open (a one-off has one; a
   // recurring chore has one per day anybody has opened the board for), whoever is or
   // isn't on it. PATCHing the definition alone only reaches the days from today

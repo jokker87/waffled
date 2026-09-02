@@ -39,10 +39,12 @@ interface Card {
   id: string; title: string; emoji: string | null; rrule: string | null; cadence: string
   days: string[]; dueOn: string | null; dueTime: string | null; carriedOver: boolean
   rewardAmount: number; rewardCurrency: string; pendingInstanceIds: string[]
+  requiresApproval: boolean; requiresPhoto: boolean
 }
 const chore = (over: Partial<Card> & { id: string; title: string }): Card => ({
   emoji: null, rrule: null, cadence: 'once', days: [], dueOn: null, dueTime: null,
   carriedOver: false, rewardAmount: 0, rewardCurrency: 'stars', pendingInstanceIds: [],
+  requiresApproval: false, requiresPhoto: false,
   ...over,
 })
 
@@ -63,7 +65,7 @@ const BOARD = {
     {
       id: 'p2', name: 'Wally', avatarEmoji: '🐢', colorHex: '#25A368', memberType: 'kid', isAdmin: false,
       recurringChores: 1,
-      chores: [chore({ id: 'w1', title: 'Vacuum upstairs', cadence: 'weekly', rrule: 'FREQ=WEEKLY;BYDAY=WE', days: ['2026-09-09'], dueTime: '18:00' })],
+      chores: [chore({ id: 'w1', title: 'Vacuum upstairs', cadence: 'weekly', rrule: 'FREQ=WEEKLY;BYDAY=WE', days: ['2026-09-09'], dueTime: '18:00', requiresApproval: true })],
     },
     {
       id: 'p3', name: 'Lottie', avatarEmoji: '🦊', colorHex: '#E0653F', memberType: 'kid', isAdmin: false,
@@ -111,7 +113,7 @@ function mockApi(opts: { capabilities?: string[]; unassigned?: unknown[] } = {})
     if (u.endsWith('/api/chores') && method === 'POST') return { ok: true, json: async () => ({ chore: { id: 'new' } }) }
     if (/\/api\/chores\/[^/]+$/.test(u) && method === 'PATCH') {
       const id = u.split('/').pop()!
-      const patch = (body ?? {}) as { personId?: string | null; dueOn?: string }
+      const patch = (body ?? {}) as { personId?: string | null; dueOn?: string; title?: string }
       // Pull the card out of wherever it currently is…
       let card: Card | undefined
       const i = state.unassigned.findIndex((c) => c.id === id)
@@ -128,6 +130,14 @@ function mockApi(opts: { capabilities?: string[]; unassigned?: unknown[] } = {})
         const target = state.people.find((p) => p.id === patch.personId)
         if (target) target.chores.push(card)
         else state.unassigned.push(card)
+      }
+      if (card && typeof patch.title === 'string') {
+        // An edit through the modal: the fields the card actually shows.
+        card.title = patch.title
+        if ('emoji' in patch) card.emoji = (patch as { emoji: string | null }).emoji
+        if (typeof (patch as { rewardAmount?: number }).rewardAmount === 'number') {
+          card.rewardAmount = (patch as { rewardAmount: number }).rewardAmount
+        }
       }
       if (card && typeof patch.dueOn === 'string') {
         // The server moves the day's instance and recomputes where it lands in the week.
@@ -418,5 +428,105 @@ describe('TasksStep', () => {
     await waitFor(() => expect(wrote('POST', '/api/chores')).toHaveLength(1))
     // One-off (the planning default) AND dated to the planned week, in one write.
     expect(wrote('POST', '/api/chores')[0].body).toMatchObject({ title: 'Book the sitter', rrule: null, dueOn: WEEK })
+  })
+  // A card has several interactive regions now, so what each one does has to be exact:
+  // the grip drags, the chip sets the day, the faces move it, and the title — the one
+  // part that was inert — opens the app's own chore editor. Sending someone to the
+  // Chores screen to fix a typo is the ejection this module exists to avoid.
+  describe('editing a task from the board', () => {
+    it('opens the app’s chore editor, and a rename shows on the board', async () => {
+      mockApi()
+      render(<Body {...props()} />)
+      await waitFor(() => expect(screen.getByText(/Fold the towels/)).toBeTruthy())
+
+      fireEvent.click(within(strip()).getByRole('button', { name: 'Edit Fold the towels' }))
+
+      // ChoreModal in EDIT mode — its own form, prefilled, not a second one of ours.
+      await waitFor(() => expect(screen.getByText('Edit chore')).toBeTruthy())
+      fireEvent.change(screen.getByDisplayValue('Fold the towels'), { target: { value: 'Fold the tea towels' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+      await waitFor(() => expect(wrote('PATCH', '/api/chores/c2')).toHaveLength(1))
+      expect(wrote('PATCH', '/api/chores/c2')[0].body).toMatchObject({ title: 'Fold the tea towels' })
+      // The board re-read, so the card shows the new name (and the modal is gone).
+      await waitFor(() => expect(within(strip()).getByText(/Fold the tea towels/)).toBeTruthy())
+      expect(screen.queryByText('Edit chore')).toBeNull()
+    })
+
+    it('prefills from the card — including the flags the card doesn’t show', async () => {
+      mockApi()
+      render(<Body {...props()} />)
+      await waitFor(() => expect(within(column('Wally')).getByText(/Vacuum upstairs/)).toBeTruthy())
+
+      fireEvent.click(within(column('Wally')).getByRole('button', { name: 'Edit Vacuum upstairs' }))
+      await waitFor(() => expect(screen.getByText('Edit chore')).toBeTruthy())
+
+      // Cadence, time and Who come back as they are…
+      expect(screen.getByRole('button', { name: 'Certain days' }).className).toContain('on')
+      expect(await screen.findByDisplayValue('18:00')).toBeTruthy()
+      await waitFor(() => expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('p2'))
+      // …and so does "Needs a parent's OK", which the card never draws. A blank prefill
+      // here would quietly switch approval OFF the moment anybody fixed a typo.
+      expect(screen.getByText('Needs a parent’s OK').closest('button')!.className).toContain('on')
+    })
+
+    it('offers no Delete — a planning session decides who does what, not what exists', async () => {
+      mockApi()
+      render(<Body {...props()} />)
+      await waitFor(() => expect(screen.getByText(/Fold the towels/)).toBeTruthy())
+
+      fireEvent.click(within(strip()).getByRole('button', { name: 'Edit Fold the towels' }))
+      await waitFor(() => expect(screen.getByText('Edit chore')).toBeTruthy())
+      expect(screen.queryByRole('button', { name: 'Delete' })).toBeNull()
+    })
+
+    it('dragging a card never opens the editor', async () => {
+      mockApi()
+      render(<Body {...props()} />)
+      await waitFor(() => expect(screen.getByText(/Sweep the porch/)).toBeTruthy())
+
+      const grip = within(strip()).getByRole('button', { name: 'Drag Sweep the porch to another column' })
+      const elementFromPoint = document.elementFromPoint
+      document.elementFromPoint = (() => column('Wally')) as typeof document.elementFromPoint
+      fireEvent.pointerDown(grip, { clientX: 10, clientY: 10 })
+      fireEvent.pointerMove(window, { clientX: 300, clientY: 300 })
+      fireEvent.pointerUp(window)
+      document.elementFromPoint = elementFromPoint
+
+      await waitFor(() => expect(wrote('PATCH', '/api/chores/c1')).toHaveLength(1))
+      // The drop moved it; it did not also open a modal over the board.
+      expect(screen.queryByText('Edit chore')).toBeNull()
+    })
+
+    it('is not offered to a viewer who can’t save it', async () => {
+      mockApi({ capabilities: [] })
+      render(<Body {...props()} />)
+      await waitFor(() => expect(screen.getByText(/Sweep the porch/)).toBeTruthy())
+      // PATCH /api/chores/:id needs chore.manage, so a modal here could only 403.
+      expect(screen.queryByRole('button', { name: /^Edit / })).toBeNull()
+    })
+    // The discriminating drop: the pointer lands not on a column's empty space but on
+    // ANOTHER card's title button — which is now an enabled control inside the drop
+    // zone. The drop must still resolve to the zone (closest('[data-colkey]') walks up)
+    // and must not leave an editor open behind it.
+    it('drops onto a card’s own title button and still just moves the chore', async () => {
+      mockApi()
+      render(<Body {...props()} />)
+      await waitFor(() => expect(within(column('Kevin')).getByText(/Dishes/)).toBeTruthy())
+
+      const landing = within(strip()).getByRole('button', { name: 'Edit Fold the towels' })
+      expect((landing as HTMLButtonElement).disabled).toBe(false)
+      const grip = within(column('Kevin')).getByRole('button', { name: 'Drag Dishes to another column' })
+      const elementFromPoint = document.elementFromPoint
+      document.elementFromPoint = (() => landing) as typeof document.elementFromPoint
+      fireEvent.pointerDown(grip, { clientX: 10, clientY: 10 })
+      fireEvent.pointerMove(window, { clientX: 300, clientY: 300 })
+      fireEvent.pointerUp(window)
+      document.elementFromPoint = elementFromPoint
+
+      await waitFor(() => expect(wrote('PATCH', '/api/chores/k1')[0]?.body).toEqual({ personId: null }))
+      expect(screen.queryByText('Edit chore')).toBeNull()
+      await waitFor(() => expect(within(strip()).getByText(/Dishes/)).toBeTruthy())
+    })
   })
 })

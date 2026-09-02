@@ -79,6 +79,12 @@ export interface TasksBoardChore {
   carriedOver: boolean
   rewardAmount: number
   rewardCurrency: string | null
+  // The two settings a card never draws but the chore editor does. They come back so
+  // opening the editor from this board can PREFILL them: ChoreModal treats a missing
+  // flag as false, so leaving them out would quietly switch "Needs a parent's OK" (or
+  // photo proof) off the first time anybody fixed a typo here.
+  requiresApproval: boolean
+  requiresPhoto: boolean
   // Every day of this chore already sitting on a board still open — whoever is (or
   // isn't) on it. updateChore only cascades to instances from today forward, so the
   // days already behind us have to be moved by hand or the kiosk board keeps
@@ -127,6 +133,8 @@ interface ChoreRowForBoard extends QueryResultRow {
   reward_amount: number
   reward_currency: string | null
   due_time: string | null
+  requires_approval: boolean
+  requires_photo: boolean
   instance_due_on: string | null
   instance_status: string | null
 }
@@ -137,6 +145,7 @@ async function choreRows(householdId: string): Promise<ChoreRowForBoard[]> {
   const { rows } = await query<ChoreRowForBoard>(
     `select c.id, c.title, c.emoji, c.person_id, c.rrule, c.rollover,
             c.reward_amount, c.reward_currency, c.due_time::text as due_time,
+            c.requires_approval, c.requires_photo,
             i.due_on::text as instance_due_on, i.status as instance_status
        from chores c
        left join lateral (
@@ -194,6 +203,8 @@ function present(
     carriedOver,
     rewardAmount: Number(r.reward_amount ?? 0),
     rewardCurrency: r.reward_currency,
+    requiresApproval: r.requires_approval,
+    requiresPhoto: r.requires_photo,
     pendingInstanceIds,
   }
 }
