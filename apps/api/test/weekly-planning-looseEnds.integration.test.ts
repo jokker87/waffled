@@ -1,0 +1,683 @@
+// Weekly Planning · step 1 "Loose ends" — the read over four modules, the ROUTING that
+// is the step's whole job, and the two answers that are allowed to write. Against a
+// real Postgres (Testcontainers).
+//
+// The step's argument is in these tests:
+//   · STEP 1 ROUTES; IT DOES NOT REPAIR. "Routing here changes nothing in your modules
+//     — it only decides which step handles it." The load-bearing assertion is that an
+//     overdue chore is STILL overdue after being routed, and the decision is on the
+//     SESSION (planning_session_steps.data.routes), where every later step can read it.
+//   · "Not done" is COMPUTED. Nobody typed it, so nothing about it is stored here.
+//   · "Parked" is the one group with a table, because it exists nowhere else yet — and
+//     the only group where Drop is a real answer.
+//   · A source module that is turned off contributes nothing, on the read AND on the
+//     write: planning must not be a hole that reaches into a disabled module.
+import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { PostgreSqlContainer, type StartedPostgreSqlContainer } from './helpers/pg'
+import jwt from 'jsonwebtoken'
+import { runMigrations } from '../src/migrate'
+
+const SECRET = 'waffled-local-dev-secret-change-me'
+
+let pg: StartedPostgreSqlContainer
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let app: any
+let closePool: () => Promise<void>
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let query: any
+let householdId: string
+let ownerId: string
+
+function mint(sub: string): string {
+  return jwt.sign({}, SECRET, { algorithm: 'HS256', subject: sub, issuer: 'waffled-local', audience: 'waffled-api', expiresIn: '1h' })
+}
+
+// lambda-api reads the query off `queryStringParameters`, NOT off the path — a `?x=y`
+// left in `path` is silently invisible to the handler.
+function call(method: string, path: string, token?: string, body?: unknown) {
+  const headers: Record<string, string> = {}
+  if (token) headers.authorization = `Bearer ${token}`
+  if (body !== undefined) headers['content-type'] = 'application/json'
+  const [rawPath, qs] = path.split('?')
+  const queryStringParameters: Record<string, string> = {}
+  if (qs) for (const pair of qs.split('&')) { const [k, v] = pair.split('='); queryStringParameters[k] = decodeURIComponent(v ?? '') }
+  return app.run(
+    { httpMethod: method, path: rawPath, headers, queryStringParameters, body: body !== undefined ? JSON.stringify(body) : null, isBase64Encoded: false },
+    {}
+  ) as Promise<{ statusCode: number; body: string }>
+}
+
+const kevin = mint('dev|kevin')
+const json = (r: { body: string }) => JSON.parse(r.body)
+
+interface LooseEnd {
+  key: string
+  kind: string
+  id: string
+  title: string
+  detail: string | null
+  actions: string[]
+}
+interface Destination { to: string; label: string; hint: string; primary?: boolean }
+interface Route { kind: string; id: string; title: string; source: string; to: string }
+interface LooseEndsPayload {
+  weekStart: string
+  notDone: LooseEnd[]
+  parked: LooseEnd[]
+  counts: { notDone: number; parked: number }
+  destinations: { notDone: Destination[]; parked: Destination[] }
+  routes: Route[]
+  sources: string[]
+}
+
+const read = async (qs = ''): Promise<LooseEndsPayload> =>
+  json(await call('GET', `/api/weekly-planning/loose-ends${qs}`, kevin))
+
+const resolve = (body: unknown) => call('POST', '/api/weekly-planning/loose-ends/resolve', kevin, body)
+const route = (body: unknown) => call('POST', '/api/weekly-planning/loose-ends/route', kevin, body)
+const park = (body: unknown) => call('POST', '/api/weekly-planning/loose-ends/parked', kevin, body)
+
+const addDays = (iso: string, n: number) => {
+  const d = new Date(`${iso}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + n)
+  return d.toISOString().slice(0, 10)
+}
+
+const setModules = (mods: Record<string, boolean>) => call('PATCH', '/api/household/modules', kevin, mods)
+
+// The session every routing test writes its decisions onto.
+let sessionId: string
+
+beforeAll(async () => {
+  pg = await new PostgreSqlContainer('postgres:16').start()
+  const url = pg.getConnectionUri()
+  await runMigrations(url)
+  process.env.DATABASE_URL = url
+  delete process.env.AUTH0_DOMAIN
+  app = (await import('../src/app')).default
+  const db = await import('../src/platform/db')
+  closePool = db.closePool
+  query = db.query
+
+  const setup = await call('POST', '/api/auth/setup', undefined, {
+    household: { name: 'Sites', timezone: 'America/Chicago' },
+    admin: { name: 'Kevin', email: 'kevin@example.com', password: 'ownerpass1' },
+  })
+  householdId = json(setup).household.id
+  ownerId = json(setup).person.id
+  await query(
+    `insert into identities (household_id, person_id, provider, auth0_user_id, email_verified) values ($1,$2,'password','dev|kevin',true)`,
+    [householdId, ownerId]
+  )
+  // Everything step 1 reads, on. `rhythms` is defaultOn:false, so it has to be asked for.
+  await setModules({ weeklyPlanning: true, chores: true, lists: true, goals: true, rhythms: true })
+  sessionId = json(await call('POST', '/api/weekly-planning/session', kevin)).session.id
+})
+
+afterAll(async () => {
+  await closePool?.()
+  await pg?.stop()
+})
+
+// The household's CURRENT week start — the anchor the list read uses, and what the
+// view calls minWeekStart. Not the planned week (that one is always >= today, so
+// comparing anything against it filters nothing).
+async function currentWeekStart(): Promise<string> {
+  return json(await call('GET', '/api/weekly-planning', kevin)).minWeekStart as string
+}
+async function plannedWeekStart(): Promise<string> {
+  return json(await call('GET', '/api/weekly-planning', kevin)).defaultWeekStart as string
+}
+// The routes as the SHELL serves them to every other step — the actual cross-step
+// contract, not our own endpoint's convenience copy.
+async function routesFromSessionView(): Promise<Route[]> {
+  const view = json(await call('GET', '/api/weekly-planning', kevin))
+  const step = view.steps.find((s: { key: string }) => s.key === 'looseEnds')
+  return (step?.data?.routes ?? []) as Route[]
+}
+
+describe('loose ends · the module gate', () => {
+  it('is behind the weeklyPlanning toggle like the rest of the module', async () => {
+    await setModules({ weeklyPlanning: false })
+    expect((await call('GET', '/api/weekly-planning/loose-ends', kevin)).statusCode).toBe(403)
+    expect((await resolve({ kind: 'parked', id: ownerId, action: 'drop' })).statusCode).toBe(403)
+    expect((await route({ sessionId, kind: 'chore', id: ownerId, title: 'x', to: 'tasks' })).statusCode).toBe(403)
+    expect((await park({ note: 'x' })).statusCode).toBe(403)
+    await setModules({ weeklyPlanning: true })
+    expect((await call('GET', '/api/weekly-planning/loose-ends', kevin)).statusCode).toBe(200)
+  })
+
+  it('starts empty — nothing is open, so nothing is asked', async () => {
+    const p = await read()
+    expect(p.notDone).toEqual([])
+    expect(p.parked).toEqual([])
+    expect(p.counts).toEqual({ notDone: 0, parked: 0 })
+    // The week it is about comes from the server, snapped and floored like everywhere else.
+    expect(p.weekStart).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+  })
+})
+
+// ── Destinations ──────────────────────────────────────────────────────────────
+describe('loose ends · where a card can send things', () => {
+  it('offers the four triage destinations for "not done" and the two verbs for "parked"', async () => {
+    const p = await read()
+    expect(p.destinations.notDone.map((d) => d.to)).toEqual(['tasks', 'calendar', 'kids', 'goals'])
+    // The reason under the name is part of the decision, so it is server-owned too.
+    expect(p.destinations.notDone[0]).toMatchObject({ to: 'tasks', label: 'Tasks', primary: true })
+    expect(p.destinations.notDone[0].hint).toMatch(/owner and a day/i)
+    expect(p.destinations.parked.map((d) => d.to)).toEqual(['tasks', 'calendar'])
+    expect(p.destinations.parked[0]).toMatchObject({ to: 'tasks', label: 'Make it a task', primary: true })
+  })
+
+  it('drops a destination whose step this household is not running', async () => {
+    await setModules({ chores: false })
+    let p = await read()
+    // `tasks` requires chores, so routing there would send things into a step the
+    // session skips over.
+    expect(p.destinations.notDone.map((d) => d.to)).not.toContain('tasks')
+    expect(p.destinations.parked.map((d) => d.to)).toEqual(['calendar'])
+    // …and the "we checked" line stops claiming a module that is off.
+    expect(p.sources).not.toContain('chores')
+
+    await call('PUT', '/api/weekly-planning/config', kevin, { steps: { kids: false } })
+    p = await read()
+    expect(p.destinations.notDone.map((d) => d.to)).not.toContain('kids')
+
+    await call('PUT', '/api/weekly-planning/config', kevin, { steps: { kids: true } })
+    await setModules({ chores: true })
+    expect((await read()).sources).toEqual(['chores', 'lists', 'rhythms', 'goals'])
+  })
+})
+
+// ── "Not done" · chores ───────────────────────────────────────────────────────
+describe('loose ends · overdue chores', () => {
+  let choreId: string
+  let overdueId: string
+
+  beforeAll(async () => {
+    const { rows } = await query(
+      `insert into chores (household_id, title, person_id, is_active) values ($1,'Take the bins out',$2,true) returning id`,
+      [householdId, ownerId]
+    )
+    choreId = rows[0].id
+    const week = await currentWeekStart()
+    const { rows: inst } = await query(
+      `insert into chore_instances (household_id, chore_id, person_id, due_on, status)
+       values ($1,$2,$3,$4::date,'pending') returning id`,
+      [householdId, choreId, ownerId, addDays(week, -9)]
+    )
+    overdueId = inst[0].id
+  })
+
+  it('surfaces an instance whose due date has passed, and says how late it is', async () => {
+    const item = (await read()).notDone.find((i) => i.id === overdueId)
+    expect(item).toBeTruthy()
+    expect(item!.kind).toBe('chore')
+    expect(item!.title).toBe('Take the bins out')
+    expect(item!.detail).toMatch(/late|overdue|days/i)
+    // The only WRITING answer a chore can take here. Everything else is a route.
+    expect(item!.actions).toEqual(['done'])
+  })
+
+  it('does NOT surface an instance still to come, or one already answered', async () => {
+    const week = await currentWeekStart()
+    const { rows: soon } = await query(
+      `insert into chore_instances (household_id, chore_id, due_on, status) values ($1,$2,$3::date,'pending') returning id`,
+      [householdId, choreId, addDays(week, 20)]
+    )
+    const { rows: doneRow } = await query(
+      `insert into chore_instances (household_id, chore_id, due_on, status) values ($1,$2,$3::date,'done') returning id`,
+      [householdId, choreId, addDays(week, -12)]
+    )
+    const ids = (await read()).notDone.map((i) => i.id)
+    expect(ids).not.toContain(soon[0].id)
+    expect(ids).not.toContain(doneRow[0].id)
+  })
+
+  // THE LOAD-BEARING TEST OF THE WHOLE STEP.
+  it('ROUTING CHANGES NOTHING IN THE MODULE — it only records which step handles it', async () => {
+    const before = await query(`select * from chore_instances where id = $1`, [overdueId])
+    const res = await route({ sessionId, kind: 'chore', id: overdueId, title: 'Take the bins out', source: 'notDone', to: 'tasks' })
+    expect(res.statusCode).toBe(200)
+
+    // Still overdue, still pending, still assigned to whoever had it. Nothing moved.
+    const after = await query(`select * from chore_instances where id = $1`, [overdueId])
+    expect(after.rows[0]).toEqual(before.rows[0])
+
+    // The decision lives on the SESSION, in the jsonb 0099 reserves for it…
+    const { rows } = await query(
+      `select data from planning_session_steps where session_id = $1 and step_key = 'looseEnds'`,
+      [sessionId]
+    )
+    expect(rows[0].data.routes).toEqual([
+      { kind: 'chore', id: overdueId, title: 'Take the bins out', source: 'notDone', to: 'tasks' },
+    ])
+    // …and the step's status is NOT touched: nobody has answered the step yet.
+    const step = json(await call('GET', '/api/weekly-planning', kevin)).steps.find((s: { key: string }) => s.key === 'looseEnds')
+    expect(step.status).toBe('pending')
+
+    // Every later step reads it straight off the session view it already receives.
+    expect(await routesFromSessionView()).toHaveLength(1)
+    // And our own read reports it, so the deck can hide what it already triaged.
+    expect((await read(`?sessionId=${sessionId}`)).routes).toHaveLength(1)
+    // Without a session there is nothing to report.
+    expect((await read()).routes).toEqual([])
+  })
+
+  it('re-routing replaces the decision rather than stacking a second one', async () => {
+    await route({ sessionId, kind: 'chore', id: overdueId, title: 'Take the bins out', source: 'notDone', to: 'kids' })
+    const routes = await routesFromSessionView()
+    expect(routes).toHaveLength(1)
+    expect(routes[0].to).toBe('kids')
+  })
+
+  it('undoes a route with to: null, which is what the trail under the card calls', async () => {
+    const res = await route({ sessionId, kind: 'chore', id: overdueId, to: null })
+    expect(res.statusCode).toBe(200)
+    expect(json(res).routes).toEqual([])
+    expect(await routesFromSessionView()).toEqual([])
+  })
+
+  // The routes array is a decision LOG, not a queue, so it must never point at
+  // something already finished — a later step would render a row for a chore its own
+  // module considers done, and could not tell without re-reading four modules.
+  it('retires an item’s route when it is settled instead', async () => {
+    await route({ sessionId, kind: 'chore', id: overdueId, title: 'Take the bins out', source: 'notDone', to: 'tasks' })
+    expect(await routesFromSessionView()).toHaveLength(1)
+    expect((await resolve({ kind: 'chore', id: overdueId, action: 'done', sessionId })).statusCode).toBe(200)
+    expect(await routesFromSessionView()).toEqual([])
+    // Undone so the next test starts from an open instance.
+    await query(`update chore_instances set status='pending', completed_by=null, completed_at=null where id = $1`, [overdueId])
+  })
+
+  it('resolving "It’s done already" completes the INSTANCE — the exception that writes', async () => {
+    const res = await resolve({ kind: 'chore', id: overdueId, action: 'done' })
+    expect(res.statusCode).toBe(200)
+    const { rows } = await query(`select status, completed_by from chore_instances where id = $1`, [overdueId])
+    expect(rows[0].status).toBe('done')
+    expect(rows[0].completed_by).toBe(ownerId)
+    // …and the read stops asking, because the source stopped being open.
+    expect((await read()).notDone.map((i) => i.id)).not.toContain(overdueId)
+  })
+
+  it('refuses to DROP a computed item — that would delete another module’s data', async () => {
+    const week = await currentWeekStart()
+    const { rows: late } = await query(
+      `insert into chore_instances (household_id, chore_id, due_on, status) values ($1,$2,$3::date,'pending') returning id`,
+      [householdId, choreId, addDays(week, -5)]
+    )
+    expect((await resolve({ kind: 'chore', id: late[0].id, action: 'drop' })).statusCode).toBe(400)
+    const { rows } = await query(`select status from chore_instances where id = $1`, [late[0].id])
+    expect(rows[0].status).toBe('pending')
+    await query(`update chore_instances set deleted_at = now() where id = $1`, [late[0].id])
+  })
+
+  it('withholds "it’s done already" from an instance whose chore demands photo proof', async () => {
+    const week = await currentWeekStart()
+    const { rows: proof } = await query(
+      `insert into chore_instances (household_id, chore_id, due_on, status, requires_photo)
+       values ($1,$2,$3::date,'pending',true) returning id`,
+      [householdId, choreId, addDays(week, -6)]
+    )
+    const item = (await read()).notDone.find((i) => i.id === proof[0].id)
+    expect(item).toBeTruthy()
+    // Planning has no camera, so completing here would 500 on ProofRequiredError. It
+    // can still be ROUTED — which is the whole point of the step.
+    expect(item!.actions).toEqual([])
+    expect((await resolve({ kind: 'chore', id: proof[0].id, action: 'done' })).statusCode).toBe(400)
+    expect((await route({ sessionId, kind: 'chore', id: proof[0].id, title: 'proof', source: 'notDone', to: 'tasks' })).statusCode).toBe(200)
+    await route({ sessionId, kind: 'chore', id: proof[0].id, to: null })
+    await query(`update chore_instances set deleted_at = now() where id = $1`, [proof[0].id])
+  })
+
+  it('contributes nothing — read or write — when the chores module is off', async () => {
+    const week = await currentWeekStart()
+    const { rows: late } = await query(
+      `insert into chore_instances (household_id, chore_id, due_on, status) values ($1,$2,$3::date,'pending') returning id`,
+      [householdId, choreId, addDays(week, -7)]
+    )
+    expect((await read()).notDone.map((i) => i.id)).toContain(late[0].id)
+
+    await setModules({ chores: false })
+    expect((await read()).notDone.map((i) => i.id)).not.toContain(late[0].id)
+    // The write path is gated too — planning must not be a hole into a disabled module.
+    expect((await resolve({ kind: 'chore', id: late[0].id, action: 'done' })).statusCode).toBe(403)
+    const { rows } = await query(`select status from chore_instances where id = $1`, [late[0].id])
+    expect(rows[0].status).toBe('pending')
+
+    await setModules({ chores: true })
+    await query(`update chore_instances set deleted_at = now() where id = $1`, [late[0].id])
+  })
+})
+
+// ── "Not done" · lists ────────────────────────────────────────────────────────
+describe('loose ends · unchecked list items', () => {
+  let listId: string
+  let staleId: string
+
+  beforeAll(async () => {
+    const { rows } = await query(
+      `insert into lists (household_id, name, list_type) values ($1,'Around the house','custom') returning id`,
+      [householdId]
+    )
+    listId = rows[0].id
+    const week = await currentWeekStart()
+    const { rows: stale } = await query(
+      `insert into list_items (household_id, list_id, name, created_at) values ($1,$2,'Return the library books', $3::date - interval '2 days') returning id`,
+      [householdId, listId, week]
+    )
+    staleId = stale[0].id
+  })
+
+  it('surfaces an item that was already open before this week began', async () => {
+    const item = (await read()).notDone.find((i) => i.id === staleId)
+    expect(item).toBeTruthy()
+    expect(item!.kind).toBe('list')
+    expect(item!.title).toBe('Return the library books')
+    expect(item!.detail).toContain('Around the house')
+    expect(item!.actions).toEqual(['done'])
+  })
+
+  // The anchor is the household's CURRENT week, not the planned one: the planned week
+  // is always today or later, so anchoring there would filter nothing and the step
+  // would flood with every unchecked row in the household.
+  it('does NOT surface something typed THIS week — that is not a leftover, it is the week', async () => {
+    const { rows } = await query(
+      `insert into list_items (household_id, list_id, name) values ($1,$2,'Bought this morning') returning id`,
+      [householdId, listId]
+    )
+    expect((await read()).notDone.map((i) => i.id)).not.toContain(rows[0].id)
+  })
+
+  it('does NOT surface a checked item, a suggestion, or a grocery row keyed to the week being planned', async () => {
+    const week = await currentWeekStart()
+    const planned = await plannedWeekStart()
+    const mk = async (cols: string, vals: unknown[]) => {
+      const { rows } = await query(
+        `insert into list_items (household_id, list_id, name, created_at${cols}) values ($1,$2,$3, $4::date - interval '3 days'${vals.map((_, i) => `, $${i + 5}`).join('')}) returning id`,
+        [householdId, listId, 'x', week, ...vals]
+      )
+      return rows[0].id as string
+    }
+    const checked = await mk(', checked', [true])
+    const suggested = await mk(', status', ['suggested'])
+    const thisWeeksShop = await mk(', week_start', [planned])
+    const ids = (await read()).notDone.map((i) => i.id)
+    expect(ids).not.toContain(checked)
+    expect(ids).not.toContain(suggested)
+    expect(ids).not.toContain(thisWeeksShop)
+  })
+
+  it('routes without touching the row, and "it’s done already" checks it off', async () => {
+    const before = await query(`select checked, week_start from list_items where id = $1`, [staleId])
+    expect((await route({ sessionId, kind: 'list', id: staleId, title: 'Return the library books', source: 'notDone', to: 'tasks' })).statusCode).toBe(200)
+    const after = await query(`select checked, week_start from list_items where id = $1`, [staleId])
+    expect(after.rows[0]).toEqual(before.rows[0])
+    await route({ sessionId, kind: 'list', id: staleId, to: null })
+
+    expect((await resolve({ kind: 'list', id: staleId, action: 'done' })).statusCode).toBe(200)
+    const { rows } = await query(`select checked, checked_by from list_items where id = $1`, [staleId])
+    expect(rows[0].checked).toBe(true)
+    expect(rows[0].checked_by).toBe(ownerId)
+  })
+
+  it('contributes nothing when the lists module is off', async () => {
+    const week = await currentWeekStart()
+    const { rows } = await query(
+      `insert into list_items (household_id, list_id, name, created_at) values ($1,$2,'Fix the gate', $3::date - interval '1 day') returning id`,
+      [householdId, listId, week]
+    )
+    expect((await read()).notDone.map((i) => i.id)).toContain(rows[0].id)
+    await setModules({ lists: false })
+    expect((await read()).notDone.map((i) => i.id)).not.toContain(rows[0].id)
+    expect((await resolve({ kind: 'list', id: rows[0].id, action: 'done' })).statusCode).toBe(403)
+    await setModules({ lists: true })
+    await query(`update list_items set deleted_at = now() where id = $1`, [rows[0].id])
+  })
+})
+
+// ── "Not done" · rhythms ──────────────────────────────────────────────────────
+describe('loose ends · rhythms past due', () => {
+  let rhythmId: string
+
+  beforeAll(async () => {
+    const res = await call('POST', '/api/rhythms', kevin, {
+      title: 'Change the air filter',
+      satisfiedBy: 'completion',
+      every: '3 months',
+      nextDueAt: new Date(Date.now() - 20 * 864e5).toISOString(),
+    })
+    rhythmId = json(res).rhythm.id
+  })
+
+  it('surfaces a completion rhythm whose date has passed', async () => {
+    const item = (await read()).notDone.find((i) => i.id === rhythmId)
+    expect(item).toBeTruthy()
+    expect(item!.kind).toBe('rhythm')
+    expect(item!.title).toBe('Change the air filter')
+    expect(item!.actions).toEqual(['done'])
+  })
+
+  it('resolving "it’s done already" re-anchors the rhythm clock in the rhythms module', async () => {
+    expect((await resolve({ kind: 'rhythm', id: rhythmId, action: 'done' })).statusCode).toBe(200)
+    const { rows } = await query(`select last_completed_at, next_due_at from rhythms where id = $1`, [rhythmId])
+    expect(rows[0].last_completed_at).toBeTruthy()
+    expect(new Date(rows[0].next_due_at).getTime()).toBeGreaterThan(Date.now())
+    expect((await read()).notDone.map((i) => i.id)).not.toContain(rhythmId)
+  })
+
+  it('settles an unbooked scheduling period by skipping the SERVER-derived period', async () => {
+    const res = await call('POST', '/api/rhythms', kevin, {
+      title: 'Book the dentist',
+      satisfiedBy: 'scheduling',
+      every: '6 months',
+      // 170 days into a ~182-day period: the booking runway (period_end - lead_time)
+      // is already open, which is what makes an unbooked period a loose end today.
+      startsOn: new Date(Date.now() - 170 * 864e5).toISOString().slice(0, 10),
+      leadTime: '30 days',
+    })
+    const id = json(res).rhythm.id
+    const item = (await read()).notDone.find((i) => i.id === id)
+    expect(item).toBeTruthy()
+    expect(item!.detail).toMatch(/nothing booked/i)
+
+    // No periodStart in the request: a client echo of a boundary that has since moved
+    // inserts happily and silences nothing, so the server re-derives it.
+    expect((await resolve({ kind: 'rhythm', id, action: 'done' })).statusCode).toBe(200)
+    const { rows } = await query(`select period_start::text as period_start from rhythm_skips where rhythm_id = $1`, [id])
+    expect(rows).toHaveLength(1)
+    expect(rows[0].period_start).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+    expect((await read()).notDone.map((i) => i.id)).not.toContain(id)
+  })
+
+  it('contributes nothing when the rhythms module is off', async () => {
+    await query(`update rhythms set next_due_at = now() - interval '5 days' where id = $1`, [rhythmId])
+    expect((await read()).notDone.map((i) => i.id)).toContain(rhythmId)
+    await setModules({ rhythms: false })
+    expect((await read()).notDone.map((i) => i.id)).not.toContain(rhythmId)
+    expect((await resolve({ kind: 'rhythm', id: rhythmId, action: 'done' })).statusCode).toBe(403)
+    await setModules({ rhythms: true })
+    await query(`update rhythms set deleted_at = now() where household_id = $1`, [householdId])
+  })
+})
+
+// ── "Not done" · goals ────────────────────────────────────────────────────────
+describe('loose ends · habit goals short for the week', () => {
+  let goalId: string
+
+  beforeAll(async () => {
+    const { rows } = await query(
+      `insert into goals (household_id, title, goal_type, tracking_mode, habit_period, habit_target_per_period, is_active)
+       values ($1,'Run three times','habit','shared_total','week',3,true) returning id`,
+      [householdId]
+    )
+    goalId = rows[0].id
+  })
+
+  it('surfaces a weekly habit that is short of its target, and says by how much', async () => {
+    const item = (await read()).notDone.find((i) => i.id === goalId)
+    expect(item).toBeTruthy()
+    expect(item!.kind).toBe('goal')
+    expect(item!.detail).toMatch(/0 of 3/)
+    expect(item!.actions).toEqual(['done'])
+  })
+
+  it('resolving "it’s done already" logs one against the goal, and the shortfall shrinks', async () => {
+    expect((await resolve({ kind: 'goal', id: goalId, action: 'done' })).statusCode).toBe(200)
+    const { rows } = await query(`select count(*)::int as n from goal_logs where goal_id = $1 and deleted_at is null`, [goalId])
+    expect(rows[0].n).toBe(1)
+    expect((await read()).notDone.find((i) => i.id === goalId)!.detail).toMatch(/1 of 3/)
+  })
+
+  it('stops asking once the target is met, and ignores a habit on another period', async () => {
+    await query(`update goals set habit_target_per_period = 1 where id = $1`, [goalId])
+    expect((await read()).notDone.map((i) => i.id)).not.toContain(goalId)
+
+    const { rows } = await query(
+      `insert into goals (household_id, title, goal_type, tracking_mode, habit_period, habit_target_per_period, is_active)
+       values ($1,'Floss daily','habit','shared_total','day',1,true) returning id`,
+      [householdId]
+    )
+    expect((await read()).notDone.map((i) => i.id)).not.toContain(rows[0].id)
+    await query(`update goals set is_active = false where id = $1`, [rows[0].id])
+  })
+
+  it('contributes nothing when the goals module is off', async () => {
+    await query(`update goals set habit_target_per_period = 5 where id = $1`, [goalId])
+    expect((await read()).notDone.map((i) => i.id)).toContain(goalId)
+    await setModules({ goals: false })
+    expect((await read()).notDone.map((i) => i.id)).not.toContain(goalId)
+    expect((await resolve({ kind: 'goal', id: goalId, action: 'done' })).statusCode).toBe(403)
+    await setModules({ goals: true })
+    await query(`update goals set is_active = false where household_id = $1`, [householdId])
+  })
+})
+
+// ── "Parked" ──────────────────────────────────────────────────────────────────
+describe('loose ends · parked items', () => {
+  let parkedId: string
+
+  it('parks a note from the capture bar — the one group with a table', async () => {
+    const res = await park({ note: 'Ask about the school trip', sessionId })
+    expect(res.statusCode).toBe(200)
+    parkedId = json(res).item.id
+    const p = await read()
+    const item = p.parked.find((i) => i.id === parkedId)
+    expect(item).toBeTruthy()
+    expect(item!.kind).toBe('parked')
+    expect(item!.title).toBe('Ask about the school trip')
+    // "Talk about it now" and "Drop it" — and Drop is only ever a real answer HERE.
+    expect(item!.actions.sort()).toEqual(['done', 'drop'])
+    // The source line names who wrote it and when; it is what earns the Drop under it.
+    expect(item!.detail).toMatch(/^Parked by Kevin · today$/)
+    expect(p.counts.parked).toBe(1)
+  })
+
+  it('counts how many finished sessions have passed a note over', async () => {
+    // A session that FINISHES after the note was written has walked past it.
+    await call('POST', `/api/weekly-planning/session/${sessionId}/complete`, kevin)
+    expect((await read()).parked.find((i) => i.id === parkedId)!.detail).toMatch(/passed over once$/)
+    await call('PATCH', `/api/weekly-planning/session/${sessionId}`, kevin, { status: 'active' })
+  })
+
+  it('keeps the optional step tag step 3 parks notes with, and the session that parked it', async () => {
+    const res = await park({ note: 'The dentist is somewhere in March', stepKey: 'horizon', sessionId })
+    expect(res.statusCode).toBe(200)
+    const { rows } = await query(
+      `select step_key, session_id, created_by, status from planning_parked_items where id = $1`,
+      [json(res).item.id]
+    )
+    expect(rows[0]).toMatchObject({ step_key: 'horizon', session_id: sessionId, created_by: ownerId, status: 'open' })
+    await resolve({ kind: 'parked', id: json(res).item.id, action: 'drop' })
+  })
+
+  it('refuses an empty note and a step tag that is not in the catalog', async () => {
+    expect((await park({ note: '   ' })).statusCode).toBe(400)
+    expect((await park({ note: 'ok', stepKey: 'lobby' })).statusCode).toBe(400)
+  })
+
+  // Routing a note is the other half of what step_key is for: it names the step that
+  // will look at the note, whichever end of the session wrote it.
+  it('routing a note sets its step_key, and stays "open" until somebody answers it', async () => {
+    const res = await route({ sessionId, kind: 'parked', id: parkedId, title: 'Ask about the school trip', source: 'parked', to: 'tasks' })
+    expect(res.statusCode).toBe(200)
+    const { rows } = await query(`select step_key, status from planning_parked_items where id = $1`, [parkedId])
+    expect(rows[0]).toMatchObject({ step_key: 'tasks', status: 'open' })
+    expect((await routesFromSessionView()).find((r) => r.id === parkedId)!.source).toBe('parked')
+
+    // Undo gives the tag back.
+    await route({ sessionId, kind: 'parked', id: parkedId, to: null })
+    const { rows: after } = await query(`select step_key from planning_parked_items where id = $1`, [parkedId])
+    expect(after[0].step_key).toBe(null)
+  })
+
+  it('survives its session being discarded — the session goes, what it produced stays', async () => {
+    const s = json(await call('POST', '/api/weekly-planning/session', kevin, { weekStart: addDays(await plannedWeekStart(), 21) })).session
+    const id = json(await park({ note: 'Outlives the session', sessionId: s.id })).item.id
+    expect((await call('DELETE', `/api/weekly-planning/session/${s.id}`, kevin)).statusCode).toBe(200)
+    const { rows } = await query(`select status, session_id from planning_parked_items where id = $1`, [id])
+    expect(rows[0].status).toBe('open')
+    expect(rows[0].session_id).toBe(null)
+    expect((await read()).parked.map((i) => i.id)).toContain(id)
+    await resolve({ kind: 'parked', id, action: 'drop' })
+  })
+
+  it('"talk about it now" resolves it and "drop it" drops it, stamping who answered', async () => {
+    expect((await resolve({ kind: 'parked', id: parkedId, action: 'done' })).statusCode).toBe(200)
+    const { rows } = await query(`select status, resolved_at, resolved_by from planning_parked_items where id = $1`, [parkedId])
+    expect(rows[0]).toMatchObject({ status: 'resolved', resolved_by: ownerId })
+    expect(rows[0].resolved_at).toBeTruthy()
+    expect((await read()).parked.map((i) => i.id)).not.toContain(parkedId)
+
+    const dropMe = json(await park({ note: 'Never mind' })).item.id
+    expect((await resolve({ kind: 'parked', id: dropMe, action: 'drop' })).statusCode).toBe(200)
+    const { rows: after } = await query(`select status from planning_parked_items where id = $1`, [dropMe])
+    expect(after[0].status).toBe('dropped')
+    expect((await read()).parked.map((i) => i.id)).not.toContain(dropMe)
+  })
+})
+
+// ── The two contracts ─────────────────────────────────────────────────────────
+describe('loose ends · the route contract', () => {
+  it('refuses a step that is not in the catalog, the step it came from, and a step that is off', async () => {
+    const base = { sessionId, kind: 'parked' as const, title: 'x', source: 'parked' as const }
+    const id = json(await park({ note: 'contract' })).item.id
+    expect((await route({ ...base, id, to: 'lobby' })).statusCode).toBe(400)
+    expect((await route({ ...base, id, to: 'looseEnds' })).statusCode).toBe(400)
+    await setModules({ familyNight: false })
+    expect((await route({ ...base, id, to: 'familyNight' })).statusCode).toBe(400)
+    // A route needs the label it was routed under — a later step renders that.
+    expect((await route({ sessionId, kind: 'parked', id, source: 'parked', title: '  ', to: 'tasks' })).statusCode).toBe(400)
+    await resolve({ kind: 'parked', id, action: 'drop' })
+  })
+
+  it('404s on a session that is not this household’s, and 400s on a bad id', async () => {
+    expect((await route({ sessionId: '11111111-1111-1111-1111-111111111111', kind: 'parked', id: ownerId, title: 'x', to: 'tasks' })).statusCode).toBe(404)
+    expect((await route({ sessionId: 'nope', kind: 'parked', id: ownerId, title: 'x', to: 'tasks' })).statusCode).toBe(400)
+    expect((await route({ sessionId, kind: 'parked', id: 'nope', title: 'x', to: 'tasks' })).statusCode).toBe(400)
+    expect((await route({ sessionId, kind: 'nonsense', id: ownerId, title: 'x', to: 'tasks' })).statusCode).toBe(400)
+    // A parked note that isn't ours can't be tagged.
+    expect((await route({ sessionId, kind: 'parked', id: '11111111-1111-1111-1111-111111111111', title: 'x', to: 'tasks' })).statusCode).toBe(404)
+  })
+})
+
+describe('loose ends · the resolve contract', () => {
+  it('refuses an unknown kind or action rather than guessing', async () => {
+    expect((await resolve({ kind: 'nonsense', id: ownerId, action: 'done' })).statusCode).toBe(400)
+    expect((await resolve({ kind: 'parked', id: ownerId, action: 'burn' })).statusCode).toBe(400)
+    // `move` was a step-1 answer before the step became intake; it is gone, and the
+    // Tasks step is what gives something an owner and a day now.
+    expect((await resolve({ kind: 'chore', id: ownerId, action: 'move' })).statusCode).toBe(400)
+  })
+
+  it('404s on an id that is not this household’s', async () => {
+    for (const kind of ['chore', 'list', 'rhythm', 'goal', 'parked']) {
+      const res = await resolve({ kind, id: '11111111-1111-1111-1111-111111111111', action: 'done' })
+      expect(res.statusCode, kind).toBe(404)
+    }
+  })
+
+  it('rejects an id that is not a uuid with a 400, not a database error', async () => {
+    expect((await resolve({ kind: 'parked', id: 'not-a-uuid', action: 'done' })).statusCode).toBe(400)
+  })
+})
