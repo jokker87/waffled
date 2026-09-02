@@ -1,80 +1,136 @@
-import { useMemo, useState, type FormEvent } from 'react'
-import {
-  eventsApi,
-  invalidateGetCache,
-  useEventsRange,
-  useHousehold,
-  usePersons,
-  type AgendaEvent,
-} from '../../../lib/api'
-import { useEventColor } from '../../../lib/event-color'
-import { createEventLocal } from '../../../lib/powersync/events-local'
-import { DOW, DOW_FULL, addDays, fmtTime, localDate, ymd } from '../../components/cal-utils'
+import { useMemo, useState } from 'react'
+import { useEventsRange, useHousehold, type AgendaEvent } from '../../../lib/api'
+import { evVars, useEventColor } from '../../../lib/event-color'
+import { EventModal } from '../../components/EventModal'
+import { DOW, DOW_FULL, MONTHS_SHORT, addDays, localDate, ymd } from '../../components/cal-utils'
 import type { PlanningStepModule, StepBodyProps } from '../registry'
 import '../../../styles/planning-calendar.css'
 
 // Step 2 · Calendar — the week is the whole screen, and it is the REAL calendar.
 //
-// Nothing here is invented: the seven columns are `GET /api/events` over the week the
-// server handed us, coloured by owner exactly as the month/week/agenda views colour
-// them (useEventColor). The one action is adding what isn't on there yet, composed in
-// place on the day you tapped — no parallel "decide" list, no side column, no receipt.
+// The week is SEVEN DAY ROWS in one card, not seven columns: a weekday in small caps
+// over a large serif date, that day's events as inline chips, and a dashed `+` at the
+// end of the row. A day with nothing says "Nothing on the calendar" and takes a tint,
+// so an open evening reads as an opportunity rather than as a hole. Nothing here is
+// invented — the rows are `GET /api/events` over the week the server handed us,
+// coloured by owner exactly as the month/week/agenda views colour them (useEventColor).
 //
-// Three rules this file must not break:
+// Four rules this file must not break:
 //  1. THE SERVER OWNS THE WEEK. `weekStart` is a prop; the seven days are that date
 //     plus 0…6. Nothing here asks the device what week it is.
-//  2. THE SEVEN COLUMNS STAY EQUAL. The composer takes the place of a day's add tile;
-//     the column does not grow to hold it. A column that widened on tap would make the
-//     whole week jump under the reader mid-thought.
-//  3. ADDING GOES THROUGH THE APP'S OWN EVENT-CREATION PATH — the same local-first
-//     create EventModal uses for a plain, non-recurring event, falling back to REST
-//     when PowerSync isn't running. A step that wrote its own SQL would be a second
-//     way to make an event, and the two would drift.
+//  2. BUSY WEEKS STAY ONE SCREEN. A day over four events shows the first four and a
+//     "+N more" pill that opens that day IN PLACE. Never a scrolling row, and never a
+//     navigation away — the shell owns where the session is.
+//  3. ADDING IS THE APP'S OWN EVENT MODAL. `EventModal`, opened on the day whose `+`
+//     was tapped. It already asks the date, the time AND ITS DURATION, repeats, the
+//     location and who it's for, and it already writes through the local-first path
+//     (`createEventLocal`, falling back to `POST /api/events`). A second event form
+//     living in this step is exactly the drift the reuse rule exists to prevent — and
+//     it is what the bug this layout replaced came out of. The old inline composer
+//     asked for the time through an `input[type=time]` at `opacity: 0` stretched over
+//     a ~70px chip: no visible affordance, and no way at all to reach it on a touch
+//     kiosk with no keyboard. It also overloaded `''` to mean BOTH "all day" and "no
+//     value", rendering `value={time || DEFAULT_TIME}`, so anything that produced an
+//     empty value showed 5pm back. And it had no duration at all — every addition was
+//     hardcoded to exactly one hour. So everything landed at 5pm for an hour.
+//  4. NO INVENTED PRESENCE. The mock's face row is deliberately absent: the session is
+//     single-driver and we do not track who is in the room.
 
-// The composer opens with a TIME chosen rather than all-day: most of what a week turns
-// out to be missing happens at an hour ("soccer at five"), and the all-day chip beside
-// it is one tap away.
-const DEFAULT_TIME = '17:00'
+// How many chips a row shows before it collapses behind "+N more".
+const ROW_MAX = 4
 
-// A local-clock ISO for a day + time, the way EventModal builds one. NOT
-// `new Date('2026-09-09')` — that is UTC midnight, and west of Greenwich it renders
-// (and files) as the day before.
-const toIso = (date: string, time: string): string => new Date(`${date}T${time}`).toISOString()
-
-// "5:00 PM" from a 24h "17:00".
-const clock = (t: string): string => {
-  const [h, m] = t.split(':').map(Number)
-  return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`
+/** "Sep 6 – 12", and "Sep 27 – Oct 3" when the week straddles a month. */
+export function weekRangeLabel(weekStart: string): string {
+  const a = new Date(`${weekStart}T00:00:00`)
+  const b = addDays(a, 6)
+  const left = `${MONTHS_SHORT[a.getMonth()]} ${a.getDate()}`
+  const right = a.getMonth() === b.getMonth() ? `${b.getDate()}` : `${MONTHS_SHORT[b.getMonth()]} ${b.getDate()}`
+  return `${left} – ${right}`
 }
 
-// What marks an event as "just added", for its ring. `createEventLocal` hands back a
-// boolean rather than an id, so the two write paths can only agree on what the person
-// actually typed — which is enough to light up the line they just made.
-const madeKey = (dayKey: string, title: string) => `${dayKey} ${title.trim().toLowerCase()}`
+/** "Sunday, Thursday and Friday" — an Oxford-comma-free list a person would say. */
+function names(list: string[]): string {
+  if (list.length <= 1) return list[0] ?? ''
+  return `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`
+}
+
+/**
+ * The one line under the week range: how much is on the week, and what is still open.
+ * "7 events · Sunday and Thursday are still open" / "28 events · every day has
+ * something". The open days are the POINT of the step — a week with room in it is the
+ * thing a family can still decide about — so they are named, not counted.
+ */
+export function weekSummary(total: number, openDays: string[]): string {
+  const count = total === 0 ? 'Nothing on the week yet' : total === 1 ? '1 event' : `${total} events`
+  const open =
+    openDays.length === 0
+      ? 'every day has something'
+      : openDays.length === 7
+        ? 'every day is still open'
+        : `${names(openDays)} ${openDays.length === 1 ? 'is' : 'are'} still open`
+  return `${count} · ${open}`
+}
+
+// "1:00 PM". Deliberately not `fmtTime`: that renders a lowercase "all day", and the
+// chip's leading cell is a real label ("All day") rather than a whispered aside.
+function chipWhen(e: AgendaEvent): string {
+  if (e.allDay) return 'All day'
+  const d = new Date(e.startsAt)
+  const h = d.getHours()
+  return `${h % 12 || 12}:${String(d.getMinutes()).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`
+}
 
 interface Day {
   key: string
+  /** "SUN" */
   dow: string
-  dowFull: string
-  num: number
+  /** "Sunday" */
+  full: string
+  /** "Sep 6" */
+  date: string
   today: boolean
+}
+
+// One event, as the week draws it: a coloured time, the title in the owner's colour on
+// their tint, and their avatar bubble at the end. `.ev-tint` + `evVars` is the same
+// chip painting every other calendar surface uses — theme-aware, and it follows the
+// household's solid-vs-tinted event style — so the unassigned/household case (the
+// neutral grey, no bubble) falls out of `useEventColor` rather than being a branch here.
+function Chip({ e, color }: { e: AgendaEvent; color: string }) {
+  const avatar = e.personEmoji ?? (e.personName ? e.personName.slice(0, 1).toUpperCase() : null)
+  return (
+    <span className={`wpc-chip ev-tint${avatar ? '' : ' bare'}`} style={evVars(color)}>
+      <span className="wpc-chip-w">{chipWhen(e)}</span>
+      <span className="wpc-chip-t">{e.title}</span>
+      {avatar && (
+        <i className="wpc-chip-av" role="img" aria-label={e.personName ?? undefined}>
+          {avatar}
+        </i>
+      )}
+    </span>
+  )
 }
 
 function Body({ weekStart, setDecisionData, refresh, busy }: StepBodyProps) {
   const { household } = useHousehold()
   const tz = household?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
-  const { persons } = usePersons()
   const colorOf = useEventColor()
 
   // The week: the server's `weekStart` plus 0…6. Local parse (no trailing Z) so the
-  // column headings are the days the household actually calls them.
+  // rows are the days the household actually calls them.
   const days = useMemo<Day[]>(() => {
     const start = new Date(`${weekStart}T00:00:00`)
     const todayKey = ymd(new Date())
     return Array.from({ length: 7 }, (_, i) => {
       const d = addDays(start, i)
       const key = ymd(d)
-      return { key, dow: DOW[d.getDay()], dowFull: DOW_FULL[d.getDay()], num: d.getDate(), today: key === todayKey }
+      return {
+        key,
+        dow: DOW[d.getDay()].toUpperCase(),
+        full: DOW_FULL[d.getDay()],
+        date: `${MONTHS_SHORT[d.getMonth()]} ${d.getDate()}`,
+        today: key === todayKey,
+      }
     })
   }, [weekStart])
 
@@ -95,218 +151,102 @@ function Body({ weekStart, setDecisionData, refresh, busy }: StepBodyProps) {
     return map
   }, [events, tz])
 
-  // The composer: one day at a time, in place.
-  const [openDay, setOpenDay] = useState<string | null>(null)
-  const [title, setTitle] = useState('')
-  // '' = all day. Otherwise a 24h HH:MM.
-  const [time, setTime] = useState(DEFAULT_TIME)
-  // MULTI-select: an event for both parents is the ordinary case, not the exception.
-  const [who, setWho] = useState<string[]>([])
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  // Which day the event modal is open on (null = closed). The row's `+` preselects that
+  // day; the header's button preselects today when today is inside the week being
+  // planned, and the week's first day otherwise — a session run on a Sunday is usually
+  // planning the week ahead, and "today" would be outside it.
+  const [addOn, setAddOn] = useState<string | null>(null)
+  // Days whose "+N more" has been opened. Per day, and never reset by a refetch: a row
+  // that collapsed again under someone mid-read would be worse than a slightly tall one.
+  const [opened, setOpened] = useState<Set<string>>(() => new Set())
   // How many things this session put on the week — the crumb, and only ever a count.
   // The recap reads through to the calendar itself, so copying event data onto the
   // session record would give the two something to disagree about.
   const [added, setAdded] = useState(0)
-  // What this session added, so those lines keep a ring: you can see what you just did.
-  const [made, setMade] = useState<Set<string>>(new Set())
 
-  function open(key: string) {
-    setOpenDay(key)
-    setTitle('')
-    setTime(DEFAULT_TIME)
-    setWho([])
-    setError(null)
-  }
+  const todayKey = ymd(new Date())
+  const headerDay = days.some((d) => d.key === todayKey) ? todayKey : days[0].key
+  const openDays = days.filter((d) => !(byDay[d.key] ?? []).length).map((d) => d.full)
 
-  function close() {
-    setOpenDay(null)
-    setError(null)
-  }
-
-  const toggleWho = (id: string) =>
-    setWho((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]))
-
-  async function submit(e: FormEvent, dayKey: string) {
-    e.preventDefault()
-    const text = title.trim()
-    if (!text || saving || busy) return
-    setSaving(true)
-    setError(null)
-    // All-day events are filed at midday like everywhere else in the app, so they can't
-    // slide into a neighbouring day on a zone change.
-    const allDay = !time
-    const startsAt = toIso(dayKey, time || '12:00')
-    const endsAt = allDay ? null : new Date(new Date(startsAt).getTime() + 60 * 60000).toISOString()
-    // Exactly EventModal's two shapes: `personIds` for the local DB, `participantIds`
-    // for REST. Keeping the split identical is what stops the two paths drifting.
-    const draft = {
-      title: text,
-      startsAt,
-      endsAt,
-      allDay,
-      isCountdown: false,
-      location: null,
-      personIds: who,
-      goalId: null,
-      goalStepId: null,
-    }
-    const { personIds: ids, ...eventDraft } = draft
-    try {
-      // Prefer the local DB (instant, offline-capable, and it paints through the same
-      // live query this screen reads); fall back to REST when PowerSync isn't running.
-      // `calendarId: null` lets the server auto-route, as it does for a single-calendar
-      // owner in EventModal.
-      if (!(await createEventLocal({ ...draft, calendarId: null }))) {
-        await eventsApi.createEvent({ ...eventDraft, participantIds: ids })
-      }
-      // The week digest is now out of date.
-      invalidateGetCache('/api/calendar/heads-up')
-      const n = added + 1
-      setAdded(n)
-      setDecisionData({ added: n })
-      setMade((cur) => new Set(cur).add(madeKey(dayKey, text)))
-      close()
-      refetch()
-      // The agenda sheet and the counter should agree with what just happened.
-      refresh()
-    } catch (err) {
-      console.error('planning · calendar add failed', err)
-      // ApiSendError carries the server's own `{ error, message }`; say what it said
-      // rather than a generic apology, and keep the typed line so it can be retried.
-      const said = (err as { body?: { message?: string } })?.body?.message
-      setError(said ? `Couldn't add that — ${said}` : "Couldn't add that — try again.")
-    } finally {
-      setSaving(false)
-    }
+  function onSaved() {
+    const n = added + 1
+    setAdded(n)
+    setDecisionData({ added: n })
+    // The rows and the shell's counter should both agree with what just happened.
+    refetch()
+    refresh()
   }
 
   return (
     <div className="wpc">
-      {/* The shell hides its own week label under 720px, so the body names the week
-          there. Hidden on wide, where the header already says it. */}
-      <div className="wpc-week-l">{`${days[0].dow} ${days[0].num} - ${days[6].dow} ${days[6].num}`}</div>
-      {/* The one line of instruction the design keeps. Not a "worth knowing" strip: it
-          says nothing about the CONTENTS of the week, only about how to change it. */}
-      <p className="wpc-hint">
-        Tap any day to add what isn&rsquo;t on here yet. Everything else is already on the calendar.
-      </p>
+      <header className="wpc-head">
+        <div className="wpc-head-l">
+          <div className="wpc-range wf-serif">{weekRangeLabel(weekStart)}</div>
+          <p className="wpc-sum">
+            {loading && !events.length ? 'Reading your calendars…' : weekSummary(events.length, openDays)}
+          </p>
+        </div>
+        <button type="button" className="btn wpc-new" disabled={busy} onClick={() => setAddOn(headerDay)}>
+          <span aria-hidden>+</span> Add an event
+        </button>
+      </header>
 
+      {/* One card, seven rows, hairlines between them. */}
       <div className="wpc-week">
         {days.map((d) => {
           const list = byDay[d.key] ?? []
-          const composing = openDay === d.key
+          const shown = opened.has(d.key) || list.length <= ROW_MAX ? list : list.slice(0, ROW_MAX)
+          const hidden = list.length - shown.length
           return (
-            <section key={d.key} className={`wpc-day${composing ? ' composing' : ''}`} data-testid={`wpc-day-${d.key}`}>
-              <header className={`wpc-day-h${d.today ? ' today' : ''}`}>
-                <span className="wpc-dow wf-serif">{d.dow}</span>
-                <span className="wpc-num">{d.num}</span>
-              </header>
-              <div className="wpc-day-b">
-                <div className="wpc-evs">
-                  {list.map((e) => (
-                    <div
-                      key={`${e.id}-${e.occurrenceStart ?? ''}`}
-                      className={`wpc-ev${made.has(madeKey(d.key, e.title)) ? ' new' : ''}`}
-                    >
-                      <i className="wpc-bar" style={{ background: colorOf(e) }} aria-hidden />
-                      <span className="wpc-ev-t">{e.title}</span>
-                      <span className="wpc-ev-w">{fmtTime(e)}</span>
-                    </div>
-                  ))}
-                  {!list.length && !loading && <p className="wpc-none">Nothing yet</p>}
-                </div>
+            <div
+              key={d.key}
+              className={`wpc-row${list.length ? '' : ' free'}${d.today ? ' today' : ''}`}
+              data-testid={`wpc-day-${d.key}`}
+            >
+              <div className="wpc-when">
+                <span className="wpc-dow">{d.dow}</span>
+                <span className="wpc-date wf-serif">{d.date}</span>
+              </div>
 
-                {composing ? (
-                  <form
-                    className="wpc-comp"
-                    onSubmit={(e) => submit(e, d.key)}
-                    onKeyDown={(e) => { if (e.key === 'Escape') close() }}
-                  >
-                    {/* No Cancel row — the design's composer is four rows and ends on the
-                        primary. Backing out is this, or Escape. */}
-                    <button type="button" className="wpc-comp-x" onClick={close} aria-label="Close">&times;</button>
-
-                    {/* Row 1 — the line itself: one editable line, no box around it. */}
-                    <input
-                      className="wpc-comp-t"
-                      autoFocus
-                      value={title}
-                      onChange={(e) => setTitle(e.target.value)}
-                      placeholder="What's happening?"
-                      aria-label={`What's happening on ${d.dowFull} ${d.num}?`}
-                    />
-
-                    {/* Row 2 — when: a chip pair, a time or all day. The time chip is a
-                        real time control wearing the chip, so the platform's own picker
-                        (and typing) both work on a kiosk. */}
-                    <div className="wpc-row">
-                      <label className={`wpc-chip wpc-chip-time${time ? ' on' : ''}`}>
-                        <span className="wpc-chip-d">{d.dow}</span>
-                        <span className="wpc-chip-v" aria-hidden>{clock(time || DEFAULT_TIME)}</span>
-                        <input
-                          type="time"
-                          aria-label="Time"
-                          value={time || DEFAULT_TIME}
-                          onChange={(e) => setTime(e.target.value)}
-                        />
-                      </label>
-                      <button
-                        type="button"
-                        className={`wpc-chip${!time ? ' on' : ''}`}
-                        aria-pressed={!time}
-                        onClick={() => setTime(time ? '' : DEFAULT_TIME)}
-                      >
-                        All day
-                      </button>
-                    </div>
-
-                    {/* Row 3 — who it's for. One avatar chip per member, MULTI-select:
-                        an event for both parents is the ordinary case. */}
-                    <div className="wpc-row wpc-whos">
-                      {persons.map((p) => {
-                        const on = who.includes(p.id)
-                        return (
-                          <button
-                            key={p.id}
-                            type="button"
-                            className={`wpc-chip wpc-chip-av${on ? ' on' : ''}`}
-                            aria-pressed={on}
-                            aria-label={p.name}
-                            onClick={() => toggleWho(p.id)}
-                          >
-                            <i className="wpc-av" style={{ background: `${p.colorHex ?? '#A6A29B'}22` }} aria-hidden>
-                              {p.avatarEmoji ?? '🙂'}
-                            </i>
-                            <span className="wpc-av-n">{p.name}</span>
-                          </button>
-                        )
-                      })}
-                    </div>
-
-                    {error && <p className="wpc-err">{error}</p>}
-
-                    {/* Row 4 — the one primary, full width. */}
-                    <button type="submit" className="btn btn-primary wpc-go" disabled={!title.trim() || saving || busy}>
-                      Add to the week
-                    </button>
-                  </form>
-                ) : (
+              <div className="wpc-evs">
+                {shown.map((e) => (
+                  <Chip key={`${e.id}-${e.occurrenceStart ?? ''}`} e={e} color={colorOf(e)} />
+                ))}
+                {hidden > 0 && (
                   <button
                     type="button"
-                    className="wpc-add"
-                    disabled={busy}
-                    aria-label={`Add something to ${d.dowFull} ${d.num}`}
-                    onClick={() => open(d.key)}
+                    className="wpc-more"
+                    onClick={() => setOpened((cur) => new Set(cur).add(d.key))}
                   >
-                    <span aria-hidden>+</span>
+                    +{hidden} more
                   </button>
                 )}
+                {!list.length && !loading && <span className="wpc-none">Nothing on the calendar</span>}
               </div>
-            </section>
+
+              <button
+                type="button"
+                className="wpc-add"
+                disabled={busy}
+                aria-label={`Add an event on ${d.full}, ${d.date}`}
+                onClick={() => setAddOn(d.key)}
+              >
+                <span aria-hidden>+</span>
+              </button>
+            </div>
           )
         })}
       </div>
+
+      <p className="wpc-note">This is everything your calendars already have. Add what isn&rsquo;t here yet.</p>
+      <p className="wpc-note wpc-note-q">
+        Busy weeks stay one screen &mdash; a day over four events shows &ldquo;+N more&rdquo;, which opens that day.
+      </p>
+
+      {/* The app's own event modal — NOT a second event form. It carries the date it was
+          opened on, and owns the time, the duration, repeats, the location and who it's
+          for, plus the local-first write. */}
+      {addOn && <EventModal date={addOn} onClose={() => setAddOn(null)} onSaved={onSaved} />}
     </div>
   )
 }

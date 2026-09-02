@@ -2,17 +2,21 @@
 // against a real Postgres (Testcontainers).
 //
 // This step adds NO endpoint of its own: the week it shows is the plain calendar read
-// (`GET /api/events?from&to`) and adding goes through the plain create (`POST
-// /api/events`), which is why `calendar.routes.ts` is still a registered no-op. So this
-// file is RETROFITTED coverage of an existing read rather than a red-first test — the
-// red-green for this step happened in
-// apps/web/src/kiosk/planning/steps/CalendarStep.test.tsx.
+// (`GET /api/events?from&to`) and adding goes through the app's own event modal, which
+// writes with the plain create (`POST /api/events`) — which is why
+// `calendar.routes.ts` is still a registered no-op. So this file is RETROFITTED
+// coverage of an existing read rather than a red-first test — the red-green for this
+// step happened in apps/web/src/kiosk/planning/steps/CalendarStep.test.tsx.
 //
 // What it is worth asserting anyway is the contract the step actually depends on and
 // that nothing else pins down:
 //   · the week window is exactly weekStart … weekStart+6 — an off-by-one at either end
-//     silently empties the first or the seventh column;
-//   · a created event comes back owner-coloured, which is how the columns are painted;
+//     silently empties the first or the seventh day row;
+//   · an event keeps the HOUR AND THE LENGTH it was created with. The step's own bug
+//     was a client one (every addition landed at the 5pm default), and the server was
+//     never at fault — but a guard here is what keeps it a client-only regression if
+//     anyone re-rounds a start or invents an end;
+//   · a created event comes back owner-coloured, which is how the chips are painted;
 //   · the step's answer round-trips on the session record as a COUNT, not a copy of the
 //     calendar.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
@@ -150,6 +154,31 @@ describe('weekly planning · step 2 · calendar', () => {
     expect(onWeek).toMatchObject({ personId: ownerId, personName: 'Kevin', personColor: '#2F7FED' })
     // Added on the day it was asked for, not a neighbouring one.
     expect(onWeek.startsAt.slice(0, 10) >= addDays(weekStart, 3)).toBe(true)
+  })
+
+  it('keeps the hour and the length an addition was given — not a default one', async () => {
+    // The modal asks for a time AND a duration; both have to survive the round trip.
+    // 8:30am for two hours is deliberately neither the 5pm default the old composer
+    // was stuck on nor the one-hour end it hardcoded.
+    const day = addDays(weekStart, 2)
+    const created = json(await call('POST', '/api/events', kevin, {
+      title: 'Swim lesson',
+      startsAt: at(day, '08:30'),
+      endsAt: at(day, '10:30'),
+      allDay: false,
+      participantIds: [ownerId],
+    })).event
+    expect(created.allDay).toBe(false)
+
+    const week = json(await call('GET', `/api/events?from=${weekStart}&to=${addDays(weekStart, 6)}`, kevin))
+    const onWeek = week.events.find((e: { title: string }) => e.title === 'Swim lesson')
+    expect(onWeek).toBeTruthy()
+    // Compared as instants, not strings: the row comes back in UTC, and the household
+    // is America/Chicago (CDT, -05:00) — so 08:30 local is 13:30Z on the same date.
+    expect(new Date(onWeek.startsAt).toISOString()).toBe(new Date(at(day, '08:30')).toISOString())
+    expect(new Date(onWeek.endsAt).toISOString()).toBe(new Date(at(day, '10:30')).toISOString())
+    // …and it is still on the day it was asked for, not pushed into the next one.
+    expect(onWeek.startsAt.slice(0, 10)).toBe(day)
   })
 
   it('puts one addition on more than one person', async () => {

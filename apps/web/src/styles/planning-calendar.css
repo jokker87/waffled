@@ -1,172 +1,153 @@
-/* Weekly Planning · step 2 - Calendar (kiosk/planning/steps/CalendarStep.tsx).
+/* Weekly Planning · step 2 — Calendar (kiosk/planning/steps/CalendarStep.tsx).
 
-   THE POINT OF THE LAYOUT: the week is the whole screen and it is the real calendar.
-   Seven EQUAL day columns, one owner-coloured line per event, a dashed add tile pinned
-   to the bottom of each column, and one hint line. If a new zone shows up in this file
-   it is probably something the design deliberately removed (the parallel decide list,
-   the worth-knowing strip, the will-write receipt, the agenda rail, the side column).
+   THE POINT OF THE LAYOUT: the week is DAY ROWS, not columns. One card, seven rows,
+   hairlines between them. Each row is [ when | that day's chips | + ]: a weekday in
+   small grey caps over a large serif date, the events as inline chips, and a dashed
+   circular add at the far right. A day with nothing on it says so and takes a subtle
+   tint, so an open day reads as available rather than as a gap.
 
-   The columns never resize. The composer takes the place of a day's add tile and the
-   grid holds still: a column that grew on tap would shove the rest of the week sideways
-   while somebody was still reading it.
+   Seven columns were tried first and did not work: a column is as narrow as a seventh
+   of the screen, which is narrower than an event title, so every chip ellipsised and
+   the week became seven lists of half-words. A row is as wide as the card.
 
-   Every colour is a token, as in planning.css - never a hex, or dark mode breaks.
+   Adding is the app's own `EventModal` (`.modal-overlay` / `.modal-card` / `.field`),
+   so this file styles NO form. If form CSS shows up here, a second event form has
+   grown in the step — delete it and pass the day to the modal instead.
+
+   Every colour is a token, as in planning.css — never a hex, or dark mode breaks.
 
    VOCABULARY
-     Week     - .wpc .wpc-week-l .wpc-hint .wpc-week
-     Day      - .wpc-day .wpc-day-h .wpc-dow .wpc-num .wpc-day-b
-     Events   - .wpc-evs .wpc-ev .wpc-ev.new .wpc-bar .wpc-ev-t .wpc-ev-w .wpc-none
-     Add      - .wpc-add
-     Compose  - .wpc-comp .wpc-comp-x .wpc-comp-t .wpc-row
-                .wpc-chip (.on, -time, -av) .wpc-chip-d .wpc-chip-v
-                .wpc-whos .wpc-av .wpc-av-n .wpc-err .wpc-go
+     Head   — .wpc .wpc-head .wpc-head-l .wpc-range .wpc-sum .wpc-new
+     Week   — .wpc-week .wpc-row (.free, .today)
+     Day    — .wpc-when .wpc-dow .wpc-date
+     Events — .wpc-evs .wpc-chip .wpc-chip-w .wpc-chip-t .wpc-chip-av
+              .wpc-more .wpc-none
+     Add    — .wpc-add
+     Notes  — .wpc-note .wpc-note-q
 */
 
 /* `.wp-body` is a flex column with `min-height: 0` and its own scroll, so the week
    takes the slack and never pushes the footer off screen. */
-.wpc { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 4px; }
+.wpc { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 
-/* The shell hides its own `.wp-week` under 720px ("the body says which week it is"),
-   so this is the phone's week label - and redundant chrome on a wide screen. */
-.wpc-week-l { display: none; font-size: 12.5px; font-weight: 700; color: var(--ink-2); }
-.wpc-hint { margin: 0 0 8px; font-size: 12.5px; font-weight: 600; color: var(--ink-3); line-height: 1.45; }
+/* ── The header line ────────────────────────────────────────────────────────── */
+/* The week range, the plain-language read of how full it is, and the one way in. */
+.wpc-head { display: flex; align-items: flex-end; gap: 16px; margin-bottom: 12px; flex-wrap: wrap; }
+.wpc-head-l { min-width: 0; flex: 1; }
+.wpc-range { font-size: 23px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.15; }
+.wpc-sum { margin: 3px 0 0; font-size: 12.5px; font-weight: 600; color: var(--ink-2); line-height: 1.45; }
 
-/* Seven equal columns. `minmax(0, 1fr)` and not `1fr`: a long event title would
-   otherwise let its column outgrow its share and the week would stop being seven of
-   anything. */
-.wpc-week { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 10px; }
+/* A dark pill, not the coral primary: the step's affirmative lives in the shell's
+   footer, and two coral buttons on one screen would compete. `.btn` carries the
+   geometry (the pill, the weight); only the fill is this step's. */
+.wpc-new { flex: none; background: var(--ink); color: var(--on-accent); padding: 11px 20px; font-size: 14px; }
+.wpc-new:disabled { opacity: 0.4; cursor: default; }
 
-.wpc-day {
-  min-width: 0; display: flex; flex-direction: column;
+/* ── The week ───────────────────────────────────────────────────────────────── */
+/* One card. The rows never scroll individually — a busy day collapses behind
+   "+N more" instead (see .wpc-more), which is what keeps the week to one screen. */
+.wpc-week {
   background: var(--card); border: 1px solid var(--hair); border-radius: var(--r-lg);
-  padding: 10px 9px 9px;
+  overflow: hidden; min-height: 0; overflow-y: auto;
 }
 
-.wpc-day-h { display: flex; align-items: baseline; gap: 5px; padding-bottom: 8px; }
-.wpc-dow { font-size: 14px; font-weight: 600; letter-spacing: -0.01em; color: var(--ink-2); }
-.wpc-num { font-size: 15px; font-weight: 700; color: var(--ink); line-height: 1; }
+.wpc-row {
+  display: grid; grid-template-columns: 74px minmax(0, 1fr) auto;
+  align-items: center; gap: 12px;
+  padding: 10px 14px; border-bottom: 1px solid var(--hair-2);
+}
+.wpc-row:last-child { border-bottom: 0; }
+/* A day with nothing on it is the opportunity, so it is tinted rather than blank. */
+.wpc-row.free { background: var(--card-2); }
+
+.wpc-when { min-width: 0; }
+.wpc-dow {
+  display: block; font-size: 10px; font-weight: 800; letter-spacing: 0.09em;
+  text-transform: uppercase; color: var(--ink-3);
+}
+.wpc-date { display: block; font-size: 19px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.2; }
 /* Today is the one day that names itself. */
-.wpc-day-h.today .wpc-dow, .wpc-day-h.today .wpc-num { color: var(--primary); }
+.wpc-row.today .wpc-dow, .wpc-row.today .wpc-date { color: var(--primary); }
 
-.wpc-day-b { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
-.wpc-evs { display: flex; flex-direction: column; gap: 5px; overflow-y: auto; min-height: 0; }
+.wpc-evs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
 
-/* One line per event: an owner-coloured bar, the title, the time. A bar rather than a
-   solid chip on purpose - a filled chip needs the ink-contrast dance (see
-   lib/event-color `evVars`), and nothing here needs text on a member colour. */
-.wpc-ev { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
-.wpc-bar { width: 3px; align-self: stretch; min-height: 14px; border-radius: 2px; flex: none; }
-.wpc-ev-t {
-  font-size: 13px; font-weight: 650; color: var(--ink); line-height: 1.35;
-  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.wpc-ev-w { margin-left: auto; flex: none; font-size: 11px; font-weight: 650; color: var(--ink-3); }
-/* What you just added keeps a ring for the rest of the step, so a week you've been
-   editing still shows which lines are yours. */
-.wpc-ev.new {
-  border-radius: var(--r-xs); padding: 3px 5px; margin: -3px -5px;
-  box-shadow: 0 0 0 2px var(--primary);
-}
-
-.wpc-none { margin: 0; font-size: 12px; font-weight: 600; color: var(--ink-3); opacity: 0.75; }
-
-/* The only action: a dashed tile at the FOOT of the column (`margin-top: auto`), the
-   same size on every day whether the day is empty or full. */
-.wpc-add {
-  margin-top: auto; flex: none; width: 100%; height: 44px;
-  display: flex; align-items: center; justify-content: center;
-  border: 1.5px dashed var(--line); border-radius: 12px;
-  background: none; font: inherit; font-size: 19px; font-weight: 600;
-  line-height: 1; color: var(--ink-3); cursor: pointer;
-}
-.wpc-add:hover:not(:disabled), .wpc-add:focus-visible { border-color: var(--primary); color: var(--primary); }
-.wpc-add:disabled { opacity: 0.35; cursor: default; }
-
-/* The composer, in place on the day you tapped - a card where the add tile was. Four
-   rows: the line, when, who, the primary. */
-.wpc-comp {
-  margin-top: auto; flex: none; position: relative;
-  display: flex; flex-direction: column; gap: 7px;
-  background: var(--card); border-radius: 12px; padding: 10px 9px 9px;
-  box-shadow: 0 0 0 2px var(--ink);
-}
-.wpc-comp-x {
-  position: absolute; top: 2px; right: 3px;
-  width: 20px; height: 20px; border: 0; border-radius: 999px;
-  background: none; color: var(--ink-3); font: inherit; font-size: 15px; line-height: 1;
-  cursor: pointer;
-}
-.wpc-comp-x:hover { color: var(--ink); }
-
-/* Row 1 - one editable LINE, not a boxed input: the composer card is already the
-   container, and a second border inside it reads as a form. */
-.wpc-comp-t {
-  width: 100%; padding: 0 18px 4px 0; font: inherit;
-  font-size: 13.5px; font-weight: 650; color: var(--ink);
-  background: none; border: 0; border-bottom: 1px solid var(--hair);
-  caret-color: var(--primary);
-}
-.wpc-comp-t::placeholder { color: var(--ink-3); font-weight: 600; }
-.wpc-comp-t:focus { outline: none; border-bottom-color: var(--primary); }
-
-.wpc-row { display: flex; flex-wrap: wrap; gap: 5px; }
-
-/* One chip shape for both rows: quiet on `--panel`, and `on` is inked. */
+/* One chip per event: the time and the title in the owner's colour, on that person's
+   tint, with their avatar bubble at the end.
+   THE PAINT IS NOT THIS FILE'S. The chip wears the shared `.ev-tint` (waffled.css)
+   with `--ev` set inline by `evVars()` — the same painting the month/week/agenda
+   views use — so it is theme-aware, follows the household's solid-vs-tinted event
+   style, and gives an unassigned or household event the neutral grey with no extra
+   branch here. This file only supplies the geometry. */
 .wpc-chip {
-  display: inline-flex; align-items: center; gap: 4px; max-width: 100%;
-  border: 0; border-radius: 999px; padding: 5px 9px; cursor: pointer;
-  font: inherit; font-size: 11.5px; font-weight: 700; line-height: 1.2;
+  display: inline-flex; align-items: center; gap: 7px; min-width: 0; max-width: 100%;
+  border-radius: 999px; padding: 5px 6px 5px 11px;
+}
+/* No avatar to show (unassigned / household) — the chip ends on its title, so give
+   the right edge the padding the bubble would have carried. */
+.wpc-chip.bare { padding-right: 11px; }
+/* Both cells inherit the chip's ink; the time is only quieter, never a second colour
+   — a hardcoded one would go illegible on a solid chip. */
+.wpc-chip-w { flex: none; font-size: 11px; font-weight: 750; opacity: 0.72; white-space: nowrap; }
+.wpc-chip-t {
+  min-width: 0; font-size: 12.5px; font-weight: 650;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* The bubble derives from the chip's own ink, so it reads on a tint and on a solid
+   fill without knowing which it is. */
+.wpc-chip-av {
+  width: 20px; height: 20px; flex: none; border-radius: 999px;
+  display: grid; place-items: center; font-size: 11px; font-style: normal; font-weight: 700;
+  background: color-mix(in srgb, currentColor 16%, transparent);
+}
+
+/* The whole point of the threshold: a day over four events keeps its row one line
+   tall and hands the rest over on a tap. Opening expands IN PLACE — never a
+   navigation, which would leave the session mid-step. */
+.wpc-more {
+  flex: none; border: 0; border-radius: 999px; padding: 5px 11px; cursor: pointer;
+  font: inherit; font-size: 11px; font-weight: 750; line-height: 1.2;
   background: var(--panel); color: var(--ink-2);
 }
-.wpc-chip:hover { color: var(--ink); }
-.wpc-chip.on { background: var(--ink); color: var(--on-accent); }
-.wpc-chip:focus-within, .wpc-chip:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ring); }
+.wpc-more:hover, .wpc-more:focus-visible { color: var(--ink); }
 
-/* The time chip wears a real `<input type="time">`: the platform picker and typing both
-   work, which a hand-rolled pill would have thrown away. The input is transparent and
-   stretched over the chip; the chip's own spans do the rendering. */
-.wpc-chip-time { position: relative; }
-.wpc-chip-d { opacity: 0.72; }
-.wpc-chip-v { white-space: nowrap; }
-.wpc-chip-time input {
-  position: absolute; inset: 0; width: 100%; height: 100%;
-  opacity: 0; border: 0; padding: 0; margin: 0; background: none;
-  font: inherit; color: inherit; cursor: pointer;
+.wpc-none { font-size: 12.5px; font-weight: 600; color: var(--ink-3); }
+
+/* The row's own add: a dashed circle at the far right, the same size on every row
+   whether the day is empty or full. */
+.wpc-add {
+  flex: none; width: 30px; height: 30px; border-radius: 999px;
+  display: grid; place-items: center;
+  border: 1.5px dashed var(--line); background: none;
+  font: inherit; font-size: 16px; font-weight: 600; line-height: 1;
+  color: var(--ink-3); cursor: pointer;
 }
+.wpc-add:hover:not(:disabled), .wpc-add:focus-visible { border-color: var(--primary); color: var(--primary); }
+.wpc-add:disabled { opacity: 0.3; cursor: default; }
 
-.wpc-whos { row-gap: 5px; }
-.wpc-chip-av { padding: 3px 8px 3px 3px; min-width: 0; }
-.wpc-av {
-  width: 19px; height: 19px; flex: none; border-radius: 999px;
-  display: grid; place-items: center; font-size: 11px; font-style: normal;
-}
-.wpc-av-n { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* ── Below the card ─────────────────────────────────────────────────────────── */
+/* What the card is (everything your calendars already have) and how the busy-day
+   collapse behaves. Both are said once, quietly, under the week. */
+.wpc-note { margin: 10px 0 0; font-size: 12px; font-weight: 600; color: var(--ink-3); line-height: 1.5; }
+.wpc-note-q { margin-top: 3px; opacity: 0.8; }
 
-.wpc-err { margin: 0; font-size: 11.5px; font-weight: 650; color: var(--danger); line-height: 1.4; }
-
-.wpc-go { width: 100%; justify-content: center; font-size: 12.5px; padding: 9px 10px; }
-.wpc-go:disabled { opacity: 0.5; cursor: default; }
-
-/* Narrow (phone)
-   The same week, as a list of day rows: the day name and number on the left, that day's
-   events (and its add) on the right. Not a lesser screen - the same content and the
-   same single action, laid out for a thumb. */
+/* ── Narrow (phone) ────────────────────────────────────────────────────────────
+   The same seven rows, stacked: the day heading on its own line and the chips full
+   width beneath it, with the add pinned to the heading line. Not a lesser screen —
+   the same content and the same single action, laid out for a thumb. */
 @media (max-width: 720px) {
-  .wpc-week-l { display: block; }
-  .wpc-week { grid-template-columns: 1fr; gap: 0; overflow-y: auto; }
-  .wpc-day {
-    display: grid; grid-template-columns: 58px 1fr; align-items: start; gap: 10px;
-    border: 0; border-bottom: 1px solid var(--hair-2); border-radius: 0;
-    background: none; padding: 12px 2px;
+  .wpc-head { align-items: flex-start; }
+  .wpc-new { width: 100%; justify-content: center; }
+
+  .wpc-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: 'when add' 'evs evs';
+    align-items: center; row-gap: 8px; padding: 12px 13px;
   }
-  .wpc-day.composing { background: var(--card); border-radius: var(--r-lg); padding: 12px 10px; }
-  .wpc-day-h { flex-direction: column; align-items: flex-start; gap: 1px; padding: 0; }
-  .wpc-dow { font-size: 15px; }
-  .wpc-num { font-size: 17px; }
-  .wpc-evs { overflow: visible; }
-  .wpc-ev-t { white-space: normal; }
-  /* A day row is only as tall as its events, so the tile stops being a full-width slab
-     and becomes a small one at the end of the row. */
-  .wpc-add { margin-top: 0; width: 44px; height: 32px; font-size: 17px; }
-  .wpc-comp { margin-top: 0; }
+  .wpc-when { grid-area: when; display: flex; align-items: baseline; gap: 8px; }
+  .wpc-add { grid-area: add; width: 34px; height: 34px; font-size: 18px; }
+  .wpc-evs { grid-area: evs; flex-direction: column; align-items: stretch; }
+  /* Full-width chips: a thumb target, and a title that wraps instead of ellipsising. */
+  .wpc-chip { max-width: none; }
+  .wpc-chip-t { white-space: normal; }
+  .wpc-more { align-self: flex-start; }
 }
