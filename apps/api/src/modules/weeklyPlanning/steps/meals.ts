@@ -329,17 +329,32 @@ export interface FillResult {
 // night with none and refuses to touch one that has one — checked once against the
 // view and again immediately before each write, because the suggestion round-trip is
 // the window in which somebody else's tap could land.
-export async function fillEmptyDinners(tenant: Tenant, weekStart: string): Promise<FillResult> {
+//
+// `chosen` is a week the family already APPROVED — the cards the shared "Plan my
+// week" planner (apps/web/src/kiosk/components/PlanWeek.tsx) drafted and they hit
+// "Add week" on. Passing them here rather than applying them through
+// POST /api/meals/plan is what keeps the fill's two guarantees intact: only the empty
+// nights are written, and the caller gets back the `FilledNight` receipt the undo
+// guard checks (the stored title is deliberately not on the view's wire, so a client
+// cannot build a trustworthy claim of its own).
+//
+// Without `chosen` this still drafts for itself — the headless fill, which is what
+// iOS parity and any non-interactive caller needs.
+export async function fillEmptyDinners(tenant: Tenant, weekStart: string, chosen?: PlanCard[] | null): Promise<FillResult> {
   const view = await mealsStepView(tenant, weekStart)
   const targets = new Set(view.emptyDates)
   if (!targets.size) return { weekStart, filled: [], view }
 
-  const cards = await suggestFor(tenant, weekStart, [...targets])
+  const cards = chosen ?? (await suggestFor(tenant, weekStart, [...targets]))
   const plan = await getOrCreateActivePlan(tenant)
   const filled: FilledNight[] = []
 
   for (const card of cards) {
     if (!targets.has(card.date)) continue
+    // This step plans DINNERS. A card naming another meal is dropped rather than
+    // quietly rewritten into a dinner — silently moving somebody's lunch to 6pm is
+    // worse than not planning it.
+    if (card.mealType && card.mealType !== MEAL_TYPE) continue
     targets.delete(card.date) // one dish per night, however many the model offered
 
     // The suggestion may name a library recipe; a bogus id degrades to its title
@@ -504,6 +519,30 @@ export async function setShoppingTrip(tenant: Tenant, weekStart: string, input: 
 async function finish(tenant: Tenant, weekStart: string, choreId: string | null): Promise<ShoppingResult> {
   const view = await mealsStepView(tenant, weekStart, choreId)
   return { weekStart, shopping: view.shopping, view }
+}
+
+// The approved week off the wire, shaped into plan cards. Only the four fields the
+// fill actually writes are read — the rest of a PlanCard is display, and trusting a
+// client's `servings` or `note` would be storing a claim nobody checks.
+export function parsePlanCards(raw: unknown): PlanCard[] | null {
+  if (!Array.isArray(raw)) return null
+  const out: PlanCard[] = []
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue
+    const c = item as Record<string, unknown>
+    if (typeof c.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(c.date)) continue
+    out.push({
+      date: c.date,
+      mealType: typeof c.mealType === 'string' ? c.mealType : MEAL_TYPE,
+      title: typeof c.title === 'string' ? c.title : '',
+      recipeId: typeof c.recipeId === 'string' && c.recipeId ? c.recipeId : null,
+      emoji: null,
+      minutes: null,
+      servings: 0,
+      note: null,
+    })
+  }
+  return out
 }
 
 // Whatever came off the wire, shaped into undo claims. A claim naming no date is

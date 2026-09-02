@@ -23,12 +23,39 @@ function ymd(d: Date): string {
 // Full-screen "Plan my week": guardrails on the left, the drafted week on the
 // right. Drafts via the household's chosen LLM; reshuffle/swap re-draft (keeping
 // locked nights); "Add week" applies every card via the normal plan endpoint.
-export function PlanWeek({ startStr, days, onClose, onApplied, initialUseUp }: { startStr: string; days: Date[]; onClose: () => void; onApplied: () => void; initialUseUp?: string[] }) {
+//
+// THREE OPTIONAL PROPS EXIST ONLY SO A CALLER CAN NARROW IT, and every default is
+// exactly what the Meals screen already had. They are what let Weekly Planning's
+// Meals step reuse this whole screen instead of growing a second, worse planner:
+//
+//   `mealTypes`  — which meals may be planned (default: all three). One entry hides
+//                  the segment entirely, because a choice of one isn't a choice.
+//   `initialDays`— the dates selected on open (default: Mon–Fri of `days`). The
+//                  planning step passes its EMPTY nights, so "fill only the empties"
+//                  is what the day chips themselves say.
+//   `onApply`    — takes over the write. Given one, this screen stops calling
+//                  /api/meals/plan + rebuildGrocery and hands the approved cards to
+//                  the caller, which is the only way a caller can own what was
+//                  written (the planning step needs the receipt its undo checks).
+export function PlanWeek({ startStr, days, onClose, onApplied, initialUseUp, mealTypes, initialDays, onApply }: {
+  startStr: string
+  days: Date[]
+  onClose: () => void
+  onApplied: () => void
+  initialUseUp?: string[]
+  mealTypes?: readonly (typeof MEAL_TYPES)[number][]
+  initialDays?: string[]
+  onApply?: (cards: PlanCard[]) => Promise<void> | void
+}) {
   const { persons } = usePersons()
   const familySize = Math.max(1, persons.length)
 
-  const [mealType, setMealType] = useState<(typeof MEAL_TYPES)[number]>('dinner')
+  const types = mealTypes?.length ? mealTypes : MEAL_TYPES
+  const [mealType, setMealType] = useState<(typeof MEAL_TYPES)[number]>(() =>
+    types.includes('dinner') ? 'dinner' : types[0]
+  )
   const [selectedDays, setSelectedDays] = useState<Set<string>>(() => {
+    if (initialDays) return new Set(initialDays)
     const s = new Set<string>()
     for (const d of days) if (d.getDay() >= 1 && d.getDay() <= 5) s.add(ymd(d)) // Mon–Fri by default
     return s
@@ -169,13 +196,21 @@ export function PlanWeek({ startStr, days, onClose, onApplied, initialUseUp }: {
   async function applyAll() {
     setApplying(true)
     try {
-      for (const c of shown) {
-        await api.planSlot(c.recipeId ? { date: c.date, mealType: c.mealType, recipeId: c.recipeId } : { date: c.date, mealType: c.mealType, title: c.title })
+      // A caller that passed `onApply` owns BOTH halves of the write — the slots and
+      // the grocery rebuild — because it may have to write them somewhere this
+      // screen can't see (the planning step posts them to its own fill endpoint so
+      // the nights come back marked and undoable).
+      if (onApply) {
+        await onApply(shown)
+      } else {
+        for (const c of shown) {
+          await api.planSlot(c.recipeId ? { date: c.date, mealType: c.mealType, recipeId: c.recipeId } : { date: c.date, mealType: c.mealType, title: c.title })
+        }
+        // "& build list": rebuild the grocery from the new week's dinners so items
+        // are linked to the planned recipes (otherwise the By-meal view stays empty
+        // / shows stale items from a previous plan).
+        await api.rebuildGrocery(startStr).catch(() => {})
       }
-      // "& build list": rebuild the grocery from the new week's dinners so items
-      // are linked to the planned recipes (otherwise the By-meal view stays empty
-      // / shows stale items from a previous plan).
-      await api.rebuildGrocery(startStr).catch(() => {})
       onApplied()
       onClose()
     } finally {
@@ -195,12 +230,18 @@ export function PlanWeek({ startStr, days, onClose, onApplied, initialUseUp }: {
       <div className="plan-config">
         <div className="plan-title wf-serif">Plan my week</div>
         <div className="tiny muted plan-sub">Tell Waffled the guardrails — it drafts the meals and the grocery list in one go.</div>
-        <div className="flabel">Plan which meal?</div>
-        <div className="seg seg-plantype">
-          {MEAL_TYPES.map((m) => (
-            <button key={m} type="button" className={mealType === m ? 'on' : ''} onClick={() => setMealType(m)}>{MEAL_LABEL[m]}</button>
-          ))}
-        </div>
+        {/* A single allowed meal is not a choice — the segment goes away rather than
+            sitting there as one permanently-selected button. */}
+        {types.length > 1 && (
+          <>
+            <div className="flabel">Plan which meal?</div>
+            <div className="seg seg-plantype">
+              {types.map((m) => (
+                <button key={m} type="button" className={mealType === m ? 'on' : ''} onClick={() => setMealType(m)}>{MEAL_LABEL[m]}</button>
+              ))}
+            </div>
+          </>
+        )}
 
         <div className="flabel">Which days?</div>
         <div className="plan-days">

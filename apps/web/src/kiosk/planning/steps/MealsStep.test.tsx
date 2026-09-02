@@ -85,7 +85,16 @@ const FILLED = [day(3), day(5), day(6)].map((d) => ({ date: d, entryId: `auto-${
 
 const calls: { url: string; method: string; body: Record<string, unknown> | null }[] = []
 
-function mockApi(opts: { view?: PlanningMealsView; recipes?: { id: string; title: string }[] } = {}) {
+// A title-only recipe: every other field is null/absent, exactly as a recipe somebody
+// has just typed a name for arrives. The picker's search must still find it — a
+// predicate over one of those nulls is what silently dropped the row.
+const titleOnly = (id: string, title: string) => ({ id, title })
+
+// What the shared planner drafts. Keyed by date so the mock answers for whichever
+// nights the planner asked about — never a fixed week of its own.
+const PICKS: Record<string, string> = { [day(3)]: 'Chili', [day(5)]: 'Stir fry', [day(6)]: 'Soup' }
+
+function mockApi(opts: { view?: PlanningMealsView; recipes?: { id: string; title: string }[] | (() => { id: string; title: string }[]) } = {}) {
   calls.length = 0
   let view = opts.view ?? baseView()
   globalThis.fetch = vi.fn(async (url: string, init?: RequestInit) => {
@@ -94,8 +103,26 @@ function mockApi(opts: { view?: PlanningMealsView; recipes?: { id: string; title
     const body = init?.body ? JSON.parse(String(init.body)) : null
     calls.push({ url: u, method, body })
 
+    // The shared "Plan my week" planner, drafting for exactly the dates it asked
+    // about — which this step narrows to the empty nights.
+    if (u.includes('/api/meals/plan-week')) {
+      const dates = (body?.dates as string[]) ?? []
+      return {
+        ok: true,
+        json: async () => ({
+          start: WEEK,
+          mealType: 'dinner',
+          via: 'test',
+          suggestions: dates.map((d) => ({
+            date: d, mealType: 'dinner', title: PICKS[d] ?? 'Something', recipeId: `rr-${d}`,
+            emoji: '🥘', minutes: 30, servings: 4, note: null,
+          })),
+        }),
+      }
+    }
     if (u.includes('/api/recipes')) {
-      return { ok: true, json: async () => ({ recipes: opts.recipes ?? [{ id: 'r-9', title: 'Chili', emoji: '🌶️' }] }) }
+      const r = typeof opts.recipes === 'function' ? opts.recipes() : opts.recipes
+      return { ok: true, json: async () => ({ recipes: r ?? [titleOnly('r-9', 'Chili')] }) }
     }
     if (u.includes('/api/persons')) {
       return { ok: true, json: async () => ({ persons: [{ id: 'p-kelly', name: 'Kelly', avatarEmoji: '🦊' }, { id: 'p-kevin', name: 'Kevin', avatarEmoji: '🐻' }] }) }
@@ -152,6 +179,21 @@ function draw(p: StepBodyProps = props()) {
 
 const sent = (m: string, frag: string) => calls.filter((c) => c.method === m && c.url.includes(frag))
 const nights = () => Array.from(document.querySelectorAll('.wpm-night'))
+
+// "Plan the rest for me" no longer drafts silently — it opens the SHARED week
+// planner (apps/web/src/kiosk/components/PlanWeek.tsx), which is where the
+// guardrails and the preferences box live. So every fill in these tests is the same
+// three moves the family makes: open it, draft, approve.
+const openPlanner = async () => {
+  fireEvent.click(within(screen.getByTestId('foot')).getByRole('button', { name: /plan the rest for me/i }))
+  return (await screen.findByRole('dialog', { name: /plan the rest of the week/i })) as HTMLElement
+}
+async function planAndApply() {
+  const planner = await openPlanner()
+  fireEvent.click(within(planner).getByRole('button', { name: /^plan my week$/i }))
+  const apply = await within(planner).findByRole('button', { name: /add week & build list/i })
+  fireEvent.click(apply)
+}
 
 beforeEach(() => setDecisionData.mockClear())
 
@@ -300,7 +342,7 @@ describe('meals step · who is shopping', () => {
 })
 
 describe('meals step · plan the rest for me', () => {
-  it('offers the fill in the FOOTER, and fills only the empty nights', async () => {
+  it('reuses the shared week planner rather than drafting behind a bare button', async () => {
     mockApi()
     draw()
     await screen.findByText('Pasta bake')
@@ -311,12 +353,54 @@ describe('meals step · plan the rest for me', () => {
     expect(fill.className).toContain('btn-ai')
     fireEvent.click(fill)
 
-    await waitFor(() => expect(sent('POST', '/meals/fill')).toHaveLength(1))
-    // The week it fills is the one the shell handed it.
-    expect(sent('POST', '/meals/fill')[0].body).toEqual({ weekStart: WEEK })
+    // What opens is PlanWeek itself — proved by the things this step never built:
+    // the guardrails and the free-text preferences box.
+    const planner = await screen.findByRole('dialog', { name: /plan the rest of the week/i })
+    expect(within(planner).getByText(/keep in mind/i)).toBeTruthy()
+    expect(within(planner).getByPlaceholderText(/lottie skips spicy/i)).toBeTruthy()
+    expect(within(planner).getByRole('switch', { name: /try something new/i })).toBeTruthy()
+    // Nothing is written just by opening it.
+    expect(sent('POST', '/meals/fill')).toHaveLength(0)
+  })
 
-    // The three that were empty are now filled AND marked as auto-filled; the four
-    // that were already set are untouched.
+  it('offers the planner ONLY the empty nights, and asks the model for just those', async () => {
+    mockApi()
+    draw()
+    await screen.findByText('Pasta bake')
+    const planner = await openPlanner()
+
+    // Three empty nights ⇒ three day chips. A chip for a night somebody already
+    // decided would draft a dish the fill then refuses to write — a silent no-op.
+    expect(planner.querySelectorAll('.plan-day-chip')).toHaveLength(3)
+    expect(within(planner).getByText(/three empty nights/i)).toBeTruthy()
+    // Dinner is the only meal this step plans, so the meal segment is gone rather
+    // than offering a Lunch that could never be written.
+    expect(planner.querySelector('.seg-plantype')).toBeNull()
+
+    fireEvent.click(within(planner).getByRole('button', { name: /^plan my week$/i }))
+    await waitFor(() => expect(sent('POST', '/api/meals/plan-week')).toHaveLength(1))
+    expect(sent('POST', '/api/meals/plan-week')[0].body).toMatchObject({
+      start: WEEK, mealType: 'dinner', dates: [day(3), day(5), day(6)],
+    })
+  })
+
+  it("applies the approved week through the step's own fill, and marks what it filled", async () => {
+    mockApi()
+    draw()
+    await screen.findByText('Pasta bake')
+    await planAndApply()
+
+    // NOT through POST /api/meals/plan: only the step's fill can refuse a night
+    // somebody already decided AND hand back the receipt the undo checks.
+    await waitFor(() => expect(sent('POST', '/meals/fill')).toHaveLength(1))
+    expect(calls.filter((c) => c.method === 'POST' && /\/api\/meals\/plan$/.test(c.url))).toHaveLength(0)
+    const body = sent('POST', '/meals/fill')[0].body!
+    expect(body.weekStart).toBe(WEEK)
+    expect((body.cards as { date: string }[]).map((c) => c.date)).toEqual([day(3), day(5), day(6)])
+
+    // The planner closes back onto the week, the three that were empty are now
+    // filled AND marked, and the four already set are untouched.
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /plan the rest of the week/i })).toBeNull())
     await screen.findByText('Chili')
     expect(document.querySelectorAll('.wpm-dish.auto')).toHaveLength(3)
     expect(screen.getByText('Pasta bake')).toBeTruthy()
@@ -331,7 +415,7 @@ describe('meals step · plan the rest for me', () => {
     mockApi()
     draw()
     await screen.findByText('Pasta bake')
-    fireEvent.click(within(screen.getByTestId('foot')).getByRole('button', { name: /plan the rest for me/i }))
+    await planAndApply()
 
     const undo = await within(screen.getByTestId('foot')).findByRole('button', { name: /undo the three/i })
     // One control, not two: the fill is gone while there is something to undo.
@@ -350,7 +434,7 @@ describe('meals step · plan the rest for me', () => {
     mockApi()
     draw()
     await screen.findByText('Pasta bake')
-    fireEvent.click(within(screen.getByTestId('foot')).getByRole('button', { name: /plan the rest for me/i }))
+    await planAndApply()
 
     await waitFor(() => expect(setDecisionData).toHaveBeenCalledWith({ autoFilled: [day(3), day(5), day(6)] }))
     fireEvent.click(await within(screen.getByTestId('foot')).findByRole('button', { name: /undo the three/i }))
@@ -378,6 +462,105 @@ describe('meals step · plan the rest for me', () => {
     const foot = within(screen.getByTestId('foot'))
     expect(foot.queryByRole('button', { name: /undo the/i })).toBeNull()
     expect((foot.getByRole('button', { name: /plan the rest for me/i }) as HTMLButtonElement).disabled).toBe(true)
+  })
+})
+
+// The bug the family hit: "why didn't this pull from my recipes? I added one and
+// started typing and nothing happened." Two things were wrong and both are covered
+// here — the field never filtered anything, and the library was cached behind a
+// truthy empty array so a recipe added afterwards never appeared.
+describe('meals step · picking a dish from the library', () => {
+  const library = () => [titleOnly('r-9', 'Chili'), titleOnly('r-8', 'Fish tacos'), titleOnly('r-7', 'Soup')]
+
+  const openNight = async (i: number) => {
+    fireEvent.click(nights()[i].querySelector('.wpm-dish')!)
+    const card = document.querySelector('.modal-card') as HTMLElement
+    await within(card).findByRole('button', { name: /chili/i })
+    return card
+  }
+
+  it('filters the library as you type, and picking one plans that night', async () => {
+    mockApi({ recipes: library() })
+    draw()
+    await screen.findByText('Pasta bake')
+    const card = await openNight(5)
+    expect(card.querySelectorAll('.wpm-recipe')).toHaveLength(3)
+
+    // One field, two jobs — so it has to actually narrow the list.
+    fireEvent.change(within(card).getByLabelText(/search your recipes/i), { target: { value: 'chi' } })
+    expect(card.querySelectorAll('.wpm-recipe')).toHaveLength(1)
+    expect(within(card).getByRole('button', { name: /chili/i })).toBeTruthy()
+
+    fireEvent.click(within(card).getByRole('button', { name: /chili/i }))
+    await waitFor(() => expect(sent('POST', '/api/meals/plan')).toHaveLength(1))
+    // Picking a recipe beats the text: the night is the recipe, not "chi".
+    expect(sent('POST', '/api/meals/plan')[0].body).toMatchObject({ date: day(5), mealType: 'dinner', recipeId: 'r-9' })
+    expect(sent('POST', '/api/meals/plan')[0].body!.title).toBeNull()
+  })
+
+  it('finds a recipe that has nothing but a title', async () => {
+    // Every other field is absent, which is how a just-created recipe arrives — the
+    // search must filter the nulls out rather than let one drop the row.
+    mockApi({ recipes: [titleOnly('r-1', 'Dummy recipe')] })
+    draw()
+    await screen.findByText('Pasta bake')
+    fireEvent.click(nights()[5].querySelector('.wpm-dish')!)
+    const card = document.querySelector('.modal-card') as HTMLElement
+    await within(card).findByRole('button', { name: /dummy recipe/i })
+    fireEvent.change(within(card).getByLabelText(/search your recipes/i), { target: { value: 'dumm' } })
+    expect(within(card).getByRole('button', { name: /dummy recipe/i })).toBeTruthy()
+  })
+
+  it('picks up a recipe added since the step was first opened', async () => {
+    // The old picker cached the list in module state behind `if (recipes) return` —
+    // and an EMPTY library is a truthy `[]`, so a household that opened the picker
+    // before adding its first recipe was told "no recipes yet" for good.
+    let lib: { id: string; title: string }[] = []
+    mockApi({ recipes: () => lib })
+    draw()
+    await screen.findByText('Pasta bake')
+
+    fireEvent.click(nights()[5].querySelector('.wpm-dish')!)
+    let card = document.querySelector('.modal-card') as HTMLElement
+    expect(await within(card).findByText(/recipe library is empty/i)).toBeTruthy()
+    fireEvent.click(within(card).getByRole('button', { name: /^cancel$/i }))
+
+    lib = [titleOnly('r-1', 'Dummy recipe')]
+    fireEvent.click(nights()[6].querySelector('.wpm-dish')!)
+    card = document.querySelector('.modal-card') as HTMLElement
+    expect(await within(card).findByRole('button', { name: /dummy recipe/i })).toBeTruthy()
+  })
+
+  it('says the library is empty plainly, and still plans what you type', async () => {
+    mockApi({ recipes: [] })
+    draw()
+    await screen.findByText('Pasta bake')
+    fireEvent.click(nights()[5].querySelector('.wpm-dish')!)
+    const card = document.querySelector('.modal-card') as HTMLElement
+
+    // Plain, and it says what to do instead — not a bare "nothing here".
+    expect(await within(card).findByText(/your recipe library is empty/i)).toBeTruthy()
+    fireEvent.change(within(card).getByLabelText(/search your recipes/i), { target: { value: 'Leftovers' } })
+    fireEvent.click(within(card).getByRole('button', { name: /plan it/i }))
+    await waitFor(() => expect(sent('POST', '/api/meals/plan')).toHaveLength(1))
+    expect(sent('POST', '/api/meals/plan')[0].body).toMatchObject({ date: day(5), title: 'Leftovers', recipeId: null })
+  })
+
+  it('distinguishes "no match" from "no recipes", and still plans the typed dish', async () => {
+    mockApi({ recipes: library() })
+    draw()
+    await screen.findByText('Pasta bake')
+    const card = await openNight(5)
+
+    fireEvent.change(within(card).getByLabelText(/search your recipes/i), { target: { value: 'zzz' } })
+    // A household with three recipes must never be told it has none.
+    expect(within(card).queryByText(/library is empty/i)).toBeNull()
+    expect(within(card).getByText(/no recipe matches/i)).toBeTruthy()
+    expect(card.querySelectorAll('.wpm-recipe')).toHaveLength(0)
+
+    fireEvent.click(within(card).getByRole('button', { name: /plan it/i }))
+    await waitFor(() => expect(sent('POST', '/api/meals/plan')).toHaveLength(1))
+    expect(sent('POST', '/api/meals/plan')[0].body).toMatchObject({ date: day(5), title: 'zzz', recipeId: null })
   })
 })
 
@@ -412,7 +595,7 @@ describe('meals step · overwriting a set night', () => {
     mockApi()
     draw()
     await screen.findByText('Pasta bake')
-    fireEvent.click(within(screen.getByTestId('foot')).getByRole('button', { name: /plan the rest for me/i }))
+    await planAndApply()
     await screen.findByText('Chili')
     expect(document.querySelectorAll('.wpm-dish.auto')).toHaveLength(3)
 

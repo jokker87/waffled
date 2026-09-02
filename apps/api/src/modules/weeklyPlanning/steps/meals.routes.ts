@@ -4,7 +4,7 @@ import { moduleRoutes, requireModule } from '../../../platform/route-guards'
 import { requireCapability } from '../../../platform/permissions'
 import { assertPersonInHousehold } from '../../../platform/household-refs'
 import { resolveWeekStart } from '../weeklyPlanning'
-import { mealsStepView, fillEmptyDinners, undoFilledDinners, parseFilledNights, setShoppingTrip } from './meals'
+import { mealsStepView, fillEmptyDinners, undoFilledDinners, parseFilledNights, parsePlanCards, setShoppingTrip } from './meals'
 
 type Api = ReturnType<typeof createAPI>
 
@@ -33,11 +33,20 @@ export function registerMealsStepRoutes(api: Api): void {
 
   // "Plan the rest for me" — fills ONLY the nights with no dinner, and hands back
   // exactly what it wrote so the same footer slot can become "Undo the three".
+  //
+  // `cards` is the week the family already approved in the shared "Plan my week"
+  // planner. It goes through THIS route rather than POST /api/meals/plan for the two
+  // things that route can't do: refuse to touch a night somebody already decided, and
+  // hand back the receipt the undo checks. Omit it and the fill drafts for itself.
   api.post('/api/weekly-planning/meals/fill', tenantRoute(async (tenant, req: Request) => {
     await requireModule(tenant, 'meals')
-    const body = (req.body ?? {}) as { weekStart?: unknown }
+    const body = (req.body ?? {}) as { weekStart?: unknown; cards?: unknown }
     const weekStart = await resolveWeekStart(tenant.householdId, body.weekStart)
-    return fillEmptyDinners(tenant, weekStart)
+    // Provided-but-unusable is NOT the same as absent: a caller that sent something
+    // shaped wrong gets nothing written, never a week this server drafted on its own
+    // and the family never approved.
+    const cards = body.cards === undefined ? null : (parsePlanCards(body.cards) ?? [])
+    return fillEmptyDinners(tenant, weekStart, cards)
   }))
 
   // The undo. It takes back what the fill wrote and nothing else: a night somebody has

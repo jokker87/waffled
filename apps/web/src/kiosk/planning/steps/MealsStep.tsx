@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react'
-import { mealsApi, personsApi, planningMealsApi, type Person, type Recipe } from '../../../lib/api'
+import { mealsApi, personsApi, planningMealsApi, useRecipes, type Person, type Recipe } from '../../../lib/api'
 import { isEatingOut } from '../../components/MealsColumn'
+import { PlanWeek } from '../../components/PlanWeek'
 import type {
+  PlanCard,
   PlanningMealsView,
   PlanningMealsNight,
   PlanningNightDinner,
@@ -54,12 +56,15 @@ interface StepState {
   // just happened rather than only what is there. Measured, not claimed: the item
   // count before the fill against the count after.
   groceryAdded: number | null
-  recipes: Recipe[] | null
-  // The household, for the shopper picker. Loaded on demand like the recipes.
+  // The household, for the shopper picker. Loaded on demand.
   people: Person[] | null
+  // Whether the shared "Plan my week" planner is open over the step. It lives HERE
+  // and not in a `useState` because the button that opens it is in `FooterExtra` and
+  // the planner renders from `Body` — two sibling trees, same store.
+  planner: boolean
 }
 
-const EMPTY: StepState = { key: '', view: null, loading: true, error: null, busy: false, filled: [], autoMarks: [], kept: [], groceryAdded: null, recipes: null, people: null }
+const EMPTY: StepState = { key: '', view: null, loading: true, error: null, busy: false, filled: [], autoMarks: [], kept: [], groceryAdded: null, people: null, planner: false }
 
 let state: StepState = EMPTY
 const listeners = new Set<() => void>()
@@ -79,7 +84,7 @@ function crumbDates(data: Record<string, unknown> | undefined): string[] {
 }
 
 async function load(key: string, weekStart: string, seed: string[]) {
-  set({ ...EMPTY, key, recipes: state.recipes, people: state.people })
+  set({ ...EMPTY, key, people: state.people })
   try {
     const view = await planningMealsApi.get(weekStart)
     if (state.key !== key) return // a later week won the race
@@ -137,12 +142,23 @@ function useMealsStep(p: StepBodyProps, primary = false): StepState {
 
 // ── The two writes the footer drives ─────────────────────────────────────────────
 
-async function runFill(weekStart: string, refresh: () => void) {
-  if (state.busy) return
+// The week the family approved in the planner, applied. It goes through the step's
+// own fill endpoint rather than the planner's usual per-slot writes for the two
+// things only that endpoint can do: refuse a night somebody already decided, and
+// hand back the receipt the undo checks (see `filled` above — a claim the client
+// rebuilt from the view proves nothing).
+async function applyPlan(weekStart: string, cards: PlanCard[], refresh: () => void) {
+  // The planner closes as soon as this resolves, so bailing out quietly would report
+  // a week that was never written. Another write being in flight (a shopper being
+  // assigned, a night being planned) is the only way here, and it has to SAY so.
+  if (state.busy) {
+    set({ error: "Something else was still saving — the week wasn't planned. Try again." })
+    return
+  }
   set({ busy: true, error: null, kept: [] })
   const groceriesBefore = state.view?.groceries?.items ?? null
   try {
-    const r = await planningMealsApi.fill(weekStart)
+    const r = await planningMealsApi.fill(weekStart, cards)
     const fresh = new Set(r.filled.map((f) => f.date))
     const after = r.view.groceries?.items ?? null
     const added = groceriesBefore !== null && after !== null ? after - groceriesBefore : null
@@ -250,6 +266,17 @@ function tripLabel(t: PlanningShoppingTrip | null): string {
   return `${t.personAvatar ?? '\u{1F464}'} ${t.personName} shops ${when}`
 }
 
+// What a typed search is matched against — the SAME fields the Recipes library
+// searches, so "cucumber" finds the same recipe on both screens. Every one of them is
+// nullable and a brand-new recipe may have only a title, so this filters the nulls out
+// rather than letting one drop the row.
+function haystack(r: Recipe): string {
+  return [r.title, r.cuisine, r.protein, r.base, r.mealType, r.effort, r.cookMethod, r.collection, ...(r.tags ?? []), ...(r.vegetables ?? []), ...(r.dietary ?? [])]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase()
+}
+
 // "Undo the three" is the design's own phrasing, so small counts read as words.
 const WORDS = ['none', 'one', 'two', 'three', 'four', 'five', 'six', 'seven']
 const countWord = (n: number) => WORDS[n] ?? String(n)
@@ -275,8 +302,14 @@ function Body(p: StepBodyProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoDates])
 
-  // The week changed under us — close a modal that names a night in the old one.
-  useEffect(() => { setEditing(null); setShopping(false) }, [s.key])
+  // The week changed under us — close a modal that names a night in the old one,
+  // and the planner, which was drafting the week we just left.
+  useEffect(() => { setEditing(null); setShopping(false); if (state.planner) set({ planner: false }) }, [s.key])
+
+  // The nights the planner is allowed to touch. Noon-local, like every other date on
+  // this screen: a bare YYYY-MM-DD parses as UTC and PlanWeek reads the day back with
+  // local getters, which west of Greenwich would offer the wrong weekday.
+  const emptyDays = useMemo(() => (s.view?.emptyDates ?? []).map(at), [s.view?.emptyDates])
 
   if (s.loading) return <div className="wpm-msg">Reading the week…</div>
   if (!s.view) return <div className="wpm-msg">{s.error ?? "Couldn't read this week's meals."}</div>
@@ -346,13 +379,40 @@ function Body(p: StepBodyProps) {
       )}
       {s.error && <div className="wpm-note wpm-note-bad">{s.error}</div>}
 
+      {/* "Plan the rest for me" opens the planner the Meals screen already has —
+          the guardrails, the preferences box, reshuffle, swap and lock — rather than
+          a second, worse one. It is narrowed to this step's promise in two ways: the
+          only day chips are the EMPTY nights, and applying hands the approved cards
+          to the step's own fill endpoint, which is what keeps them marked, undoable
+          and unable to overwrite a night somebody already decided. */}
+      {s.planner && (
+        <div className="wpm-planner" role="dialog" aria-label="Plan the rest of the week">
+          <div className="wpm-planner-head">
+            <button type="button" className="pill wpm-planner-back" onClick={() => set({ planner: false })}>
+              ‹ Back to the week
+            </button>
+            <span className="wpm-planner-n">
+              Planning the {countWord(emptyDays.length)} empty {emptyDays.length === 1 ? 'night' : 'nights'} — the rest stay as they are
+            </span>
+          </div>
+          <PlanWeek
+            startStr={p.weekStart}
+            days={emptyDays}
+            initialDays={s.view.emptyDates}
+            mealTypes={['dinner']}
+            onClose={() => set({ planner: false })}
+            onApplied={() => {}}
+            onApply={(cards) => applyPlan(p.weekStart, cards, p.refresh)}
+          />
+        </div>
+      )}
+
       {night && (
         <NightModal
           // Keyed by the night so switching nights starts with a fresh text field
           // rather than carrying the last night's half-typed dish across.
           key={night.date}
           night={night}
-          recipes={s.recipes}
           busy={s.busy}
           onClose={() => setEditing(null)}
           onPick={(slot) => { setEditing(null); void planNight(p.weekStart, night.date, slot, p.refresh) }}
@@ -430,22 +490,30 @@ function NightColumn({ night, auto, disabled, onOpen }: {
 // that can be: the library, a free-text dish (leftovers, eating out), and a way to
 // empty the slot. The Meals screen is where a week gets built; this is where one night
 // gets fixed.
-function NightModal({ night, recipes, busy, onClose, onPick, onClear }: {
+//
+// ONE FIELD, TWO JOBS — and it has to be, because there is only room for one. What
+// you type narrows the library as you go AND is the dish if nothing there fits, so
+// "chi" filters to Chili while "chi" + Plan it makes the night literally "chi". The
+// label says both; picking a recipe always beats the text.
+//
+// The library is read through `useRecipes`, the same hook the Recipes screen and the
+// week planner use — so it fetches when the picker opens and refetches on the
+// `recipes` bus topic. The bug that made this necessary: the list used to be cached
+// in this file's module state behind `if (recipes) return`, and an EMPTY library is a
+// truthy `[]`, so a household that opened the picker before adding its first recipe
+// was told "no recipes yet" for the rest of the page's life.
+function NightModal({ night, busy, onClose, onPick, onClear }: {
   night: PlanningMealsNight
-  recipes: Recipe[] | null
   busy: boolean
   onClose: () => void
   onPick: (slot: { recipeId?: string | null; title?: string | null }) => void
   onClear: () => void
 }) {
   const [title, setTitle] = useState('')
+  const { recipes, loading, error } = useRecipes()
 
-  useEffect(() => {
-    if (recipes) return
-    let alive = true
-    mealsApi.recipes().then((r) => { if (alive) set({ recipes: r.recipes }) }).catch(() => { if (alive) set({ recipes: [] }) })
-    return () => { alive = false }
-  }, [recipes])
+  const q = title.trim().toLowerCase()
+  const matches = useMemo(() => (q ? recipes.filter((r) => haystack(r).includes(q)) : recipes), [recipes, q])
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -457,20 +525,30 @@ function NightModal({ night, recipes, busy, onClose, onPick, onClear }: {
         </div>
 
         <label className="field">
-          <span>Something simple</span>
+          <span>Search your recipes, or type any dish</span>
           <input
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            placeholder="Leftovers, eating out, breakfast for dinner…"
+            placeholder="Chili · leftovers · eating out…"
+            aria-label="Search your recipes, or type any dish"
             onKeyDown={(e) => { if (e.key === 'Enter' && title.trim()) onPick({ title: title.trim(), recipeId: null }) }}
           />
         </label>
 
         <div className="wpm-modal-h">From your recipes</div>
         <div className="wpm-recipes">
-          {recipes === null && <div className="wpm-msg">Loading…</div>}
-          {recipes?.length === 0 && <div className="wpm-msg">No recipes yet — type a dish above instead.</div>}
-          {recipes?.map((r) => (
+          {loading && <div className="wpm-msg">Loading…</div>}
+          {!loading && error && <div className="wpm-msg">Couldn&apos;t read your recipes — reload and try again.</div>}
+          {/* Three different silences, and they must not read alike: an empty
+              library, a search with no hit, and a list. Saying "no recipes yet" to
+              somebody who has forty of them is what made this look broken. */}
+          {!loading && !error && recipes.length === 0 && (
+            <div className="wpm-msg">Your recipe library is empty — whatever you type above is planned as the dish.</div>
+          )}
+          {!loading && !error && recipes.length > 0 && matches.length === 0 && (
+            <div className="wpm-msg">No recipe matches “{title.trim()}” — Plan it uses what you typed.</div>
+          )}
+          {matches.map((r) => (
             <button key={r.id} type="button" className="wpm-recipe" disabled={busy} onClick={() => onPick({ recipeId: r.id, title: null })}>
               <span aria-hidden>{r.emoji ?? '🍽️'}</span>
               {r.title}
@@ -612,7 +690,9 @@ function FooterExtra(p: StepBodyProps) {
       className="btn btn-ai wpm-act"
       disabled={disabled || !empties}
       title={empties ? `Fills the ${countWord(empties)} empty ${empties === 1 ? 'night' : 'nights'}` : 'Every night is planned'}
-      onClick={() => void runFill(p.weekStart, p.refresh)}
+      // Opens the week planner rather than drafting silently: the same screen the
+      // Meals tab uses, so the guardrails and the preferences box are here too.
+      onClick={() => set({ planner: true })}
     >
       <span aria-hidden>✨</span> Plan the rest for me
     </button>

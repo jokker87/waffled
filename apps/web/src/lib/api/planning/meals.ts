@@ -7,6 +7,7 @@
 // plan and must not grow a second way to write one.
 import { apiGet, apiSend } from '../client'
 import { emit } from '../bus'
+import type { PlanCard } from '../meals'
 
 export interface PlanningNightEvent {
   id: string
@@ -96,8 +97,13 @@ export const planningMealsApi = {
       `/api/weekly-planning/meals?weekStart=${encodeURIComponent(weekStart)}${choreId ? `&choreId=${encodeURIComponent(choreId)}` : ''}`
     ),
   // "Plan the rest for me" — fills only the nights with no dinner.
-  fill: (weekStart: string) =>
-    apiSend<PlanningMealsFill>('POST', '/api/weekly-planning/meals/fill', { weekStart })
+  //
+  // `cards` is the week the family approved in the shared "Plan my week" planner.
+  // It is applied HERE rather than through POST /api/meals/plan because only this
+  // route can refuse a night somebody already decided and hand back the receipt the
+  // undo checks. Omitted, the server drafts the empties itself.
+  fill: (weekStart: string, cards?: PlanCard[]) =>
+    apiSend<PlanningMealsFill>('POST', '/api/weekly-planning/meals/fill', cards ? { weekStart, cards } : { weekStart })
       .then((r) => { emit('meals'); emit('grocery'); return r }),
   undo: (weekStart: string, filled: PlanningFilledNight[]) =>
     apiSend<PlanningMealsUndo>('POST', '/api/weekly-planning/meals/undo', { weekStart, filled })

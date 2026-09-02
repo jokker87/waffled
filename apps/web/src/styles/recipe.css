@@ -712,6 +712,39 @@
 .recipes-count {
   font-weight: 600;
 }
+
+/* An empty library is a whole screen, not a line of muted text under dead controls.
+   One thing to say and one thing to do, centred — which is also why the topbar drops
+   its own "New recipe" while this is showing: two primaries for the same action is
+   what made the old version read as a mistake. */
+.recipes-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 6px;
+  padding: 40px 20px 60px;
+}
+.recipes-empty-e {
+  font-size: 52px;
+  line-height: 1;
+}
+.recipes-empty-t {
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  margin-top: 8px;
+}
+.recipes-empty-s {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink-3);
+  max-width: 380px;
+  line-height: 1.5;
+  margin-bottom: 12px;
+}
 .recipes-clear {
   cursor: pointer;
 }

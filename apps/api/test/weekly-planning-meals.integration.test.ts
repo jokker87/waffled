@@ -317,6 +317,87 @@ describe('weekly planning · meals · plan the rest for me', () => {
     expect(res.statusCode).toBe(200)
     expect(json(res).cleared).toEqual([])
   })
+
+  // The web step no longer drafts behind a bare button: it opens the shared "Plan my
+  // week" planner, and what the family approves there comes back here as `cards`.
+  // That is deliberate — POST /api/meals/plan could apply them, but it can neither
+  // refuse a night somebody already decided nor hand back the receipt the undo
+  // checks. So the two guarantees have to survive the approved-week path too.
+  it('applies a week the family approved — and STILL only the empty nights', async () => {
+    const before = (await stepView()).nights.filter((n) => n.dinner)
+    // A card for all seven nights, four of which somebody already decided.
+    const cards = days.map((d, i) => ({ date: d, mealType: 'dinner', title: `Approved ${i}`, recipeId: null }))
+
+    const res = await call('POST', '/api/weekly-planning/meals/fill', kevin, { weekStart, cards })
+    expect(res.statusCode).toBe(200)
+    const wrote: Filled[] = json(res).filled
+    expect(wrote.map((f) => f.date)).toEqual([days[3], days[5], days[6]])
+    // What was written is what the family approved, not something re-drafted here.
+    expect(wrote.map((f) => f.title)).toEqual(['Approved 3', 'Approved 5', 'Approved 6'])
+
+    const view: StepView = json(res).view
+    for (const b of before) {
+      const a = view.nights.find((n) => n.date === b.date)!
+      expect(a.dinner!.entryId).toBe(b.dinner!.entryId)
+      expect(a.dinner!.title).toBe(b.dinner!.title)
+    }
+
+    // …and the receipt is real: the undo it hands back clears exactly those three.
+    const undo = await call('POST', '/api/weekly-planning/meals/undo', kevin, { weekStart, filled: wrote })
+    expect(json(undo).cleared.sort()).toEqual([days[3], days[5], days[6]])
+    expect((await stepView()).emptyDates).toEqual([days[3], days[5], days[6]])
+  })
+
+  it('writes nothing when the approved week arrives malformed', async () => {
+    // Absent `cards` means "draft it for me". Anything else that isn't a usable list
+    // must NOT fall through to that — the family would get a week they never saw.
+    const res = await call('POST', '/api/weekly-planning/meals/fill', kevin, { weekStart, cards: 'nope' })
+    expect(res.statusCode).toBe(200)
+    expect(json(res).filled).toEqual([])
+    expect((json(res).view as StepView).emptyDates).toEqual([days[3], days[5], days[6]])
+  })
+
+  it('drops an approved card that names a meal this step does not plan', async () => {
+    // The picker is narrowed to dinner, so a lunch card can only arrive from a
+    // client that ignored that — writing it as a dinner would move somebody's lunch
+    // to 6pm without saying so.
+    const res = await call('POST', '/api/weekly-planning/meals/fill', kevin, {
+      weekStart,
+      cards: [
+        { date: days[3], mealType: 'lunch', title: 'Sandwiches', recipeId: null },
+        { date: days[5], mealType: 'dinner', title: 'Chili night', recipeId: null },
+      ],
+    })
+    expect(res.statusCode).toBe(200)
+    expect((json(res).filled as Filled[]).map((f) => f.date)).toEqual([days[5]])
+    expect((json(res).view as StepView).emptyDates).toEqual([days[3], days[6]])
+
+    // Put the week back for the tests below.
+    await call('DELETE', `/api/meals/plan?date=${days[5]}&mealType=dinner`, kevin)
+    expect((await stepView()).emptyDates).toEqual([days[3], days[5], days[6]])
+  })
+})
+
+// The night picker's library comes straight off GET /api/recipes — the same read the
+// Recipes screen uses. Asserted here because the family's report ("I added a dummy
+// recipe and still nothing came up") could have been a broken read; it wasn't, which
+// is what pins the fix to the client.
+describe('weekly planning · meals · the picker\'s library', () => {
+  it('lists a recipe that has nothing but a title', async () => {
+    const res = await call('POST', '/api/recipes', kevin, { title: 'Dummy recipe' })
+    expect(res.statusCode).toBe(201)
+    const id = json(res).recipe.id
+
+    const list = await call('GET', '/api/recipes', kevin)
+    expect(list.statusCode).toBe(200)
+    const found = (json(list).recipes as { id: string; title: string }[]).find((r) => r.id === id)
+    expect(found?.title).toBe('Dummy recipe')
+
+    // …and it can be planned onto a night by id, which is what the picker does.
+    expect((await planDinner(days[3], { recipeId: id })).statusCode).toBe(200)
+    expect((await stepView()).nights[3].dinner!.title).toBe('Dummy recipe')
+    await call('DELETE', `/api/meals/plan?date=${days[3]}&mealType=dinner`, kevin)
+  })
 })
 
 describe('weekly planning · meals · who is shopping', () => {

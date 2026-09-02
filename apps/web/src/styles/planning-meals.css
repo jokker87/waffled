@@ -172,3 +172,33 @@
 .wpm-recipe:disabled { opacity: 0.55; cursor: default; }
 .wpm-modal-f { display: flex; align-items: center; gap: 9px; }
 .wpm-modal-sp { flex: 1; }
+
+/* ── "Plan the rest for me": the shared week planner, over the step ─────────── */
+/* The step does NOT own a planner — it opens the one the Meals screen has, whole:
+   guardrails, the preferences box, reshuffle, swap, lock. It sits over the whole
+   session (including the topbar) because `.plan-screen` is a full-screen two-column
+   layout and squeezing it into the step body would be the "worse copy" this reuse
+   exists to avoid. The one thing added is the header: PlanWeek's own way out is the
+   topbar this overlay covers, and it needs to say what the planner is narrowed to. */
+.wpm-planner {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  padding: 12px 0 0;
+}
+.wpm-planner-head {
+  display: flex; align-items: center; gap: 14px; flex: none;
+  padding: 0 30px 12px;
+}
+.wpm-planner-back { cursor: pointer; }
+/* The promise, in the one place it can't be missed: the planner only ever offers the
+   empty nights, so "fill only the empties" is what the day chips themselves say. */
+.wpm-planner-n { font-size: 12.5px; font-weight: 650; color: var(--ink-3); }
+.wpm-planner .plan-screen { flex: 1; min-height: 0; }
+@media (max-width: 720px) {
+  .wpm-planner-head { padding: 0 16px 10px; }
+  .wpm-planner-n { display: none; }
+}

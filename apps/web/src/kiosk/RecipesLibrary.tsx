@@ -75,22 +75,7 @@ export function RecipesLibrary() {
     const t = setTimeout(() => setMealQ(q.trim()), 200)
     return () => clearTimeout(t)
   }, [q])
-  const { meals: savedMeals } = useSavedMeals(mealQ || undefined)
-
-  useTopbarFull(
-    () => (
-      <div style={{ display: 'flex', alignItems: 'center', width: '100%', gap: 14 }}>
-        <button className="pill" style={{ cursor: 'pointer' }} onClick={() => navigate('/meals')}>‹ Meals</button>
-        <div className="wf-serif" style={{ fontSize: 20, fontWeight: 600 }}>Recipes</div>
-        {/* The only in-app way to start an empty plate. Deliberately the bare route
-            with no id: the builder creates the meal lazily on the first dish, so
-            abandoning this screen leaves no orphan behind. */}
-        <button className="pill" style={{ marginLeft: 'auto', cursor: 'pointer' }} onClick={() => navigate('/meals/build')}>＋ New meal</button>
-        <button className="pill btn-primary" style={{ color: 'var(--on-accent)', border: 0, cursor: 'pointer' }} onClick={() => navigate('/meals/recipe/new')}>＋ New recipe</button>
-      </div>
-    ),
-    [navigate]
-  )
+  const { meals: savedMeals, loading: mealsLoading } = useSavedMeals(mealQ || undefined)
 
   const collOpts = useMemo(() => distinct(recipes, 'collection'), [recipes])
   const cuisineOpts = useMemo(() => distinct(recipes, 'cuisine'), [recipes])
@@ -137,6 +122,54 @@ export function RecipesLibrary() {
   const anyFilter = structuredFilter || mealsOnly || ql
   function clearAll() {
     setFav(false); setNewOnly(false); setCollections([]); setCuisines([]); setProteins([]); setDiets([]); setQ(''); setMealsOnly(false)
+  }
+
+  // THE LIBRARY IS GENUINELY EMPTY — not merely "nothing is showing". The difference
+  // matters: a search with no hits also shows nothing, and hiding the search box
+  // there would strand somebody with a query they can no longer clear. So this is
+  // gated on both sources being loaded, both being empty, and NOTHING being typed or
+  // toggled. Only then is the search/sort/filter row chrome that cannot do anything,
+  // and only then does the screen become a single invitation.
+  const libraryEmpty = !loading && !error && !mealsLoading && recipes.length === 0 && mealList.length === 0 && !anyFilter
+
+  useTopbarFull(
+    () => (
+      <div style={{ display: 'flex', alignItems: 'center', width: '100%', gap: 14 }}>
+        <button className="pill" style={{ cursor: 'pointer' }} onClick={() => navigate('/meals')}>‹ Meals</button>
+        <div className="wf-serif" style={{ fontSize: 20, fontWeight: 600 }}>Recipes</div>
+        {/* The only in-app way to start an empty plate. Deliberately the bare route
+            with no id: the builder creates the meal lazily on the first dish, so
+            abandoning this screen leaves no orphan behind. */}
+        <button className="pill" style={{ marginLeft: 'auto', cursor: 'pointer' }} onClick={() => navigate('/meals/build')}>＋ New meal</button>
+        {/* ONE primary on the screen. With an empty library the whole page is a call
+            to add the first recipe, so the header's copy of that button would be the
+            second — which is what made the old empty state read as a mistake. */}
+        {!libraryEmpty && (
+          <button className="pill btn-primary" style={{ color: 'var(--on-accent)', border: 0, cursor: 'pointer' }} onClick={() => navigate('/meals/recipe/new')}>＋ New recipe</button>
+        )}
+      </div>
+    ),
+    [navigate, libraryEmpty]
+  )
+
+  if (libraryEmpty) {
+    return (
+      <div className="recipes-lib">
+        {/* No count, no sort, no filters: with nothing to count or narrow they are
+            controls that cannot do their job. One thing to say, one thing to do. */}
+        <div className="recipes-empty">
+          <div className="recipes-empty-e" aria-hidden>🍳</div>
+          <div className="recipes-empty-t wf-serif">No recipes yet</div>
+          <div className="recipes-empty-s">
+            Add your first and it turns up everywhere it&apos;s useful — the meal planner, the
+            grocery list, Cook Mode.
+          </div>
+          <button type="button" className="btn btn-primary" onClick={() => navigate('/meals/recipe/new')}>
+            ＋ New recipe
+          </button>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -216,12 +249,11 @@ export function RecipesLibrary() {
       )}
 
       {error && <div className="muted" style={{ padding: 20 }}>Couldn't load recipes — try reloading or signing in again.</div>}
+      {/* The empty LIBRARY is handled above, as its own screen. What is left here is
+          the empty RESULT — the search and filters are still on show, so the way out
+          is the Clear beside them rather than a second primary jammed mid-sentence. */}
       {!error && !loading && shownCount === 0 && (
-        <div className="muted" style={{ padding: 20, fontWeight: 600 }}>
-          {totalCount === 0 ? (
-            <>No recipes yet — tap <button type="button" className="pill btn-primary" style={{ color: 'var(--on-accent)', border: 0, cursor: 'pointer' }} onClick={() => navigate('/meals/recipe/new')}>＋ New recipe</button> to add your first.</>
-          ) : 'Nothing matches these filters.'}
-        </div>
+        <div className="muted" style={{ padding: 20, fontWeight: 600 }}>Nothing matches these filters.</div>
       )}
 
       <div className="recipes-grid">
