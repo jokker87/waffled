@@ -31,6 +31,7 @@ import { registerMealRoutes } from './modules/meals/meals.routes'
 import { registerEventRoutes } from './modules/events/events'
 import { registerCountdownRoutes } from './modules/countdowns/countdowns'
 import { registerFamilyNightRoutes } from './modules/familyNight/familyNight.routes'
+import { registerWeeklyPlanningRoutes } from './modules/weeklyPlanning/weeklyPlanning.routes'
 import { registerRhythmRoutes } from './modules/rhythms/rhythms.routes'
 import { registerCalendarAiRoutes } from './modules/calendar/calendar-ai'
 import { registerCalendarRoutes } from './modules/calendar/calendars'
@@ -242,6 +243,7 @@ registerCountdownRoutes(api)
 
 // Family Night (/api/family-night…) — optional module
 registerFamilyNightRoutes(api)
+registerWeeklyPlanningRoutes(api)
 
 // Rhythms (/api/rhythms…) — optional module
 registerRhythmRoutes(api)

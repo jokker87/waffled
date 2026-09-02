@@ -30,6 +30,7 @@ const MealBuilder = lazy(() => import('./MealBuilder').then((m) => ({ default: m
 const Lists = lazy(() => import('./Lists').then((m) => ({ default: m.Lists })))
 const Pantry = lazy(() => import('./Pantry').then((m) => ({ default: m.Pantry })))
 const Rhythms = lazy(() => import('./Rhythms').then((m) => ({ default: m.Rhythms })))
+const WeeklyPlanning = lazy(() => import('./WeeklyPlanning').then((m) => ({ default: m.WeeklyPlanning })))
 const Photos = lazy(() => import('./Photos').then((m) => ({ default: m.Photos })))
 const Settings = lazy(() => import('./Settings').then((m) => ({ default: m.Settings })))
 
@@ -95,6 +96,11 @@ export function KioskRoutes() {
         </Route>
         <Route element={<ModuleGate module="rhythms" />}>
           <Route path="rhythms" element={<Rhythms />} />
+        </Route>
+        <Route element={<ModuleGate module="weeklyPlanning" />}>
+          {/* The session presents full-screen (its own chrome replaces the rail's), so
+              it takes a single route and drives which step is on screen itself. */}
+          <Route path="planning" element={<WeeklyPlanning />} />
         </Route>
         <Route path="photos" element={<Photos />} />
         <Route path="settings" element={<Settings />} />

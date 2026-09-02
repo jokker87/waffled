@@ -1,0 +1,179 @@
+/* Weekly Planning — the session shell (WeeklyPlanning.tsx).
+   Built from the shared vocabulary (.btn, .modal-overlay/.modal-card, .wf-serif) plus
+   this module's own chrome. Measurements are the v4 design's (wp4.css `.s4*`), whose
+   tokens are already these tokens — so every colour here is a var and dark mode comes
+   for free. Never hardcode a hex in this file.
+
+   THE POINT OF THE LAYOUT: the step body is the content, and the chrome around it is
+   four things — a step counter, a title, the one question, a progress hair. If a new
+   zone shows up here, it is probably something v4 deliberately removed (the agenda
+   rail, the side column, the capacity read).
+
+   VOCABULARY
+     Lobby      — .wp-lobby*
+     Session    — .wp-head .wp-stepchip .wp-title .wp-ask .wp-week .wp-prog
+                  .wp-body .wp-foot .wp-skip .wp-primary .wp-next
+     Agenda     — .wp-sheet*
+     Record     — .wp-record*
+     Shared     — .wp-screen .wp-empty .wp-placeholder*
+*/
+
+.wp-screen { padding: 24px 30px 40px; }
+.wp-empty { color: var(--ink-3); font-weight: 600; padding: 24px 2px; max-width: 62ch; line-height: 1.5; }
+
+/* ── In session ─────────────────────────────────────────────────────────────── */
+/* The session fills the frame and never scrolls the page: a header row, the body,
+   and a footer pinned to the bottom, so the primary button is in the same place on
+   every step. `100dvh` (not vh) because the phone browser's chrome moves. */
+.wp-in {
+  padding: 0;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  min-height: 100%;
+  height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
+}
+
+.wp-head {
+  display: flex; align-items: center; gap: 18px;
+  padding: 18px 28px 0;
+  position: relative; flex-wrap: wrap;
+}
+.wp-stepchip {
+  display: inline-flex; align-items: center; gap: 7px; flex: none;
+  font: inherit; font-size: 12.5px; font-weight: 750; letter-spacing: -0.01em;
+  color: var(--ink-2); background: var(--panel);
+  border: 0; border-radius: 999px; padding: 6px 13px; cursor: pointer;
+}
+.wp-stepchip:hover { color: var(--ink); }
+.wp-stepchip svg { width: 11px; height: 11px; stroke: currentColor; fill: none; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+
+.wp-title { font-size: 31px; font-weight: 600; letter-spacing: -0.028em; line-height: 1.1; }
+.wp-ask { font-size: 15px; font-weight: 550; color: var(--ink-2); min-width: 0; }
+/* Where the mock put presence faces. The session is single-driver, so this names the
+   week being planned instead of inventing a room. */
+.wp-week { margin-left: auto; flex: none; font-size: 12.5px; font-weight: 650; color: var(--ink-2); }
+
+/* The 2px hair — the only progress indicator the design keeps. */
+.wp-prog {
+  position: absolute; left: 0; right: 0; bottom: -10px;
+  height: 2px; background: var(--hair);
+}
+.wp-prog > div { height: 100%; background: var(--primary); transition: width 0.25s ease; }
+
+.wp-body { padding: 26px 28px 8px; min-height: 0; overflow-y: auto; }
+
+.wp-foot {
+  display: flex; align-items: center; gap: 12px;
+  padding: 14px 28px; background: var(--card); border-top: 1px solid var(--hair);
+}
+.wp-foot-sp { flex: 1; }
+/* "Skip this step" is a real answer, so it's a control — but a quiet one, because it
+   should never compete with the affirmative next to it. */
+.wp-skip {
+  background: none; border: 0; padding: 13px 4px; cursor: pointer;
+  font: inherit; font-size: 15px; font-weight: 700; color: var(--ink-2); white-space: nowrap;
+}
+.wp-skip:hover { color: var(--ink); }
+.wp-skip:disabled, .wp-primary:disabled { opacity: 0.5; cursor: default; }
+.wp-primary { font-size: 16px; padding: 14px 28px; }
+.wp-next { opacity: 0.72; font-weight: 600; margin-left: 6px; }
+
+/* ── Step body placeholder (removed as each step lands) ─────────────────────── */
+.wp-placeholder {
+  max-width: 620px; margin: 0 auto; text-align: center;
+  border: 1.5px dashed var(--hair); border-radius: var(--r-lg);
+  padding: 44px 32px; background: var(--card-2);
+}
+.wp-placeholder-t { font-size: 18px; font-weight: 750; color: var(--ink-2); }
+.wp-placeholder-s { margin-top: 8px; font-size: 13.5px; font-weight: 600; color: var(--ink-3); line-height: 1.55; }
+
+/* ── Lobby ──────────────────────────────────────────────────────────────────── */
+.wp-lobby {
+  max-width: 560px; margin: 8px auto 0;
+  background: var(--card); border-radius: var(--r-xl); box-shadow: var(--sh-2);
+  padding: 30px 32px 28px;
+}
+.wp-lobby-t { font-size: 27px; font-weight: 600; letter-spacing: -0.022em; }
+.wp-lobby-s { margin-top: 5px; font-size: 13.5px; font-weight: 600; color: var(--ink-2); line-height: 1.5; }
+.wp-lobby-acts { margin: 20px 0 24px; display: flex; flex-direction: column; gap: 12px; }
+.wp-lobby-act-h {
+  font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.07em;
+  color: var(--gold-d);
+}
+.wp-lobby-act-steps { margin-top: 3px; font-size: 14.5px; font-weight: 650; color: var(--ink); line-height: 1.35; }
+.wp-lobby-go { width: 100%; justify-content: center; }
+
+/* ── Agenda sheet ───────────────────────────────────────────────────────────── */
+/* Progressive disclosure, not permanent furniture: the ten steps live behind the step
+   counter, so they cost nothing until someone asks where they are. */
+.wp-sheet { width: 520px; max-width: 100%; padding: 24px 26px 20px; }
+.wp-sheet-t { font-size: 24px; font-weight: 600; letter-spacing: -0.02em; margin-bottom: 4px; }
+.wp-sheet-s { font-size: 13.5px; font-weight: 600; color: var(--ink-2); margin-bottom: 14px; }
+.wp-sheet-act {
+  font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.07em;
+  color: var(--gold-d); padding: 12px 0 4px;
+}
+.wp-sheet-step {
+  display: flex; align-items: center; gap: 11px; width: 100%;
+  padding: 9px 0; border: 0; border-bottom: 1px solid var(--hair-2);
+  background: none; font: inherit; font-size: 15px; font-weight: 600;
+  color: var(--ink-2); text-align: left; cursor: pointer;
+}
+.wp-sheet-step:hover { color: var(--ink); }
+.wp-sheet-n {
+  width: 22px; height: 22px; border-radius: 999px; background: var(--panel);
+  font-size: 11px; font-weight: 800; display: grid; place-items: center;
+  color: var(--ink-2); flex: none;
+}
+.wp-sheet-step.done { color: var(--ink-3); }
+.wp-sheet-step.done .wp-sheet-n { background: var(--success); color: var(--on-accent); }
+.wp-sheet-step.on { color: var(--ink); font-weight: 750; }
+.wp-sheet-step.on .wp-sheet-n { background: var(--primary); color: var(--on-accent); }
+.wp-sheet-m { margin-left: auto; font-size: 12px; font-weight: 650; color: var(--ink-2); }
+.wp-sheet-f { display: flex; margin-top: 16px; }
+.wp-sheet-f .btn { flex: 1; justify-content: center; }
+
+/* ── The saved record ───────────────────────────────────────────────────────── */
+.wp-record {
+  max-width: 640px; margin: 8px auto 0;
+  background: var(--card); border-radius: var(--r-xl); box-shadow: var(--sh-2);
+  padding: 28px 32px 24px;
+}
+.wp-record-t { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; }
+.wp-record-s { margin-top: 4px; font-size: 13.5px; font-weight: 600; color: var(--ink-2); }
+.wp-record-list { margin: 20px 0 4px; }
+.wp-record-row { display: flex; align-items: center; gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--hair-2); }
+.wp-record-row:last-child { border-bottom: 0; }
+.wp-record-n {
+  width: 22px; height: 22px; border-radius: 999px; flex: none;
+  background: var(--success); color: var(--on-accent);
+  font-size: 12px; font-weight: 800; display: grid; place-items: center;
+}
+.wp-record-row.skipped .wp-record-n { background: var(--panel); color: var(--ink-2); }
+.wp-record-main { min-width: 0; }
+.wp-record-main b { display: block; font-size: 15.5px; font-weight: 650; }
+.wp-record-main s { display: block; font-size: 12.5px; font-weight: 600; color: var(--ink-2); text-decoration: none; margin-top: 1px; }
+.wp-record-f { display: flex; margin-top: 18px; }
+.wp-record-f .btn { flex: 1; justify-content: center; }
+
+/* ── Narrow (phone) ────────────────────────────────────────────────────────────
+   The design's phone frame is the same screen, not a lesser one: same counter, same
+   question, same single primary. Only the type scale and the padding come down, and
+   the week label drops out of the header (the body says which week it is). */
+@media (max-width: 720px) {
+  .wp-screen { padding: 16px 16px 28px; }
+  .wp-head { padding: 12px 18px 0; gap: 10px; }
+  .wp-head > .wp-title { flex-basis: 100%; font-size: 25px; }
+  .wp-ask { flex-basis: 100%; font-size: 13.5px; }
+  .wp-week { display: none; }
+  .wp-body { padding: 18px 18px 6px; }
+  .wp-foot { padding: 12px 18px; gap: 8px; }
+  .wp-primary { flex: 1; justify-content: center; font-size: 15px; padding: 13px 18px; }
+  /* The next-step hint is the first thing to go when the button gets tight. */
+  .wp-next { display: none; }
+  .wp-skip { font-size: 14px; padding: 12px 2px; }
+  .wp-placeholder { padding: 32px 20px; }
+  .wp-lobby, .wp-record { padding: 22px 20px 20px; border-radius: var(--r-lg); }
+}

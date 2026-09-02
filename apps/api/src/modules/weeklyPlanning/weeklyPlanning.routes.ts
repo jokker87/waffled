@@ -1,0 +1,101 @@
+// Weekly Planning — HTTP routes (/api/weekly-planning). Logic in weeklyPlanning.ts.
+import createAPI, { type Request, type Response } from 'lambda-api'
+import { moduleRoutes } from '../../platform/route-guards'
+import {
+  getView,
+  getConfig,
+  setConfig,
+  startSession,
+  patchSession,
+  decideStep,
+  completeSession,
+  getSessionById,
+  resolveSteps,
+  isStepKey,
+  STEPS,
+  type WeeklyPlanningConfig,
+} from './weeklyPlanning'
+
+type Api = ReturnType<typeof createAPI>
+
+// Every route here is gated by the optional `weeklyPlanning` module (403 when off).
+const { tenantRoute, adminRoute } = moduleRoutes('weeklyPlanning')
+
+export function registerWeeklyPlanningRoutes(api: Api): void {
+  // The landing read: config, the week a session plans, the open session and every
+  // step with its availability and decision.
+  api.get('/api/weekly-planning', tenantRoute(async (tenant) => {
+    return getView(tenant.householdId)
+  }))
+
+  // Bare config — handy for settings, which doesn't need the session.
+  api.get('/api/weekly-planning/config', tenantRoute(async (tenant) => {
+    return { config: await getConfig(tenant.householdId), steps: STEPS }
+  }))
+
+  // When the session happens, which steps this household runs. Admin-only, like the
+  // other module configs.
+  api.put('/api/weekly-planning/config', adminRoute(async (tenant, req: Request) => {
+    const body = (req.body ?? {}) as Partial<WeeklyPlanningConfig>
+    const patch: Partial<WeeklyPlanningConfig> = {}
+    if (typeof body.dayOfWeek === 'number') patch.dayOfWeek = body.dayOfWeek
+    // A bad time is dropped rather than 400'd — the rest of the patch is still honest.
+    if (typeof body.time === 'string' && /^\d{2}:\d{2}$/.test(body.time)) patch.time = body.time
+    if (typeof body.showOnToday === 'boolean') patch.showOnToday = body.showOnToday
+    if (body.steps && typeof body.steps === 'object') {
+      // Merge, don't replace: settings.weeklyPlanning.steps is a sparse opt-out map, so
+      // a client toggling one step must not clear the others.
+      const current = (await getConfig(tenant.householdId)).steps
+      const next: Record<string, boolean> = { ...current }
+      for (const [k, v] of Object.entries(body.steps)) if (isStepKey(k) && typeof v === 'boolean') next[k] = v
+      patch.steps = next
+    }
+    const config = await setConfig(tenant.householdId, patch)
+    return { config }
+  }))
+
+  // Start the week's session, or resume the one that's already there.
+  api.post('/api/weekly-planning/session', tenantRoute(async (tenant) => {
+    return { session: await startSession(tenant) }
+  }))
+
+  // Move the driver between steps, or reopen/finish the session.
+  api.patch('/api/weekly-planning/session/:id', tenantRoute(async (tenant, req: Request, res: Response) => {
+    const body = (req.body ?? {}) as { currentStep?: unknown; status?: unknown }
+    const patch: Parameters<typeof patchSession>[2] = {}
+    if (body.currentStep !== undefined) {
+      if (!isStepKey(body.currentStep)) return res.status(400).json({ error: 'BadRequest', message: 'unknown step' })
+      patch.currentStep = body.currentStep
+    }
+    if (body.status !== undefined) {
+      if (body.status !== 'active' && body.status !== 'completed') {
+        return res.status(400).json({ error: 'BadRequest', message: 'status must be active or completed' })
+      }
+      patch.status = body.status
+    }
+    const session = await patchSession(tenant.householdId, req.params.id!, patch)
+    if (!session) return res.status(404).json({ error: 'NotFound', message: 'session not found' })
+    return { session }
+  }))
+
+  // Record what a step decided ('skipped' is a real answer, not a failure).
+  api.post('/api/weekly-planning/session/:id/step', tenantRoute(async (tenant, req: Request, res: Response) => {
+    const body = (req.body ?? {}) as { stepKey?: unknown; status?: unknown; data?: unknown }
+    if (!isStepKey(body.stepKey)) return res.status(400).json({ error: 'BadRequest', message: 'unknown step' })
+    if (body.status !== 'pending' && body.status !== 'done' && body.status !== 'skipped') {
+      return res.status(400).json({ error: 'BadRequest', message: 'status must be pending, done or skipped' })
+    }
+    const data = body.data && typeof body.data === 'object' && !Array.isArray(body.data) ? (body.data as Record<string, unknown>) : {}
+    const steps = await decideStep(tenant.householdId, req.params.id!, { stepKey: body.stepKey, status: body.status, data })
+    if (!steps) return res.status(404).json({ error: 'NotFound', message: 'session not found' })
+    return { steps }
+  }))
+
+  // Finish it — the record gets its timestamp and Today becomes the surface again.
+  api.post('/api/weekly-planning/session/:id/complete', tenantRoute(async (tenant, req: Request, res: Response) => {
+    const existing = await getSessionById(tenant.householdId, req.params.id!)
+    if (!existing) return res.status(404).json({ error: 'NotFound', message: 'session not found' })
+    const session = await completeSession(tenant.householdId, req.params.id!)
+    return { session, steps: await resolveSteps(tenant.householdId, req.params.id!) }
+  }))
+}

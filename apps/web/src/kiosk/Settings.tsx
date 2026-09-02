@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState, type FormEvent } from '
 import { useSearchParams } from 'react-router'
 import { useSyncHealth, type SyncHealthStatus } from '../lib/powersync/sync-health'
 import { restartPowerSyncHard } from '../lib/powersync/db'
-import { personsApi, permissionsApi, healthApi, updatesApi, type UpdateInfo, accountApi, type AccountInfo, apiKeysApi, captureApi, calendarsApi, mealsApi, currenciesApi, conversionsApi, rewardsApi, choresApi, goalCalendarApi, groceryApi, authApi, kioskApi, usePantry, pantryApi, useCountdowns, countdownsApi, DEFAULT_BIRTHDAY_HORIZON_DAYS, useFamilyNight, familyNightApi, weekdayName, type FamilyNightPart, ALLERGEN_LABELS, ALLERGEN_KEYS, isDisplayMode, setDisplayMode, isKioskMode, usePersons, useCurrencies, useConversions, useHousehold, useHouseholdSettings, useWeather, useEventsToday, usePhotos, emitHouseholdChanged, CAPABILITIES, CAPABILITY_LABELS, ROLE_LABELS, type SettingsMember, type CaptureConfig, type Provider, type CalendarStatus, type CalendarLink, type IcsFeed, type MealCalendarSettings, type Currency, type MemoryGroup, type PantryStaple, type OidcConfig, type OidcConfigPatch, type KioskDevice, type DisplayConfig, type StoredProof, type PermissionMatrix, type Role, type Capability, type HealthReport, type HealthStatus, type ApiKey, type ApiScopeDef } from '../lib/api'
+import { personsApi, permissionsApi, healthApi, updatesApi, type UpdateInfo, accountApi, type AccountInfo, apiKeysApi, captureApi, calendarsApi, mealsApi, currenciesApi, conversionsApi, rewardsApi, choresApi, goalCalendarApi, groceryApi, authApi, kioskApi, usePantry, pantryApi, useCountdowns, countdownsApi, DEFAULT_BIRTHDAY_HORIZON_DAYS, useFamilyNight, familyNightApi, weekdayName, type FamilyNightPart, useWeeklyPlanning, weeklyPlanningApi, planningDayName, ALLERGEN_LABELS, ALLERGEN_KEYS, isDisplayMode, setDisplayMode, isKioskMode, usePersons, useCurrencies, useConversions, useHousehold, useHouseholdSettings, useWeather, useEventsToday, usePhotos, emitHouseholdChanged, CAPABILITIES, CAPABILITY_LABELS, ROLE_LABELS, type SettingsMember, type CaptureConfig, type Provider, type CalendarStatus, type CalendarLink, type IcsFeed, type MealCalendarSettings, type Currency, type MemoryGroup, type PantryStaple, type OidcConfig, type OidcConfigPatch, type KioskDevice, type DisplayConfig, type StoredProof, type PermissionMatrix, type Role, type Capability, type HealthReport, type HealthStatus, type ApiKey, type ApiScopeDef } from '../lib/api'
 import { MODULES, moduleEnabled } from '../lib/modules'
 import { useThemePref } from '../lib/theme'
 import { eventStyle } from '../lib/display'
@@ -2408,6 +2408,7 @@ function ModulesPanel() {
               {on && m.hasSettings && m.key === 'pantry' && <PantrySettings />}
               {on && m.hasSettings && m.key === 'chores' && <ChoresModuleSettings />}
               {on && m.hasSettings && m.key === 'familyNight' && <FamilyNightSettings />}
+              {on && m.hasSettings && m.key === 'weeklyPlanning' && <WeeklyPlanningSettings />}
             </div>
           )
         })}
@@ -2638,6 +2639,72 @@ function FamilyNightSettings() {
         <button type="button" className="pill" onClick={addPart}>+ Add part</button>
         <button type="button" className="pill primary" disabled={saving} onClick={saveParts} style={{ marginLeft: 'auto' }}>Save agenda</button>
       </div>
+    </div>
+  )
+}
+
+// Weekly Planning's own settings (shown when the module is on): when the session
+// happens, and which of its steps this household runs.
+//
+// A step whose module is off is NOT shown as a choice — it isn't one. Turning chores
+// back on is what brings the Tasks step back, and offering a toggle that can't do
+// anything would imply otherwise. The catalog (order, titles, what each step reads)
+// comes from the server, so this panel never hardcodes the list.
+function WeeklyPlanningSettings() {
+  const { view, loading } = useWeeklyPlanning()
+  const [saving, setSaving] = useState(false)
+  if (loading || !view) return null
+  const config = view.config
+
+  async function save(patch: Parameters<typeof weeklyPlanningApi.setConfig>[0]) {
+    setSaving(true)
+    try { await weeklyPlanningApi.setConfig(patch) } finally { setSaving(false) }
+  }
+
+  const offForModule = view.steps.filter((s) => s.requiresModule && config.steps[s.key] !== false && !s.available)
+  const choosable = view.steps.filter((s) => !s.requiresModule || s.available || config.steps[s.key] === false)
+
+  return (
+    <div className="set-module-settings">
+      <div className="set-module-setrow">
+        <span>Session happens on</span>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <select className="sel" value={config.dayOfWeek} disabled={saving} onChange={(e) => save({ dayOfWeek: Number(e.target.value) })}>
+            {FN_DAYS.map((d) => <option key={d} value={d}>{planningDayName(d)}</option>)}
+          </select>
+          <input className="set-inline-input" type="time" value={config.time} disabled={saving} onChange={(e) => save({ time: e.target.value })} style={{ width: 120 }} />
+        </div>
+      </div>
+      <div className="set-module-desc" style={{ marginTop: -4, marginBottom: 8 }}>
+        When to nudge the family to sit down. The session always plans the week ahead — which
+        seven days that is follows your household's first day of the week.
+      </div>
+
+      <div className="set-module-setrow">
+        <span>Show on the Today page</span>
+        <Switch checked={config.showOnToday !== false} disabled={saving} onChange={(v) => save({ showOnToday: v })} ariaLabel="Show the planning session on Today" />
+      </div>
+
+      <div className="set-row2-t" style={{ marginTop: 6, marginBottom: 4 }}>Steps</div>
+      <div className="set-module-desc" style={{ marginBottom: 8 }}>
+        Turn off anything your family doesn't do — the session skips it and never counts it.
+      </div>
+      {choosable.map((s) => (
+        <div key={s.key} className="set-module-setrow">
+          <span>{s.title}</span>
+          <Switch
+            checked={config.steps[s.key] !== false}
+            disabled={saving}
+            onChange={(v) => save({ steps: { [s.key]: v } })}
+            ariaLabel={`Include ${s.title} in the session`}
+          />
+        </div>
+      ))}
+      {offForModule.length > 0 && (
+        <div className="set-module-desc" style={{ marginTop: 8 }}>
+          Not in the session because the module it reads is off: {offForModule.map((s) => s.title).join(', ')}.
+        </div>
+      )}
     </div>
   )
 }

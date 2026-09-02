@@ -243,6 +243,19 @@ Legend: ✅ done · 🟡 partial / in progress · 🚧 planned · ⛔ dropped (s
 
 ## Partial / in progress 🟡
 
+- **Weekly Planning** — a guided session that walks the family through deciding the week
+  ahead in ten steps (loose ends · calendar · horizon scan · family night · connection ·
+  goals · meals · tasks · kids · recap). New optional `weeklyPlanning` module (default
+  **off**), `planning_sessions` / `planning_session_steps` tables, and a server-owned step
+  catalog so web and iOS can't drift on the shape of the session. **Shipped so far:** the
+  module shell — Settings → Modules panel (session day/time, per-step opt-out), the
+  `/planning` screen with its lobby, the step chrome (counter → agenda sheet, the one
+  question, progress hair, skip/affirm footer) and the saved record. **Pending:** the ten
+  step bodies, which land one commit at a time, then iOS parity for all of them. Nine of the
+  ten are a *read* over modules that already exist — the session sequences decisions rather
+  than storing them. Design: `Weekly Planning v4` canvas; plan:
+  `docs/product/weekly-planning-plan.md`.
+
 - **Waffled-Bites (kid companion device)** — the pairing system and the parent-facing
   control panel (Family → tap a kid → Waffled-Bite: quiet time, night light, wake-up
   light schedule, alarm, sound machine, screen brightness) are done on **web and iOS**

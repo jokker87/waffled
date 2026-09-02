@@ -15,6 +15,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A new Weekly Planning module (opt-in) that walks the family through deciding the week
+  ahead.** Turn it on in Settings → Modules and a **Planning** page appears: pick a day and
+  time for the session, choose which of its ten steps your family actually runs, and start
+  it. The session shows one step at a time — the step's name, the single question it asks,
+  and one button to answer it — with the full ten-step agenda tucked behind the step counter
+  so you can jump anywhere or leave whenever the week is decided. Skipping a step is a real
+  answer, and finishing writes a record of what the week decided that you can reopen. The
+  individual steps (loose ends, the calendar, meals, tasks, goals and the rest) are being
+  filled in one at a time and read from the modules you already use rather than asking you to
+  type anything twice.
 - **A privacy policy and terms of service on waffled.app.** Two new pages —
   [waffled.app/privacy](https://waffled.app/privacy) and
   [waffled.app/terms](https://waffled.app/terms) — spelling out what a self-hosted install
