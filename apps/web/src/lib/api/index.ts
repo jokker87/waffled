@@ -28,6 +28,8 @@ export * from './countdowns'
 export * from './familyNight'
 export * from './rhythms'
 export * from './weeklyPlanning'
+// Each planning step's own client, pre-exported so building a step never edits this file.
+export * from './planning'
 export * from './calendars'
 export * from './weather'
 export * from './meals'

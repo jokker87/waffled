@@ -16,6 +16,7 @@ import {
   STEPS,
   type WeeklyPlanningConfig,
 } from './weeklyPlanning'
+import { STEP_ROUTE_REGISTRARS } from './steps'
 
 type Api = ReturnType<typeof createAPI>
 
@@ -23,6 +24,10 @@ type Api = ReturnType<typeof createAPI>
 const { tenantRoute, adminRoute } = moduleRoutes('weeklyPlanning')
 
 export function registerWeeklyPlanningRoutes(api: Api): void {
+  // Each step's own reads live in their own file and are registered here as a list, so
+  // building a step never means editing this one. See ./steps/index.ts.
+  for (const register of STEP_ROUTE_REGISTRARS) register(api)
+
   // The landing read: config, the week in question, its session and every step with
   // its availability and decision. `?weekStart=` plans a week other than the default
   // (snapped and floored server-side — see resolveWeekStart).

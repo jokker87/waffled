@@ -106,3 +106,64 @@ absent from the catalog, which is what makes the incremental build possible.
 | 8 | `tasks` | Run the household | chores |
 | 9 | `kids` | Run the household | goals, chores |
 | 10 | `recap` | Close | everything above |
+
+## Building the steps in parallel
+
+The shell is finished and the seams are cut, so steps can be built concurrently. **The rule is
+one file per step per side — nobody edits a shared file.**
+
+Building step `<key>` (`<Pascal>`) means touching only:
+
+| What | Where |
+|---|---|
+| The step body | `apps/web/src/kiosk/planning/steps/<Pascal>Step.tsx` |
+| Its styles | `apps/web/src/styles/planning-<key>.css` (new file, imported by the body) |
+| Its API client | `apps/web/src/lib/api/planning/<key>.ts` |
+| Its routes | `apps/api/src/modules/weeklyPlanning/steps/<key>.routes.ts` |
+| Its service logic | `apps/api/src/modules/weeklyPlanning/steps/<key>.ts` |
+| Its tests | `apps/api/test/weekly-planning-<key>.integration.test.ts`, `apps/web/src/kiosk/planning/steps/<Pascal>Step.test.tsx` |
+
+All of those are already created and **already wired up**, which is the point:
+
+- `apps/web/src/kiosk/planning/registry.ts` maps all ten keys to all ten files and defines
+  `StepBodyProps` — the contract between the shell and a step. A step exports
+  `{ Body, FooterExtra? }` as its default; `FooterExtra` puts one more control in the footer
+  beside Skip and the affirmative (v4 uses it for Meals' "✨ Plan the rest for me").
+- `apps/api/src/modules/weeklyPlanning/steps/index.ts` lists all ten route registrars, so
+  `weeklyPlanning.routes.ts` never needs editing.
+- `apps/web/src/lib/api/planning/index.ts` re-exports all ten clients, so `lib/api/index.ts`
+  never needs editing.
+
+**Do not edit** `WeeklyPlanning.tsx`, `planning.css`, `weeklyPlanning.routes.ts`,
+`weeklyPlanning.ts`, `lib/api/weeklyPlanning.ts`, `registry.ts` or either `index.ts`. If a step
+seems to need a change there, that's a shell change — raise it rather than editing, because ten
+branches editing the shell is exactly what these seams exist to prevent.
+
+### Sequencing
+
+Three steps aren't free to go in any order:
+
+1. **`looseEnds` goes first** — it owns the `planning_parked_items` migration (**0100**), and
+   `horizon`'s "park a note" writes to the same table. `horizon` starts after it lands.
+2. **`recap` goes last** — it reads what every other step decided.
+3. Everything else (`calendar`, `familyNight`, `connection`, `goals`, `meals`, `tasks`, `kids`)
+   is independent.
+
+**Migration numbers are assigned centrally, never picked by a step** — CI's migration-hygiene job
+fails the PR on a collision. Only `looseEnds` has one (0100). Any other step that turns out to
+need schema asks for a number first.
+
+### What a step agent runs, and what it doesn't
+
+Each agent runs **only its own tests**: its one API integration file (one testcontainer Postgres)
+and its one web test file. It does **not** run the full suites, and it does **not** run Playwright
+— `playwright.config.ts` pins the preview server to port 4178, so two concurrent e2e runs collide
+on that port no matter which worktree they're in. The full suites, the e2e pass and the live check
+on the demo stack happen once per merge, on the feature branch.
+
+### Branching
+
+Steps land as **one commit each on the single feature branch** (repo convention: a batch is one
+PR). An agent working in its own worktree branches from the **feature branch**, not `origin/main`
+— the shell isn't on main — and its commit is cherry-picked over, which keeps the history one
+linear commit per step instead of a fan of merge commits.

@@ -38,14 +38,32 @@ const STEPS = [
 
 const calls: { url: string; method: string; body: Record<string, unknown> | null }[] = []
 
+// A STATEFUL double: completing really flips the session to completed and discarding
+// really removes it, so the screen's reaction to the *fresh* view is what's under test.
+// A double that always replayed the same view couldn't catch the URL getting ahead of
+// the state, which is precisely the bug this pass fixed.
 function mockApi(view: Record<string, unknown>) {
   calls.length = 0
+  const state = JSON.parse(JSON.stringify(view)) as Record<string, unknown>
   globalThis.fetch = vi.fn(async (url: string, init?: RequestInit) => {
     const u = String(url)
     const method = init?.method ?? 'GET'
     calls.push({ url: u, method, body: init?.body ? JSON.parse(String(init.body)) : null })
-    if (u.includes('/api/weekly-planning') && method === 'GET') return { ok: true, json: async () => view }
-    return { ok: true, json: async () => ({ ok: true, session: view.session, steps: view.steps }) }
+
+    if (u.includes('/api/weekly-planning') && method === 'GET') return { ok: true, json: async () => state }
+    if (method === 'POST' && u.endsWith('/complete')) {
+      state.session = { ...(state.session as object), status: 'completed', completedAt: '2026-09-06T17:40:00.000Z' }
+    }
+    if (method === 'DELETE' && u.includes('/session/')) state.session = null
+    // Starting really creates a session for the week on screen.
+    if (method === 'POST' && u.endsWith('/api/weekly-planning/session')) {
+      state.session = session({ weekStart: state.weekStart as string, currentStep: 'looseEnds' })
+    }
+    if (method === 'PATCH' && u.includes('/session/')) {
+      const patch = init?.body ? JSON.parse(String(init.body)) : {}
+      state.session = { ...(state.session as object), ...patch, ...(patch.status === 'active' ? { completedAt: null } : {}) }
+    }
+    return { ok: true, json: async () => ({ ok: true, session: state.session, steps: state.steps }) }
   }) as unknown as typeof fetch
 }
 

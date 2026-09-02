@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router'
 import {
   useWeeklyPlanning,
@@ -9,8 +9,9 @@ import {
   nextStepAfter,
   planningDayName,
   addWeeks,
-  type PlanningStep,
 } from '../lib/api'
+import { STEP_MODULES, type PlanningStepModule, type StepBodyProps } from './planning/registry'
+import { StepPlaceholder } from './planning/StepPlaceholder'
 import '../styles/planning.css'
 
 // Weekly Planning — the session shell.
@@ -42,9 +43,65 @@ function weekLabel(weekStart: string): string {
   return `${f(start)} – ${f(end)}`
 }
 
+// Hoisted, NOT defined inside WeeklyPlanning. A component declared in the render body
+// is a new component type on every render, so React unmounts and remounts it and
+// replaces its DOM nodes — which drops focus mid-interaction and made a click land on a
+// node that had already been detached. Anything with a handler belongs out here.
+function WeekStepper({ weekStart, canGoBack, busy, onGo, className }: {
+  weekStart: string
+  canGoBack: boolean
+  busy: boolean
+  onGo: (week: string) => void
+  className?: string
+}) {
+  return (
+    <div className={`wp-weeknav ${className ?? ''}`}>
+      <button
+        type="button" className="wp-weekarrow" disabled={!canGoBack || busy}
+        onClick={() => onGo(addWeeks(weekStart, -1))}
+        aria-label="Plan the previous week"
+      >‹</button>
+      <span className="wp-weeknav-l">{weekLabel(weekStart)}</span>
+      <button
+        type="button" className="wp-weekarrow" disabled={busy}
+        onClick={() => onGo(addWeeks(weekStart, 1))}
+        aria-label="Plan the next week"
+      >›</button>
+    </div>
+  )
+}
+
+// Offered from the agenda sheet mid-session and from the record afterwards — the two
+// places you'd look for "no, do this week again".
+function DiscardBlock({ confirming, setConfirming, busy, onDiscard }: {
+  confirming: boolean
+  setConfirming: (v: boolean) => void
+  busy: boolean
+  onDiscard: () => void
+}) {
+  return (
+    <div className="wp-sheet-danger">
+      {confirming ? (
+        <>
+          <div className="wp-sheet-danger-q">
+            Throw this session away and start the week over? What it already decided —
+            events added, chores handed out — stays put; only the session is discarded.
+          </div>
+          <div className="wp-sheet-danger-acts">
+            <button type="button" className="wp-sheet-danger-no" onClick={() => setConfirming(false)}>Keep it</button>
+            <button type="button" className="wp-sheet-danger-yes" disabled={busy} onClick={onDiscard}>Start over</button>
+          </div>
+        </>
+      ) : (
+        <button type="button" className="wp-sheet-danger-open" onClick={() => setConfirming(true)}>Start this week over</button>
+      )}
+    </div>
+  )
+}
+
 export function WeeklyPlanning() {
   const { step: urlStep } = useParams<{ step?: string }>()
-  const [search, setSearch] = useSearchParams()
+  const [search] = useSearchParams()
   const navigate = useNavigate()
 
   const weekParam = search.get('week') ?? undefined
@@ -54,12 +111,22 @@ export function WeeklyPlanning() {
   // Two-tap confirm on discarding a session — it can't be undone, and it sits next to
   // the everyday "Close".
   const [confirmDiscard, setConfirmDiscard] = useState(false)
+  // What the current step wants kept on the record. A ref, not state: it changes as the
+  // step is used and only matters at the moment the answer is sent, so re-rendering the
+  // whole session on every keystroke inside a step would be waste.
+  const decisionData = useRef<Record<string, unknown> | null>(null)
+  const setDecisionData = useCallback((d: Record<string, unknown> | null) => { decisionData.current = d }, [])
 
   const steps = view?.steps ?? []
   const runnable = useMemo(() => availableSteps(steps), [steps])
   const current = useMemo(() => resolveCurrent(view ?? null, urlStep), [view, urlStep])
   const next = current ? nextStepAfter(steps, current.key) : null
   const session = view?.session ?? null
+  const stepMod = useStepModule(current?.key)
+
+  // A crumb belongs to the step that set it. Moving on must not carry it onto the next
+  // step's answer.
+  useEffect(() => { decisionData.current = null }, [current?.key])
 
   // A link to a step of a week. The week rides in the query only when it isn't the
   // default, so the everyday URL stays `/planning/calendar`.
@@ -69,15 +136,29 @@ export function WeeklyPlanning() {
     return `/planning${stepKey ? `/${stepKey}` : ''}${q}`
   }
 
-  // Keep the address bar honest: an active session with no step in the URL (someone
-  // opened /planning, or came back from Today) rewrites to the step it resumed at.
-  // `replace` so this correction never becomes a back-button stop.
+  // Is the view we're holding actually about the week the URL asks for? While a week
+  // change is in flight it is NOT, and acting on a stale view here would shove the URL
+  // back to the old week's step. Every correction below waits for the fresh view.
+  const viewMatchesUrlWeek = !!view && view.weekStart === (weekParam ?? view.defaultWeekStart)
+
+  // Keep the address bar honest. Corrections are driven by the VIEW, never fired
+  // alongside a deliberate navigation — two routing updates racing in one tick is
+  // exactly how the URL ended up back on a step the session had just left.
+  //
+  // `replace` throughout: a correction must never become a back-button stop.
   useEffect(() => {
-    if (!view || !session || session.status === 'completed' || !current) return
-    if (urlStep === current.key) return
-    navigate(hrefFor(current.key), { replace: true })
+    if (!view || !viewMatchesUrlWeek || !session) return
+    if (session.status === 'completed') {
+      // Saved: the record is the surface, so the step leaves the path.
+      if (urlStep) navigate(hrefFor(null), { replace: true })
+      return
+    }
+    if (!current) return
+    // A path naming a step that can't run (or naming none at all) resumes instead. A
+    // path naming a runnable step is left alone — a pasted link outranks the pointer.
+    if (!runnable.some((s) => s.key === urlStep)) navigate(hrefFor(current.key), { replace: true })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, session?.id, session?.status, current?.key, urlStep])
+  }, [view, viewMatchesUrlWeek, session?.id, session?.status, current?.key, urlStep])
 
   async function go(fn: () => Promise<unknown>) {
     if (busy) return
@@ -87,7 +168,10 @@ export function WeeklyPlanning() {
 
   const start = () => go(async () => {
     const { session: s } = await weeklyPlanningApi.startSession(view?.weekStart)
-    if (s.currentStep) navigate(hrefFor(s.currentStep))
+    // Defensive: a start that comes back without a session is a server problem, and
+    // throwing here would take down the click handler rather than the refetch showing
+    // whatever actually happened.
+    if (s?.currentStep) navigate(hrefFor(s.currentStep))
   })
 
   // Answering a step is two writes that belong together: record the answer, then move
@@ -95,13 +179,15 @@ export function WeeklyPlanning() {
   async function answer(status: 'done' | 'skipped') {
     if (!session || !current) return
     await go(async () => {
-      await weeklyPlanningApi.decideStep(session.id, current.key, status)
+      await weeklyPlanningApi.decideStep(session.id, current.key, status, decisionData.current ?? undefined)
+      decisionData.current = null
       if (next) {
         await weeklyPlanningApi.patchSession(session.id, { currentStep: next.key })
         navigate(hrefFor(next.key))
       } else {
+        // No navigate here: the effect above drops the step from the path once the
+        // completed session actually arrives, so the URL can't get ahead of the state.
         await weeklyPlanningApi.complete(session.id)
-        navigate(hrefFor(null), { replace: true })
       }
     })
   }
@@ -130,11 +216,12 @@ export function WeeklyPlanning() {
 
   // Moving to another week drops the step: that week has its own session (or none),
   // and carrying this week's step across would name a step of a different record.
+  // ONE navigate, not a setSearch plus a navigate — two routing updates in the same tick
+  // race, and the query survived the one that was meant to clear it.
   const goWeek = (week: string) => {
     setSheet(false)
     if (!view) return
-    if (week === view.defaultWeekStart) { setSearch({}, { replace: false }); navigate('/planning') }
-    else navigate(`/planning?week=${week}`)
+    navigate(week === view.defaultWeekStart ? '/planning' : `/planning?week=${week}`)
   }
 
   if (loading) return <div className="wp-screen"><div className="wp-empty">Loading…</div></div>
@@ -152,42 +239,9 @@ export function WeeklyPlanning() {
   }
 
   const canGoBack = view.weekStart > view.minWeekStart
-  const WeekStepper = ({ className }: { className?: string }) => (
-    <div className={`wp-weeknav ${className ?? ''}`}>
-      <button
-        type="button" className="wp-weekarrow" disabled={!canGoBack || busy}
-        onClick={() => goWeek(addWeeks(view.weekStart, -1))}
-        aria-label="Plan the previous week"
-      >‹</button>
-      <span className="wp-weeknav-l">{weekLabel(view.weekStart)}</span>
-      <button
-        type="button" className="wp-weekarrow" disabled={busy}
-        onClick={() => goWeek(addWeeks(view.weekStart, 1))}
-        aria-label="Plan the next week"
-      >›</button>
-    </div>
-  )
+  const weekNav = { weekStart: view.weekStart, canGoBack, busy, onGo: goWeek }
 
-  // Reachable from the agenda sheet mid-session and from the record afterwards — the
-  // two places you'd look for "no, do this week again".
-  const DiscardBlock = () => (
-    <div className="wp-sheet-danger">
-      {confirmDiscard ? (
-        <>
-          <div className="wp-sheet-danger-q">
-            Throw this session away and start the week over? What it already decided —
-            events added, chores handed out — stays put; only the session is discarded.
-          </div>
-          <div className="wp-sheet-danger-acts">
-            <button type="button" className="wp-sheet-danger-no" onClick={() => setConfirmDiscard(false)}>Keep it</button>
-            <button type="button" className="wp-sheet-danger-yes" disabled={busy} onClick={discard}>Start over</button>
-          </div>
-        </>
-      ) : (
-        <button type="button" className="wp-sheet-danger-open" onClick={() => setConfirmDiscard(true)}>Start this week over</button>
-      )}
-    </div>
-  )
+  const discardProps = { confirming: confirmDiscard, setConfirming: setConfirmDiscard, busy, onDiscard: discard }
 
   // ── Saved: the record ────────────────────────────────────────────────────────
   // v4 step 10: "after that Today is the surface, not this session." So the finished
@@ -226,8 +280,8 @@ export function WeeklyPlanning() {
               Reopen the session
             </button>
           </div>
-          <div className="wp-record-week">Plan another week <WeekStepper /></div>
-          <DiscardBlock />
+          <div className="wp-record-week">Plan another week <WeekStepper {...weekNav} /></div>
+          <DiscardBlock {...discardProps} />
         </div>
       </div>
     )
@@ -240,7 +294,7 @@ export function WeeklyPlanning() {
         <div className="wp-lobby">
           <div className="wp-lobby-t wf-serif">{planningDayName(view.config.dayOfWeek)}'s session</div>
           <div className="wp-lobby-s">{runnable.length} steps. Jump anywhere, leave whenever the week is decided.</div>
-          <WeekStepper className="wp-weeknav-lobby" />
+          <WeekStepper {...weekNav} className="wp-weeknav-lobby" />
           <div className="wp-lobby-acts">
             {stepsByAct(steps).map((a) => (
               <div key={a.act} className="wp-lobby-act">
@@ -260,6 +314,9 @@ export function WeeklyPlanning() {
   // ── In session ───────────────────────────────────────────────────────────────
   const pos = runnable.findIndex((s) => s.key === current?.key) + 1
   const pct = Math.round((pos / runnable.length) * 100)
+  const stepProps: StepBodyProps | null = current
+    ? { step: current, sessionId: session.id, weekStart: view.weekStart, setDecisionData, refresh: refetch, busy }
+    : null
 
   return (
     <div className="wp-screen wp-in">
@@ -276,11 +333,12 @@ export function WeeklyPlanning() {
       </div>
 
       <div className="wp-body">
-        {current && <StepBody step={current} />}
+        {current && (stepMod ? <stepMod.Body {...stepProps!} /> : <StepPlaceholder step={current} />)}
       </div>
 
       <div className="wp-foot">
         <button type="button" className="wp-skip" disabled={busy} onClick={() => answer('skipped')}>Skip this step</button>
+        {stepMod?.FooterExtra && stepProps && <stepMod.FooterExtra {...stepProps} />}
         <div className="wp-foot-sp" />
         <button type="button" className="btn btn-primary wp-primary" disabled={busy} onClick={() => answer('done')}>
           {current?.primary}
@@ -294,7 +352,7 @@ export function WeeklyPlanning() {
             <button type="button" className="modal-close" onClick={closeSheet} aria-label="Close">×</button>
             <div className="wp-sheet-t wf-serif">{planningDayName(view.config.dayOfWeek)}'s session</div>
             <div className="wp-sheet-s">{runnable.length} steps. Jump anywhere, leave whenever the week is decided.</div>
-            <WeekStepper className="wp-weeknav-sheet" />
+            <WeekStepper {...weekNav} className="wp-weeknav-sheet" />
             {stepsByAct(steps).map((a) => (
               <div key={a.act}>
                 <div className="wp-sheet-act">{a.act}</div>
@@ -324,7 +382,7 @@ export function WeeklyPlanning() {
                   offer the door. Leaving keeps the session exactly where it is. */}
               <button type="button" className="btn btn-ghost" onClick={() => { closeSheet(); navigate('/') }}>Leave for now</button>
             </div>
-            <DiscardBlock />
+            <DiscardBlock {...discardProps} />
           </div>
         </div>
       )}
@@ -332,18 +390,18 @@ export function WeeklyPlanning() {
   )
 }
 
-// Each step's real body arrives in its own commit and registers here. Until then the
-// step is honest about being chrome only — it still records an answer, so the session
-// and the record work end to end today.
-function StepBody({ step }: { step: PlanningStep }) {
-  return (
-    <div className="wp-placeholder">
-      <div className="wp-placeholder-t">{step.title} is next up to be built</div>
-      <div className="wp-placeholder-s">
-        This step will read {step.requiresModule ? `your ${step.requiresModule} module` : 'what the app already knows'} —
-        nothing here is typed twice. The session, its record and every other step already work,
-        so you can walk the whole shape now.
-      </div>
-    </div>
-  )
+// Load the step's module from the registry. Each step is its own chunk, so reaching
+// step 7 never downloaded steps 1–6, and — the reason the registry exists at all — a
+// step is built by editing its own files and never this one.
+function useStepModule(key: string | undefined): PlanningStepModule | null {
+  const [mod, setMod] = useState<PlanningStepModule | null>(null)
+  useEffect(() => {
+    let alive = true
+    setMod(null)
+    const load = key ? STEP_MODULES[key] : undefined
+    if (!load) return
+    load().then((m) => { if (alive) setMod(m) }).catch(() => { /* falls back to the placeholder */ })
+    return () => { alive = false }
+  }, [key])
+  return mod
 }
