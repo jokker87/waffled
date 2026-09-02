@@ -47,7 +47,7 @@ function call(method: string, path: string, token?: string, body?: unknown) {
 const kevin = mint('dev|kevin')
 const json = (r: { body: string }) => JSON.parse(r.body)
 
-interface BoardChore { id: string; title: string; cadence: string; days: string[]; carriedOver: boolean; pendingInstanceIds: string[] }
+interface BoardChore { id: string; title: string; cadence: string; days: string[]; dueOn: string | null; carriedOver: boolean; pendingInstanceIds: string[] }
 interface BoardPerson { id: string; name: string; recurringChores: number; chores: BoardChore[] }
 const board = async () => json(await call('GET', '/api/weekly-planning/tasks', kevin)) as { weekStart: string; people: BoardPerson[]; unassigned: BoardChore[] }
 const strip = (b: { unassigned: BoardChore[] }) => b.unassigned.map((c) => c.title)
@@ -305,12 +305,156 @@ describe('planning · tasks · the week each person is carrying', () => {
   it('a chore carried over from before the week arrives without a day of its own', async () => {
     const { query } = await import('../src/platform/db')
     const created = await call('POST', '/api/chores', kevin, { title: 'Fix the gate', personId: wallyId, rrule: null, dueOn: day(0) })
-    // Backdate its single instance to before the week — a rollover one-off still open.
-    await query(`update chore_instances set due_on = $2::date where chore_id = $1`, [json(created).chore.id, day(-6)])
+    // Backdate its single instance to a day that has genuinely PASSED — a rollover
+    // one-off still open. Relative to today, not to the week: the planned week can
+    // start as much as six days out, so "before the week" alone would include days
+    // still ahead of us, which nobody has carried anything over from yet.
+    const past = new Date()
+    past.setUTCDate(past.getUTCDate() - 5)
+    await query(`update chore_instances set due_on = $2::date where chore_id = $1`, [
+      json(created).chore.id,
+      past.toISOString().slice(0, 10),
+    ])
 
     const gate = held(await board(), 'Wally').find((c) => c.title === 'Fix the gate')!
     expect(gate.carriedOver).toBe(true)
     expect(gate.days).toEqual([])
+  })
+})
+
+// Handing a chore over has to be REVERSIBLE — back up for grabs, or on to somebody
+// else — and the kiosk board must never be left disagreeing with this one. A chore can
+// already have several pending days materialized, so every one of them has to follow
+// the change in BOTH directions, which is why the board hands those days back for a
+// chore that already has an owner too (it used to hand them back only for unowned ones).
+describe('planning · tasks · handing a chore out is reversible', () => {
+  const soon = (n: number) => {
+    const d = new Date()
+    d.setUTCDate(d.getUTCDate() + n)
+    return d.toISOString().slice(0, 10)
+  }
+  const dayOwner = async (date: string, title: string) => {
+    const day = json(await call('GET', `/api/chore-instances/today?date=${date}`, kevin))
+    return day.instances.find((i: { choreTitle: string }) => i.choreTitle === title)?.personId ?? null
+  }
+
+  it('takes a chore back off someone — every pending day follows, both ways', async () => {
+    const created = await call('POST', '/api/chores', kevin, { title: 'Sort the recycling', personId: null, rrule: 'FREQ=DAILY' })
+    const choreId = json(created).chore.id
+    // Two days of the kiosk board have been opened, so two instances exist.
+    await call('GET', `/api/chore-instances/today?date=${soon(1)}`, kevin)
+    await call('GET', `/api/chore-instances/today?date=${soon(2)}`, kevin)
+
+    const offered = (await board()).unassigned.find((c) => c.title === 'Sort the recycling')!
+    expect(offered.pendingInstanceIds.length).toBeGreaterThanOrEqual(2)
+    await call('PATCH', `/api/chores/${choreId}`, kevin, { personId: wallyId })
+    for (const id of offered.pendingInstanceIds) {
+      await call('POST', `/api/chore-instances/${id}/assign`, kevin, { personId: wallyId })
+    }
+    expect(await dayOwner(soon(1), 'Sort the recycling')).toBe(wallyId)
+    expect(await dayOwner(soon(2), 'Sort the recycling')).toBe(wallyId)
+
+    // THE UNDO. The board hands back the pending days of a chore that already has an
+    // owner, which is what makes taking it back possible at all.
+    const held = who(await board(), 'Wally').chores.find((c) => c.title === 'Sort the recycling')!
+    expect(held.pendingInstanceIds.length).toBeGreaterThanOrEqual(2)
+    expect((await call('PATCH', `/api/chores/${choreId}`, kevin, { personId: null })).statusCode).toBe(200)
+    for (const id of held.pendingInstanceIds) {
+      expect((await call('POST', `/api/chore-instances/${id}/assign`, kevin, { personId: null })).statusCode).toBe(200)
+    }
+
+    // Up for grabs again on this board AND on the kiosk one — no day left holding a name.
+    expect(strip(await board())).toContain('Sort the recycling')
+    expect(await dayOwner(soon(1), 'Sort the recycling')).toBe(null)
+    expect(await dayOwner(soon(2), 'Sort the recycling')).toBe(null)
+  })
+
+  it('hands one straight on to somebody else, days and all', async () => {
+    const created = await call('POST', '/api/chores', kevin, { title: 'Rake the leaves', personId: wallyId, rrule: 'FREQ=DAILY' })
+    const choreId = json(created).chore.id
+    await call('GET', `/api/chore-instances/today?date=${soon(3)}`, kevin)
+
+    const held = who(await board(), 'Wally').chores.find((c) => c.title === 'Rake the leaves')!
+    expect(held.pendingInstanceIds.length).toBeGreaterThan(0)
+    await call('PATCH', `/api/chores/${choreId}`, kevin, { personId: lottieId })
+    for (const id of held.pendingInstanceIds) {
+      await call('POST', `/api/chore-instances/${id}/assign`, kevin, { personId: lottieId })
+    }
+
+    expect(await dayOwner(soon(3), 'Rake the leaves')).toBe(lottieId)
+    const after = await board()
+    expect(who(after, 'Wally').chores.map((c) => c.title)).not.toContain('Rake the leaves')
+    expect(who(after, 'Lottie').chores.map((c) => c.title)).toContain('Rake the leaves')
+  })
+})
+
+// "Carried over" means a day that has actually PASSED with the task still open. A
+// session normally plans NEXT week, so anything created today is dated before the week
+// being planned — which is not the same thing as being left over from it.
+describe('planning · tasks · a brand-new task is not carried over', () => {
+  it('a one-off created today says when it is for, not that it was left behind', async () => {
+    const created = await call('POST', '/api/chores', kevin, { title: 'Book the sitter', personId: wallyId, rrule: null })
+    expect(created.statusCode).toBe(201)
+
+    const card = who(await board(), 'Wally').chores.find((c) => c.title === 'Book the sitter')
+    // It is on the board (a task you just made must not vanish)…
+    expect(card).toBeTruthy()
+    // …and it does not claim to be a leftover.
+    expect(card!.carriedOver).toBe(false)
+    expect(card!.dueOn).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+  })
+
+  it('and one nobody has taken says the same in the strip', async () => {
+    await call('POST', '/api/chores', kevin, { title: 'Ring the plumber', personId: null, rrule: null })
+    expect((await board()).unassigned.find((c) => c.title === 'Ring the plumber')!.carriedOver).toBe(false)
+  })
+})
+
+// A one-off's day lives on its single pending INSTANCE, not on a chores column — so
+// moving it is a `dueOn` patch of the chore, the one chores field this step needed.
+describe('planning · tasks · setting the day on a task', () => {
+  const day = async (n: number) => {
+    const d = new Date(`${(await board()).weekStart}T00:00:00Z`)
+    d.setUTCDate(d.getUTCDate() + n)
+    return d.toISOString().slice(0, 10)
+  }
+
+  it('moves a one-off onto a day of the planned week', async () => {
+    const created = await call('POST', '/api/chores', kevin, { title: 'Drop the parcel', personId: wallyId, rrule: null })
+    const choreId = json(created).chore.id
+    const target = await day(2)
+
+    // dueOn ALONE: nothing else about the chore is being edited.
+    expect((await call('PATCH', `/api/chores/${choreId}`, kevin, { dueOn: target })).statusCode).toBe(200)
+
+    const card = who(await board(), 'Wally').chores.find((c) => c.title === 'Drop the parcel')!
+    expect(card.days).toEqual([target])
+    expect(card.dueOn).toBe(target)
+  })
+
+  it('refuses a date that isn’t one', async () => {
+    const created = await call('POST', '/api/chores', kevin, { title: 'Sharpen the knives', personId: wallyId, rrule: null })
+    expect((await call('PATCH', `/api/chores/${json(created).chore.id}`, kevin, { dueOn: 'someday' })).statusCode).toBe(400)
+  })
+
+  it('never rewrites a day somebody already finished', async () => {
+    const created = await call('POST', '/api/chores', kevin, { title: 'Wash the car', personId: wallyId, rrule: null })
+    const choreId = json(created).chore.id
+    const { query } = await import('../src/platform/db')
+    const before = await query<{ id: string; due_on: string }>(
+      `select id, due_on::text as due_on from chore_instances where chore_id = $1`,
+      [choreId]
+    )
+    await call('POST', `/api/chore-instances/${before.rows[0].id}/complete`, kevin, {})
+
+    await call('PATCH', `/api/chores/${choreId}`, kevin, { dueOn: await day(4) })
+
+    const after = await query<{ due_on: string; status: string }>(
+      `select due_on::text as due_on, status from chore_instances where id = $1`,
+      [before.rows[0].id]
+    )
+    expect(after.rows[0].status).not.toBe('pending')
+    expect(after.rows[0].due_on).toBe(before.rows[0].due_on)
   })
 })
 

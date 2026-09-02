@@ -12,6 +12,11 @@ import type { StepBodyProps } from '../registry'
 // board was re-read), the two answers the step records (handed over / deliberately left),
 // and that "+ Add for …" opens the app's EXISTING chore modal with Who already filled
 // in — a second chore form would be the bug.
+//
+// Every move is REVERSIBLE, by tap or by drag, and both directions have to carry every
+// open day of the chore with them or the kiosk board ends up disagreeing with this one.
+// Drag is the kiosk board's own pointer-event mechanism, so the test drives it the same
+// way: grip pointerdown → pointermove over a column → pointerup.
 
 const { Body } = mod
 
@@ -48,7 +53,9 @@ const BOARD = {
     {
       id: 'p1', name: 'Kevin', avatarEmoji: '🧔', colorHex: '#7A5AF8', memberType: 'adult', isAdmin: true,
       recurringChores: 4,
-      chores: [chore({ id: 'k1', title: 'Dishes', cadence: 'daily', rrule: 'FREQ=DAILY', days: ['2026-09-06', '2026-09-07', '2026-09-08', '2026-09-09', '2026-09-10', '2026-09-11', '2026-09-12'] })],
+      // Two days of it are already sitting on a kiosk board — both have to follow it
+      // wherever it goes next, including back.
+      chores: [chore({ id: 'k1', title: 'Dishes', cadence: 'daily', rrule: 'FREQ=DAILY', days: ['2026-09-06', '2026-09-07', '2026-09-08', '2026-09-09', '2026-09-10', '2026-09-11', '2026-09-12'], pendingInstanceIds: ['i7', 'i8'] })],
     },
     {
       id: 'p2', name: 'Wally', avatarEmoji: '🐢', colorHex: '#25A368', memberType: 'kid', isAdmin: false,
@@ -101,9 +108,30 @@ function mockApi(opts: { capabilities?: string[]; unassigned?: unknown[] } = {})
     if (u.endsWith('/api/chores') && method === 'POST') return { ok: true, json: async () => ({ chore: { id: 'new' } }) }
     if (/\/api\/chores\/[^/]+$/.test(u) && method === 'PATCH') {
       const id = u.split('/').pop()!
+      const patch = (body ?? {}) as { personId?: string | null; dueOn?: string }
+      // Pull the card out of wherever it currently is…
+      let card: Card | undefined
       const i = state.unassigned.findIndex((c) => c.id === id)
-      const target = state.people.find((p) => p.id === (body as { personId: string }).personId)
-      if (i >= 0 && target) target.chores.push(...state.unassigned.splice(i, 1))
+      if (i >= 0) card = state.unassigned[i]
+      for (const p of state.people) {
+        const j = p.chores.findIndex((c) => c.id === id)
+        if (j >= 0) card = p.chores[j]
+      }
+      if (card && 'personId' in patch) {
+        // …and put it wherever the PATCH says, in EITHER direction: a person's column,
+        // or (personId null) back in the strip.
+        state.unassigned = state.unassigned.filter((c) => c.id !== id)
+        for (const p of state.people) p.chores = p.chores.filter((c) => c.id !== id)
+        const target = state.people.find((p) => p.id === patch.personId)
+        if (target) target.chores.push(card)
+        else state.unassigned.push(card)
+      }
+      if (card && typeof patch.dueOn === 'string') {
+        // The server moves the day's instance and recomputes where it lands in the week.
+        card.dueOn = patch.dueOn
+        card.days = patch.dueOn >= WEEK ? [patch.dueOn] : []
+        card.carriedOver = false
+      }
       return { ok: true, json: async () => ({ chore: { id } }) }
     }
     if (u.includes('/assign')) return { ok: true, json: async () => ({ instance: { id: 'i1', status: 'pending' } }) }
@@ -145,8 +173,8 @@ describe('TasksStep', () => {
     expect(within(column('Lottie')).getByText('Carried over')).toBeTruthy()
     expect(within(column('Lottie')).getByText('Left over from before this week')).toBeTruthy()
     expect(within(strip()).getByText('Sun')).toBeTruthy()
-    // …and a chore with no day says so plainly rather than inventing one.
-    expect(within(strip()).getByText('No day set')).toBeTruthy()
+    // …and a one-off with no day invites one rather than inventing one.
+    expect(within(strip()).getByRole('button', { name: 'Set the day for Fold the towels' }).textContent).toBe('Set a day')
 
     // Fairness is visible without anyone computing it.
     expect(within(column('Kevin')).getByText(/4 recurring chores/)).toBeTruthy()
@@ -236,5 +264,140 @@ describe('TasksStep', () => {
     render(<Body {...props()} />)
     await waitFor(() => expect(screen.getByText(/Sweep the porch/)).toBeTruthy())
     expect(screen.queryByRole('button', { name: 'Give Sweep the porch to Wally' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Put Dishes back up for grabs' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^Drag / })).toBeNull()
+    // No day to set either — so the chip goes back to stating the plain fact.
+    expect(screen.queryByRole('button', { name: 'Set the day for Fold the towels' })).toBeNull()
+    expect(within(strip()).getByText('No day set')).toBeTruthy()
+  })
+
+  // Handing a chore over is a decision, and a decision you can't take back is a trap.
+  it('takes an assignment back — the chore AND every open day of it', async () => {
+    mockApi()
+    render(<Body {...props()} />)
+    await waitFor(() => expect(within(column('Kevin')).getByText(/Dishes/)).toBeTruthy())
+
+    fireEvent.click(within(column('Kevin')).getByRole('button', { name: 'Put Dishes back up for grabs' }))
+
+    // Back to nobody on the definition…
+    await waitFor(() => expect(wrote('PATCH', '/api/chores/k1')).toHaveLength(1))
+    expect(wrote('PATCH', '/api/chores/k1')[0].body).toEqual({ personId: null })
+    // …and EVERY day already sitting on a kiosk board is released with it, not just the
+    // first: leaving one behind is exactly how the two boards end up disagreeing.
+    for (const id of ['i7', 'i8']) {
+      await waitFor(() => expect(wrote('POST', `/api/chore-instances/${id}/assign`)).toHaveLength(1))
+      expect(wrote('POST', `/api/chore-instances/${id}/assign`)[0].body).toEqual({ personId: null })
+    }
+
+    // The board re-read: it's up for grabs again, and Kevin's column has let it go.
+    await waitFor(() => expect(within(strip()).getByText(/Dishes/)).toBeTruthy())
+    expect(within(column('Kevin')).queryByText(/Dishes/)).toBeNull()
+  })
+
+  it('hands one straight on to somebody else, without a trip through the strip', async () => {
+    mockApi()
+    render(<Body {...props()} />)
+    await waitFor(() => expect(within(column('Kevin')).getByText(/Dishes/)).toBeTruthy())
+
+    fireEvent.click(within(column('Kevin')).getByRole('button', { name: 'Give Dishes to Lottie' }))
+
+    await waitFor(() => expect(wrote('PATCH', '/api/chores/k1')[0]?.body).toEqual({ personId: 'p3' }))
+    expect(wrote('POST', '/api/chore-instances/i8/assign')[0].body).toEqual({ personId: 'p3' })
+    await waitFor(() => expect(within(column('Lottie')).getByText(/Dishes/)).toBeTruthy())
+    // The owner never offers themselves — that tap would do nothing.
+    expect(within(column('Lottie')).queryByRole('button', { name: 'Give Dishes to Lottie' })).toBeNull()
+  })
+
+  // Drag is the gesture people reach for on a board like this. It's the kiosk Chores
+  // board's own mechanism (pointer events, so a mouse and the kiosk touchscreen behave
+  // the same), and it must do exactly what tapping a face does — no second write path.
+  describe('dragging a card', () => {
+    const elementFromPoint = document.elementFromPoint
+    afterEach(() => {
+      document.elementFromPoint = elementFromPoint
+    })
+    // jsdom does no layout, so elementFromPoint has to be told what's under the pointer.
+    const over = (el: Element) => {
+      document.elementFromPoint = (() => el) as typeof document.elementFromPoint
+    }
+    const dropOn = (grip: HTMLElement, target: Element) => {
+      fireEvent.pointerDown(grip, { clientX: 10, clientY: 10 })
+      over(target)
+      fireEvent.pointerMove(window, { clientX: 300, clientY: 300 })
+      fireEvent.pointerUp(window)
+    }
+
+    it('drops a chore into a person’s column — the same move as tapping their face', async () => {
+      mockApi()
+      render(<Body {...props()} />)
+      await waitFor(() => expect(screen.getByText(/Sweep the porch/)).toBeTruthy())
+
+      dropOn(within(strip()).getByRole('button', { name: 'Drag Sweep the porch to another column' }), column('Wally'))
+
+      await waitFor(() => expect(wrote('PATCH', '/api/chores/c1')[0]?.body).toEqual({ personId: 'p2' }))
+      // The days already on a board follow a drop exactly as they follow a tap.
+      await waitFor(() => expect(wrote('POST', '/api/chore-instances/i2/assign')[0]?.body).toEqual({ personId: 'p2' }))
+      await waitFor(() => expect(within(column('Wally')).getByText(/Sweep the porch/)).toBeTruthy())
+    })
+
+    it('drops one back onto the strip — drag undoes what drag did', async () => {
+      mockApi()
+      render(<Body {...props()} />)
+      await waitFor(() => expect(within(column('Kevin')).getByText(/Dishes/)).toBeTruthy())
+
+      dropOn(within(column('Kevin')).getByRole('button', { name: 'Drag Dishes to another column' }), strip())
+
+      await waitFor(() => expect(wrote('PATCH', '/api/chores/k1')[0]?.body).toEqual({ personId: null }))
+      await waitFor(() => expect(within(strip()).getByText(/Dishes/)).toBeTruthy())
+    })
+
+    it('a drop back where it started writes nothing', async () => {
+      mockApi()
+      render(<Body {...props()} />)
+      await waitFor(() => expect(within(column('Kevin')).getByText(/Dishes/)).toBeTruthy())
+
+      dropOn(within(column('Kevin')).getByRole('button', { name: 'Drag Dishes to another column' }), column('Kevin'))
+
+      await waitFor(() => expect(within(column('Kevin')).getByText(/Dishes/)).toBeTruthy())
+      expect(wrote('PATCH', '/api/chores/k1')).toHaveLength(0)
+    })
+  })
+
+  // "I assigned it and had nowhere to say when." The day chip is the picker.
+  it('sets the day on a one-off right on its card', async () => {
+    mockApi()
+    render(<Body {...props()} />)
+    await waitFor(() => expect(screen.getByText(/Fold the towels/)).toBeTruthy())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Set the day for Fold the towels' }))
+    fireEvent.change(await screen.findByLabelText('Day for Fold the towels'), { target: { value: '2026-09-09' } })
+
+    // dueOn on the chore itself — the chores module moves the day's instance with it.
+    await waitFor(() => expect(wrote('PATCH', '/api/chores/c2')).toHaveLength(1))
+    expect(wrote('PATCH', '/api/chores/c2')[0].body).toEqual({ dueOn: '2026-09-09' })
+    // And the chip now names the day, because the board was re-read.
+    await waitFor(() => expect(within(strip()).getByText('Wed')).toBeTruthy())
+  })
+
+  it('leaves a recurring chore’s days to the chore editor', async () => {
+    mockApi()
+    render(<Body {...props()} />)
+    await waitFor(() => expect(screen.getByText(/Sweep the porch/)).toBeTruthy())
+    // 'Sweep the porch' repeats weekly: its days come from its rrule, so the chip is a
+    // statement, not a picker — a date here could only contradict the recurrence.
+    expect(screen.queryByRole('button', { name: 'Set the day for Sweep the porch' })).toBeNull()
+  })
+
+  it('the add-a-task modal starts on “Just once” — planning a week is mostly one-offs', async () => {
+    mockApi()
+    render(<Body {...props()} />)
+    await waitFor(() => expect(screen.getByText(/Sweep the porch/)).toBeTruthy())
+
+    fireEvent.click(within(strip()).getByRole('button', { name: /Add a task/ }))
+    await waitFor(() => expect(screen.getByText('New chore')).toBeTruthy())
+    expect(screen.getByRole('button', { name: 'Just once' }).className).toContain('on')
+    expect(screen.getByRole('button', { name: 'Every day' }).className).not.toContain('on')
+    // …which means the modal offers the day, too.
+    expect(screen.getByText('On')).toBeTruthy()
   })
 })

@@ -19,6 +19,7 @@
 // The step stores nothing of its own: every write goes through the existing chores
 // endpoints, so this file is read-only.
 import { query } from '../../../platform/db'
+import { householdTz, todayDate } from '../../chores/chores.service'
 import type { QueryResultRow } from 'pg'
 
 // How often a chore comes round, in the app's own words (ChoreModal's segmented
@@ -71,17 +72,20 @@ export interface TasksBoardChore {
   // A one-off's own date, which may sit outside the planned week. null for recurring.
   dueOn: string | null
   dueTime: string | null
-  // A one-off that was due before this week, is still open, and rolls forward — so it
-  // arrives in the week without belonging to a day in it.
+  // A one-off whose day has actually PASSED, that is still open, and that rolls
+  // forward — so it arrives in the week without belonging to a day in it. NOT merely
+  // "dated before the week": a session usually plans NEXT week, so that would brand
+  // everything made today a leftover.
   carriedOver: boolean
   rewardAmount: number
   rewardCurrency: string | null
-  // Instances of this chore already sitting on a day's board with nobody on them.
-  // updateChore does NOT cascade to chore_instances, so PATCHing the definition alone
-  // would leave those rows still reading "up for grabs" on the kiosk. EVERY such day
-  // comes back, not just the first: a one-off has exactly one, but a recurring chore
-  // has one per day anybody has opened the board for, and moving only the earliest
-  // would leave the rest unowned there while this board shows a name.
+  // Every day of this chore already sitting on a board still open — whoever is (or
+  // isn't) on it. updateChore only cascades to instances from today forward, so the
+  // days already behind us have to be moved by hand or the kiosk board keeps
+  // disagreeing with this one. EVERY such day comes back, not just the first: a
+  // one-off has exactly one, but a recurring chore has one per day anybody has opened
+  // the board for. They come back for an OWNED chore too — that is what makes handing
+  // one out reversible (back up for grabs, or on to somebody else).
   pendingInstanceIds: string[]
 }
 
@@ -143,16 +147,23 @@ async function choreRows(householdId: string): Promise<ChoreRowForBoard[]> {
   return rows
 }
 
-// Every materialized instance nobody has claimed, per chore. A separate aggregate
-// rather than the lateral above (which picks the single row a one-off is placed by) —
-// these are ALL the days a hand-out has to fix.
-async function unclaimedInstanceIds(householdId: string): Promise<Map<string, string[]>> {
+// Every materialized instance still open, per chore. A separate aggregate rather than
+// the lateral above (which picks the single row a one-off is placed by) — these are ALL
+// the days a hand-out has to fix, and all the days taking it back has to fix again.
+// Deliberately not filtered by person_id: a move is reversible, so the days of a chore
+// somebody already holds matter as much as the days of one nobody has taken. Only
+// 'pending' rows — a day somebody completed keeps its owner, for ledger integrity.
+async function pendingInstanceIds(householdId: string): Promise<Map<string, string[]>> {
   const { rows } = await query<{ chore_id: string; ids: string[] }>(
     `select ci.chore_id, array_agg(ci.id order by ci.due_on) as ids
        from chore_instances ci
        join chores c on c.id = ci.chore_id and c.deleted_at is null
-      where ci.household_id = $1 and ci.person_id is null
+      where ci.household_id = $1
         and ci.status = 'pending' and ci.deleted_at is null
+        -- Only days that AGREE with the definition: unclaimed, or on whoever owns the
+        -- chore. A day somebody claimed for themselves off an up-for-grabs chore is
+        -- their own doing, and this board has no business handing it to someone else.
+        and (ci.person_id is null or ci.person_id is not distinct from c.person_id)
       group by ci.chore_id`,
     [householdId]
   )
@@ -184,16 +195,31 @@ function present(
 // Where a chore sits relative to the week being planned. null ⇒ it has nothing to do
 // with this week (a one-off already done, or dated past it) and doesn't belong on the
 // board at all.
-function placeInWeek(r: ChoreRowForBoard, dates: string[]): { days: string[]; carriedOver: boolean } | null {
+//
+// `today` is the household's own today, and it — not the week start — is what decides
+// "carried over". A session normally plans NEXT week, so every one-off made during this
+// week is dated before the week being planned; judging by the week start alone told the
+// family a task they had just written down was left over from a week they hadn't
+// planned yet. A day is carried over only once it has actually passed.
+function placeInWeek(
+  r: ChoreRowForBoard,
+  dates: string[],
+  today: string
+): { days: string[]; carriedOver: boolean } | null {
   if (r.rrule) return { days: recurringDays(r.rrule, dates), carriedOver: false }
   const due = r.instance_due_on
   // A one-off with no instance at all can still be handed out — it just has no day.
   if (!due) return { days: [], carriedOver: false }
   if (dates.includes(due)) return { days: [due], carriedOver: false }
-  // Before the week, still open, and set to roll forward: it arrives in the week
-  // without belonging to a day in it.
   if (due < dates[0]) {
-    return r.instance_status === 'pending' && r.rollover ? { days: [], carriedOver: true } : null
+    // Already done (or awaiting a parent): settled, not this week's business.
+    if (r.instance_status !== 'pending') return null
+    // Its day has passed and it's still open: it rolls into the week (when it rolls
+    // over at all) without belonging to a day in it.
+    if (due < today) return r.rollover ? { days: [], carriedOver: true } : null
+    // Still ahead of us, just before the week starts — a task made today, typically.
+    // It belongs on the board saying its own date, and it is nobody's leftover.
+    return { days: [], carriedOver: false }
   }
   // After the week: a real chore, just not this week's business.
   return null
@@ -201,7 +227,11 @@ function placeInWeek(r: ChoreRowForBoard, dates: string[]): { days: string[]; ca
 
 export async function getTasksBoard(householdId: string, weekStart: string): Promise<TasksBoard> {
   const dates = weekDates(weekStart)
-  const [{ rows: personRows }, chores, unclaimed] = await Promise.all([
+  // The household's own today — the line between "left over" and "not yet". Taken from
+  // the chores module rather than computed here, so the two screens agree about which
+  // day it is (a chore day rolls at household-local midnight, not UTC's).
+  const today = todayDate(await householdTz(householdId))
+  const [{ rows: personRows }, chores, pending] = await Promise.all([
     query<QueryResultRow>(
       `select p.id, p.name, p.avatar_emoji, p.color_hex, p.member_type, p.is_admin
          from persons p
@@ -210,7 +240,7 @@ export async function getTasksBoard(householdId: string, weekStart: string): Pro
       [householdId]
     ),
     choreRows(householdId),
-    unclaimedInstanceIds(householdId),
+    pendingInstanceIds(householdId),
   ])
 
   const byPerson = new Map<string, TasksBoardChore[]>()
@@ -226,15 +256,16 @@ export async function getTasksBoard(householdId: string, weekStart: string): Pro
       // The strip is everything nobody has taken — deliberately NOT week-scoped. An
       // up-for-grabs chore is up for grabs until someone takes it, and its card says
       // plainly which day (or which date outside the week) it is for.
-      const place = placeInWeek(r, dates) ?? { days: [], carriedOver: false }
-      unassigned.push(present(r, place.days, place.carriedOver, unclaimed.get(r.id) ?? []))
+      const place = placeInWeek(r, dates, today) ?? { days: [], carriedOver: false }
+      unassigned.push(present(r, place.days, place.carriedOver, pending.get(r.id) ?? []))
       continue
     }
-    const place = placeInWeek(r, dates)
+    const place = placeInWeek(r, dates, today)
     if (!place) continue
     const list = byPerson.get(r.person_id) ?? []
-    // A chore with an owner has nothing left to fix on a day's board.
-    list.push(present(r, place.days, place.carriedOver, []))
+    // Its open days come back here too: handing a chore over is reversible, and taking
+    // it back has to fix the same days handing it out did.
+    list.push(present(r, place.days, place.carriedOver, pending.get(r.id) ?? []))
     byPerson.set(r.person_id, list)
   }
 

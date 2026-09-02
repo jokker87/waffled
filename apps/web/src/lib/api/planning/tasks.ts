@@ -26,10 +26,11 @@ export interface PlanningTasksChore {
   carriedOver: boolean
   rewardAmount: number
   rewardCurrency: string | null
-  // Every day of this chore already sitting on a board with nobody on it (a one-off has
-  // one; a recurring chore has one per day anybody has opened the board for). Assigning
-  // the definition alone would leave those rows still showing "up for grabs", so
-  // `handOut` moves all of them.
+  // Every day of this chore already sitting on a board still open (a one-off has one; a
+  // recurring chore has one per day anybody has opened the board for), whoever is or
+  // isn't on it. PATCHing the definition alone only reaches the days from today
+  // forward, so `handOut` moves all of these too — in BOTH directions, which is what
+  // keeps a take-back from leaving the kiosk board showing a name this board doesn't.
   pendingInstanceIds: string[]
 }
 
@@ -61,14 +62,22 @@ export const planningTasksApi = {
   board: (weekStart?: string) =>
     apiGet<PlanningTasksBoard>(`/api/weekly-planning/tasks${weekStart ? `?weekStart=${weekStart}` : ''}`),
 
-  // Give a chore to someone: the definition (which covers every future occurrence) and
-  // every day of it already sitting unclaimed on a board — all of them, because moving
-  // only the first would leave the rest reading "up for grabs" on the kiosk. Both are
-  // the chores module's own endpoints; this step adds no write of its own.
-  async handOut(chore: PlanningTasksChore, personId: string): Promise<void> {
+  // Move a chore: to `personId`, or back up for grabs when that's null — the same call
+  // both ways, because handing a chore over has to be undoable. It writes the
+  // definition (which covers every future occurrence) and every open day of it already
+  // sitting on a board: all of them, because moving only some would leave the kiosk
+  // Chores screen disagreeing with this board about who has it. Both are the chores
+  // module's own endpoints; this step adds no write of its own.
+  async handOut(chore: PlanningTasksChore, personId: string | null): Promise<void> {
     await choresApi.updateChore(chore.id, { personId })
     for (const instanceId of chore.pendingInstanceIds) {
       await choresApi.assignInstance(instanceId, personId)
     }
   },
+
+  // Say which day a one-off lands on. `dueOn` is a chore PATCH like any other; the
+  // chores module moves the day's instance with it (and leaves a day somebody already
+  // finished alone). Recurring chores ignore it — their days come from the rrule, which
+  // belongs to the chore editor, not to a chip on a board.
+  setDay: (chore: PlanningTasksChore, dueOn: string) => choresApi.updateChore(chore.id, { dueOn }),
 }

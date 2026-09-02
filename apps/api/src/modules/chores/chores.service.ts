@@ -387,6 +387,13 @@ export const UPDATABLE_CHORE: Record<string, string> = {
   rollover: 'rollover',
 }
 
+// `dueOn` is patchable too, but it is NOT in the map above, because a one-off's day
+// lives on its single pending chore_instance and `chores` has no due_on column at all
+// (see the instance move at the end of updateChore). So it needs its own entry in the
+// list of fields a PATCH may carry — otherwise "just move this task to Thursday" is
+// rejected as "no updatable fields provided".
+export const PATCHABLE_CHORE_FIELDS: readonly string[] = [...Object.keys(UPDATABLE_CHORE), 'dueOn']
+
 export async function updateChore(
   householdId: string,
   id: string,
@@ -401,20 +408,32 @@ export async function updateChore(
       values.push(patch[field])
     }
   }
-  values.push(householdId, id)
-  const { rows } = await query<ChoreRow>(
-    `update chores set ${sets.join(', ')}
-       where household_id = $${i++} and id = $${i} and deleted_at is null
-       returning *`,
-    values
-  )
-  const updated = rows[0] ?? null
+  // A patch that only moves a one-off's day (dueOn) touches no column on `chores` —
+  // read the row instead of running an UPDATE with an empty SET, so the instance work
+  // below still runs and the caller still gets its chore back.
+  const updated = sets.length
+    ? (
+        await query<ChoreRow>(
+          `update chores set ${sets.join(', ')}
+             where household_id = $${i} and id = $${i + 1} and deleted_at is null
+             returning *`,
+          [...values, householdId, id]
+        )
+      ).rows[0] ?? null
+    : (
+        await query<ChoreRow>(
+          `select * from chores where household_id = $1 and id = $2 and deleted_at is null`,
+          [householdId, id]
+        )
+      ).rows[0] ?? null
 
   // Reassigning the chore's "Who" should follow through to its not-yet-acted-on
   // instances from today forward, so editing the assignee (including back to
   // "up for grabs", person_id null) moves it on the board. Done/awaiting
   // instances keep whoever completed/submitted them, for stars-ledger integrity.
-  if (updated && 'personId' in patch) {
+  // `personId: undefined` is "not being edited", never "up for grabs" — it sets no
+  // column above, so it must not silently release the instances either.
+  if (updated && 'personId' in patch && patch.personId !== undefined) {
     await query(
       `update chore_instances ci
           set person_id = $1

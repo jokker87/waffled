@@ -24,7 +24,7 @@ import {
   rejectInstance,
   presentChore,
   presentInstance,
-  UPDATABLE_CHORE,
+  PATCHABLE_CHORE_FIELDS,
   ProofRequiredError,
   listStoredProofs,
   deleteStoredProof,
@@ -43,6 +43,7 @@ type Api = ReturnType<typeof createAPI>
 const { tenantRoute, adminRoute, capRoute } = moduleRoutes('chores')
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/
 
 export function registerChoreRoutes(api: Api): void {
   // Household chore settings — the photo-proof retention window and the rewards
@@ -121,7 +122,15 @@ export function registerChoreRoutes(api: Api): void {
       }
       await assertPersonInHousehold(tenant.householdId, patch.personId)
     }
-    if (!Object.keys(UPDATABLE_CHORE).some((field) => field in patch)) {
+    // Moving a one-off's day: a plain calendar date. It lands on the chore's pending
+    // instance rather than on a chores column (updateChore), and a recurring chore
+    // ignores it. Absent, null and empty all keep meaning "don't move the day" — what
+    // clients have always sent — so only a value that tried to be a date and isn't one
+    // is an error.
+    if (patch.dueOn != null && patch.dueOn !== '' && (typeof patch.dueOn !== 'string' || !DATE_ONLY_RE.test(patch.dueOn))) {
+      return res.status(400).json({ error: 'BadRequest', message: 'dueOn must be a YYYY-MM-DD date' })
+    }
+    if (!PATCHABLE_CHORE_FIELDS.some((field) => field in patch)) {
       return res.status(400).json({ error: 'BadRequest', message: 'no updatable fields provided' })
     }
     const chore = await updateChore(tenant.householdId, id, patch)

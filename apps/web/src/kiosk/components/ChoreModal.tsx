@@ -20,15 +20,21 @@ const DAYS: Array<[string, string]> = [
 
 type Freq = 'once' | 'daily' | 'weekly'
 
-function parseRrule(rrule: string | null | undefined, editing: boolean): { freq: Freq; days: string[] } {
+function parseRrule(
+  rrule: string | null | undefined,
+  editing: boolean,
+  defaultFreq: Freq = 'daily'
+): { freq: Freq; days: string[] } {
   if (rrule && /FREQ=WEEKLY/i.test(rrule)) {
     const m = rrule.match(/BYDAY=([A-Z,]+)/i)
     return { freq: 'weekly', days: m ? m[1].toUpperCase().split(',') : [] }
   }
   if (rrule && /FREQ=DAILY/i.test(rrule)) return { freq: 'daily', days: [] }
   // No rrule: an existing chore with null rrule is a one-off; a brand-new chore
-  // still defaults to "Every day" (the common case).
-  return { freq: editing ? 'once' : 'daily', days: [] }
+  // defaults to "Every day" (the common case on the Chores screen) unless the surface
+  // opening the modal knows better — Weekly Planning adds mostly one-offs, so it asks
+  // for 'once'. The default stays put for everyone who doesn't pass one.
+  return { freq: editing ? 'once' : defaultFreq, days: [] }
 }
 
 function buildRrule(freq: Freq, days: string[]): string | null {
@@ -40,8 +46,14 @@ function buildRrule(freq: Freq, days: string[]): string | null {
   return 'FREQ=DAILY'
 }
 
-function initialForm(chore?: ChoreDraft, personId?: string | null, canAssignOthers = true, selfPersonId?: string | null) {
-  const sched = parseRrule(chore?.rrule, !!chore)
+function initialForm(
+  chore?: ChoreDraft,
+  personId?: string | null,
+  canAssignOthers = true,
+  selfPersonId?: string | null,
+  defaultFreq?: Freq
+) {
+  const sched = parseRrule(chore?.rrule, !!chore, defaultFreq)
   // Restricted users (no chore.manage) can only target themselves or up-for-grabs;
   // default them to self rather than the full-list default.
   const prefill = chore?.personId ?? personId ?? (canAssignOthers ? '' : selfPersonId ?? '')
@@ -68,6 +80,7 @@ function initialForm(chore?: ChoreDraft, personId?: string | null, canAssignOthe
 export function ChoreModal({
   chore,
   personId,
+  defaultFreq,
   canAssignOthers = true,
   selfPersonId,
   onClose,
@@ -75,6 +88,10 @@ export function ChoreModal({
 }: {
   chore?: ChoreDraft
   personId?: string | null
+  // Which "Repeats" a NEW chore starts on. Omit it for the app-wide default ('daily');
+  // a surface where most additions are one-offs (Weekly Planning's Tasks step) passes
+  // 'once'. Ignored when editing — an existing chore's cadence is its own.
+  defaultFreq?: Freq
   // Without chore.manage, restrict the assignee picker to self + up-for-grabs.
   canAssignOthers?: boolean
   selfPersonId?: string | null
@@ -84,7 +101,7 @@ export function ChoreModal({
   const editing = !!chore
   const { persons } = usePersons()
   const { currencies, defaultCurrency } = useCurrencies()
-  const [form, setForm] = useState(() => initialForm(chore, personId, canAssignOthers, selfPersonId))
+  const [form, setForm] = useState(() => initialForm(chore, personId, canAssignOthers, selfPersonId, defaultFreq))
   // Restricted users see only themselves; everyone else sees the full member list.
   const pickable = canAssignOthers ? persons : persons.filter((p) => p.id === selfPersonId)
   // A parent doesn't need another parent's OK: hide the approval toggle when the
