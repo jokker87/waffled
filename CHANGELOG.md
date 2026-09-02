@@ -24,7 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   answer, and finishing writes a record of what the week decided that you can reopen. The
   individual steps (loose ends, the calendar, meals, tasks, goals and the rest) are being
   filled in one at a time and read from the modules you already use rather than asking you to
-  type anything twice.
+  type anything twice. The session defaults to the week ahead, but you can step forward and
+  plan any later week — each week keeps its own session and its own record — and every step has
+  its own web address, so leaving mid-session and coming back (or refreshing, or using the back
+  button) puts you exactly where you were.
 - **A privacy policy and terms of service on waffled.app.** Two new pages —
   [waffled.app/privacy](https://waffled.app/privacy) and
   [waffled.app/terms](https://waffled.app/terms) — spelling out what a self-hosted install

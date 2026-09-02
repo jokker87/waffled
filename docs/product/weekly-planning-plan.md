@@ -50,6 +50,27 @@ its own week writes rows nothing will read again). `plannedWeekStart()` honors t
 week, otherwise it plans the next one — so a Sunday session plans the week ahead in both a
 Sunday-start and a Monday-start household.
 
+That's only the **default**. A family getting in front of a trip can plan further out:
+`GET /api/weekly-planning?weekStart=` and `POST /session { weekStart }` take any week, and
+`resolveWeekStart()` is the one gate in front of them — it rejects nonsense (→ the default),
+**snaps** a mid-week date to its week start (naming "the Wednesday of the trip" must not key a
+session to a day), and clamps to the floor. The floor is the household's *current* week: a week
+that has already finished has nothing left to decide. The view returns `weekStart`,
+`defaultWeekStart` and `minWeekStart` so a client can render a stepper without doing any week
+arithmetic of its own.
+
+## The URL is the state (web)
+
+`/planning/:step`, with `?week=` when it isn't the default week. Leaving the module and coming
+back, a refresh, the back button and a pasted link all land on the right step. Bare `/planning`
+is the entry point: it shows the lobby, or rewrites itself (`replace`) to the step the session
+resumed at, and a path naming a step that can't run falls back rather than stranding on a blank
+screen.
+
+This is deliberately **two** pointers, and they answer different questions: the URL is where
+*this browser* is, and `planning_sessions.current_step` is where the *family* is — which is what
+lets the iPad resume where the phone left off. Answering a step writes both.
+
 ## Steps and gating
 
 The ten steps are a **server-owned catalog** (`STEPS` in `weeklyPlanning.ts`) so web and iOS

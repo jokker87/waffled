@@ -22,10 +22,11 @@ type Api = ReturnType<typeof createAPI>
 const { tenantRoute, adminRoute } = moduleRoutes('weeklyPlanning')
 
 export function registerWeeklyPlanningRoutes(api: Api): void {
-  // The landing read: config, the week a session plans, the open session and every
-  // step with its availability and decision.
-  api.get('/api/weekly-planning', tenantRoute(async (tenant) => {
-    return getView(tenant.householdId)
+  // The landing read: config, the week in question, its session and every step with
+  // its availability and decision. `?weekStart=` plans a week other than the default
+  // (snapped and floored server-side — see resolveWeekStart).
+  api.get('/api/weekly-planning', tenantRoute(async (tenant, req: Request) => {
+    return getView(tenant.householdId, req.query?.weekStart)
   }))
 
   // Bare config — handy for settings, which doesn't need the session.
@@ -54,9 +55,11 @@ export function registerWeeklyPlanningRoutes(api: Api): void {
     return { config }
   }))
 
-  // Start the week's session, or resume the one that's already there.
-  api.post('/api/weekly-planning/session', tenantRoute(async (tenant) => {
-    return { session: await startSession(tenant) }
+  // Start a week's session, or resume the one that's already there. `weekStart` in the
+  // body picks the week; absent ⇒ the default (the week ahead).
+  api.post('/api/weekly-planning/session', tenantRoute(async (tenant, req: Request) => {
+    const body = (req.body ?? {}) as { weekStart?: unknown }
+    return { session: await startSession(tenant, body.weekStart) }
   }))
 
   // Move the driver between steps, or reopen/finish the session.

@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { useNavigate, useParams, useSearchParams } from 'react-router'
 import {
   useWeeklyPlanning,
   weeklyPlanningApi,
@@ -7,6 +8,7 @@ import {
   resolveCurrent,
   nextStepAfter,
   planningDayName,
+  addWeeks,
   type PlanningStep,
 } from '../lib/api'
 import '../styles/planning.css'
@@ -23,6 +25,11 @@ import '../styles/planning.css'
 // file owns only the chrome, the lobby, the agenda sheet and the saved record. The
 // step catalog (order, titles, questions, primary labels, which module each step
 // reads) comes from the server so this screen and iOS cannot drift.
+//
+// THE URL IS THE STATE. `/planning/:step` names the step and `?week=` names the week,
+// so refresh, back and a pasted link all land where you were — and the session's own
+// `currentStep` stays the cross-DEVICE resume pointer. Both matter: the URL is where
+// *this* browser is, the session row is where the *family* is.
 
 // "Mon 31 – Sun 6" for the week being planned. This sits where v4's mock put the
 // presence faces: the session is single-driver, so showing a row of avatars would be
@@ -36,15 +43,38 @@ function weekLabel(weekStart: string): string {
 }
 
 export function WeeklyPlanning() {
-  const { view, loading, refetch } = useWeeklyPlanning()
+  const { step: urlStep } = useParams<{ step?: string }>()
+  const [search, setSearch] = useSearchParams()
+  const navigate = useNavigate()
+
+  const weekParam = search.get('week') ?? undefined
+  const { view, loading, refetch } = useWeeklyPlanning(weekParam)
   const [sheet, setSheet] = useState(false)
   const [busy, setBusy] = useState(false)
 
   const steps = view?.steps ?? []
   const runnable = useMemo(() => availableSteps(steps), [steps])
-  const current = useMemo(() => resolveCurrent(view), [view])
+  const current = useMemo(() => resolveCurrent(view ?? null, urlStep), [view, urlStep])
   const next = current ? nextStepAfter(steps, current.key) : null
   const session = view?.session ?? null
+
+  // A link to a step of a week. The week rides in the query only when it isn't the
+  // default, so the everyday URL stays `/planning/calendar`.
+  const hrefFor = (stepKey: string | null, week?: string) => {
+    const w = week ?? view?.weekStart
+    const q = w && view && w !== view.defaultWeekStart ? `?week=${w}` : ''
+    return `/planning${stepKey ? `/${stepKey}` : ''}${q}`
+  }
+
+  // Keep the address bar honest: an active session with no step in the URL (someone
+  // opened /planning, or came back from Today) rewrites to the step it resumed at.
+  // `replace` so this correction never becomes a back-button stop.
+  useEffect(() => {
+    if (!view || !session || session.status === 'completed' || !current) return
+    if (urlStep === current.key) return
+    navigate(hrefFor(current.key), { replace: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, session?.id, session?.status, current?.key, urlStep])
 
   async function go(fn: () => Promise<unknown>) {
     if (busy) return
@@ -52,7 +82,10 @@ export function WeeklyPlanning() {
     try { await fn() } finally { setBusy(false); refetch() }
   }
 
-  const start = () => go(() => weeklyPlanningApi.startSession())
+  const start = () => go(async () => {
+    const { session: s } = await weeklyPlanningApi.startSession(view?.weekStart)
+    if (s.currentStep) navigate(hrefFor(s.currentStep))
+  })
 
   // Answering a step is two writes that belong together: record the answer, then move
   // the driver on. The last step's answer is the save, which is what ends the session.
@@ -60,14 +93,30 @@ export function WeeklyPlanning() {
     if (!session || !current) return
     await go(async () => {
       await weeklyPlanningApi.decideStep(session.id, current.key, status)
-      if (next) await weeklyPlanningApi.patchSession(session.id, { currentStep: next.key })
-      else await weeklyPlanningApi.complete(session.id)
+      if (next) {
+        await weeklyPlanningApi.patchSession(session.id, { currentStep: next.key })
+        navigate(hrefFor(next.key))
+      } else {
+        await weeklyPlanningApi.complete(session.id)
+        navigate(hrefFor(null), { replace: true })
+      }
     })
   }
 
   const jump = (key: string) => {
     setSheet(false)
-    if (session) go(() => weeklyPlanningApi.patchSession(session.id, { currentStep: key }))
+    if (!session) return
+    navigate(hrefFor(key))
+    go(() => weeklyPlanningApi.patchSession(session.id, { currentStep: key }))
+  }
+
+  // Moving to another week drops the step: that week has its own session (or none),
+  // and carrying this week's step across would name a step of a different record.
+  const goWeek = (week: string) => {
+    setSheet(false)
+    if (!view) return
+    if (week === view.defaultWeekStart) { setSearch({}, { replace: false }); navigate('/planning') }
+    else navigate(`/planning?week=${week}`)
   }
 
   if (loading) return <div className="wp-screen"><div className="wp-empty">Loading…</div></div>
@@ -83,6 +132,23 @@ export function WeeklyPlanning() {
       </div>
     )
   }
+
+  const canGoBack = view.weekStart > view.minWeekStart
+  const WeekStepper = ({ className }: { className?: string }) => (
+    <div className={`wp-weeknav ${className ?? ''}`}>
+      <button
+        type="button" className="wp-weekarrow" disabled={!canGoBack || busy}
+        onClick={() => goWeek(addWeeks(view.weekStart, -1))}
+        aria-label="Plan the previous week"
+      >‹</button>
+      <span className="wp-weeknav-l">{weekLabel(view.weekStart)}</span>
+      <button
+        type="button" className="wp-weekarrow" disabled={busy}
+        onClick={() => goWeek(addWeeks(view.weekStart, 1))}
+        aria-label="Plan the next week"
+      >›</button>
+    </div>
+  )
 
   // ── Saved: the record ────────────────────────────────────────────────────────
   // v4 step 10: "after that Today is the surface, not this session." So the finished
@@ -111,10 +177,17 @@ export function WeeklyPlanning() {
             {!decided.length && <div className="wp-record-row"><div className="wp-record-main"><s>Nothing was decided in this session.</s></div></div>}
           </div>
           <div className="wp-record-f">
-            <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => session && go(() => weeklyPlanningApi.patchSession(session.id, { status: 'active' }))}>
+            <button
+              type="button" className="btn btn-ghost" disabled={busy}
+              onClick={() => go(async () => {
+                await weeklyPlanningApi.patchSession(session.id, { status: 'active' })
+                if (session.currentStep) navigate(hrefFor(session.currentStep))
+              })}
+            >
               Reopen the session
             </button>
           </div>
+          <div className="wp-record-week">Plan another week <WeekStepper /></div>
         </div>
       </div>
     )
@@ -126,9 +199,8 @@ export function WeeklyPlanning() {
       <div className="wp-screen">
         <div className="wp-lobby">
           <div className="wp-lobby-t wf-serif">{planningDayName(view.config.dayOfWeek)}'s session</div>
-          <div className="wp-lobby-s">
-            {runnable.length} steps for {weekLabel(view.weekStart)}. Jump anywhere, leave whenever the week is decided.
-          </div>
+          <div className="wp-lobby-s">{runnable.length} steps. Jump anywhere, leave whenever the week is decided.</div>
+          <WeekStepper className="wp-weeknav-lobby" />
           <div className="wp-lobby-acts">
             {stepsByAct(steps).map((a) => (
               <div key={a.act} className="wp-lobby-act">
@@ -181,9 +253,8 @@ export function WeeklyPlanning() {
           <div className="modal-card wp-sheet" onClick={(e) => e.stopPropagation()}>
             <button type="button" className="modal-close" onClick={() => setSheet(false)} aria-label="Close">×</button>
             <div className="wp-sheet-t wf-serif">{planningDayName(view.config.dayOfWeek)}'s session</div>
-            <div className="wp-sheet-s">
-              {runnable.length} steps. Jump anywhere, leave whenever the week is decided.
-            </div>
+            <div className="wp-sheet-s">{runnable.length} steps. Jump anywhere, leave whenever the week is decided.</div>
+            <WeekStepper className="wp-weeknav-sheet" />
             {stepsByAct(steps).map((a) => (
               <div key={a.act}>
                 <div className="wp-sheet-act">{a.act}</div>
@@ -198,7 +269,7 @@ export function WeeklyPlanning() {
                       onClick={() => jump(s.key)}
                     >
                       <span className="wp-sheet-n">{s.status === 'done' ? '✓' : n}</span>
-                      {s.title}
+                      <span className="wp-sheet-name">{s.title}</span>
                       {here && <span className="wp-sheet-m">you're here</span>}
                       {!here && s.status === 'done' && <span className="wp-sheet-m">decided</span>}
                       {!here && s.status === 'skipped' && <span className="wp-sheet-m">skipped</span>}

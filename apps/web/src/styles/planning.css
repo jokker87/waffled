@@ -116,7 +116,15 @@
 /* ── Agenda sheet ───────────────────────────────────────────────────────────── */
 /* Progressive disclosure, not permanent furniture: the ten steps live behind the step
    counter, so they cost nothing until someone asks where they are. */
-.wp-sheet { width: 520px; max-width: 100%; padding: 24px 26px 20px; }
+/* `width: min(520px, …)` against the VIEWPORT, not `max-width: 100%`.
+   `.modal-overlay` is `display: grid; place-items: center` with no explicit columns,
+   so its implicit column sizes to the item's max-content: a bare `width: 520px` makes
+   the column 520px wide, `100%` then resolves to 520px too, and the card sails past a
+   390px phone with its text clipped (the card's own `overflow-y: auto` makes overflow-x
+   `auto`, so it silently cropped rather than reflowing). Other modals dodge this by
+   never setting `width` — they inherit `.modal-card`'s `width: 100%; max-width: 480px`.
+   The 48px is the overlay's own 24px padding, both sides. */
+.wp-sheet { width: min(520px, calc(100vw - 48px)); max-width: none; padding: 24px 26px 20px; }
 .wp-sheet-t { font-size: 24px; font-weight: 600; letter-spacing: -0.02em; margin-bottom: 4px; }
 .wp-sheet-s { font-size: 13.5px; font-weight: 600; color: var(--ink-2); margin-bottom: 14px; }
 .wp-sheet-act {
@@ -130,6 +138,9 @@
   color: var(--ink-2); text-align: left; cursor: pointer;
 }
 .wp-sheet-step:hover { color: var(--ink); }
+/* The name takes the slack so a long title ellipsises instead of shoving the
+   "you're here" marker off the card's edge. */
+.wp-sheet-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wp-sheet-n {
   width: 22px; height: 22px; border-radius: 999px; background: var(--panel);
   font-size: 11px; font-weight: 800; display: grid; place-items: center;
@@ -142,6 +153,23 @@
 .wp-sheet-m { margin-left: auto; font-size: 12px; font-weight: 650; color: var(--ink-2); }
 .wp-sheet-f { display: flex; margin-top: 16px; }
 .wp-sheet-f .btn { flex: 1; justify-content: center; }
+
+/* ── The week stepper ──────────────────────────────────────────────────────────
+   The default is the week ahead, but a family getting in front of a trip can plan
+   further out. Deliberately NOT in the session header: once a session is running the
+   week it plans is settled, so switching lives on the entry surfaces (the lobby, the
+   agenda sheet, the record) where changing your mind is free. */
+.wp-weeknav { display: inline-flex; align-items: center; gap: 4px; }
+.wp-weeknav-l { font-size: 13px; font-weight: 750; color: var(--ink); min-width: 96px; text-align: center; }
+.wp-weekarrow {
+  width: 28px; height: 28px; flex: none; border: 0; border-radius: 999px;
+  background: var(--panel); color: var(--ink-2);
+  font: inherit; font-size: 16px; font-weight: 700; line-height: 1; cursor: pointer;
+}
+.wp-weekarrow:hover:not(:disabled) { background: var(--hair); color: var(--ink); }
+.wp-weekarrow:disabled { opacity: 0.35; cursor: default; }
+.wp-weeknav-lobby { margin-top: 14px; }
+.wp-weeknav-sheet { margin-top: 10px; }
 
 /* ── The saved record ───────────────────────────────────────────────────────── */
 .wp-record {
@@ -165,6 +193,11 @@
 .wp-record-main s { display: block; font-size: 12.5px; font-weight: 600; color: var(--ink-2); text-decoration: none; margin-top: 1px; }
 .wp-record-f { display: flex; margin-top: 18px; }
 .wp-record-f .btn { flex: 1; justify-content: center; }
+.wp-record-week {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--hair-2);
+  font-size: 13px; font-weight: 650; color: var(--ink-2);
+}
 
 /* ── Narrow (phone) ────────────────────────────────────────────────────────────
    The design's phone frame is the same screen, not a lesser one: same counter, same

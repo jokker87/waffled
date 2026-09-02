@@ -98,9 +98,12 @@ export function KioskRoutes() {
           <Route path="rhythms" element={<Rhythms />} />
         </Route>
         <Route element={<ModuleGate module="weeklyPlanning" />}>
-          {/* The session presents full-screen (its own chrome replaces the rail's), so
-              it takes a single route and drives which step is on screen itself. */}
+          {/* The step is IN the path (and the week in `?week=`), so refresh, the back
+              button and a pasted link all land on the step you were on. `/planning`
+              bare is the entry point: it shows the lobby, or rewrites itself to the
+              step the session resumed at. */}
           <Route path="planning" element={<WeeklyPlanning />} />
+          <Route path="planning/:step" element={<WeeklyPlanning />} />
         </Route>
         <Route path="photos" element={<Photos />} />
         <Route path="settings" element={<Settings />} />

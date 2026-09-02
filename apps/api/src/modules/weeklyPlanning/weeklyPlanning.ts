@@ -9,7 +9,7 @@
 // Config lives in households.settings.weeklyPlanning.
 import { query } from '../../platform/db'
 import { moduleEnabled, type ModuleKey } from '../../platform/modules'
-import { householdWeekStart, snapToWeekStart, type FirstDayOfWeek } from '../lists/lists.service'
+import { householdWeekStart, snapToWeekStart, parseWeekStartParam, type FirstDayOfWeek } from '../lists/lists.service'
 import type { Tenant } from '../households/households'
 
 // ---------------------------------------------------------------------------
@@ -122,21 +122,50 @@ export async function setConfig(householdId: string, patch: Partial<WeeklyPlanni
 // the household starts its week on Sunday (this week) or Monday (tomorrow's week).
 export async function plannedWeekStart(householdId: string): Promise<string> {
   const thisWeek = await householdWeekStart(householdId)
+  const { firstDay, todayLocal } = await weekPrefs(householdId)
+  if (snapToWeekStart(todayLocal, firstDay) === todayLocal) return thisWeek
+  return addDays(thisWeek, 7)
+}
+
+async function weekPrefs(householdId: string): Promise<{ firstDay: FirstDayOfWeek; todayLocal: string }> {
   const { rows } = await query<{ week_start: string; timezone: string | null }>(
     `select week_start, timezone from households where id = $1`,
     [householdId]
   )
   const firstDay: FirstDayOfWeek = rows[0]?.week_start === 'monday' ? 'monday' : 'sunday'
   const tz = (rows[0]?.timezone ?? '').trim() || 'UTC'
-  const todayLocal = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
-  if (snapToWeekStart(todayLocal, firstDay) === todayLocal) return thisWeek
-  return addDays(thisWeek, 7)
+  return {
+    firstDay,
+    todayLocal: new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()),
+  }
 }
 
 function addDays(iso: string, n: number): string {
   const d = new Date(iso + 'T00:00:00Z')
   d.setUTCDate(d.getUTCDate() + n)
   return d.toISOString().slice(0, 10)
+}
+
+// The earliest week a session may plan: the household's CURRENT week. A week that has
+// already finished can't be planned — there is nothing left in it to decide — and the
+// clients show this as the floor of the week stepper.
+export const earliestWeekStart = (householdId: string) => householdWeekStart(householdId)
+
+// Resolve the week a request is about. Callers hand us whatever came off the wire; this
+// is the ONE gate in front of it, and everything downstream gets a real household week.
+//
+// Three jobs, and the middle one is the easy one to forget:
+//   1. reject nonsense (and a date the snap can't represent) → the default week;
+//   2. SNAP a mid-week date to its week start — a caller naming "the Wednesday of the
+//      trip" must not create a session keyed to a day, which nothing would read again;
+//   3. clamp to the floor, so no session claims to plan a week that's over.
+export async function resolveWeekStart(householdId: string, raw: unknown): Promise<string> {
+  const parsed = parseWeekStartParam(raw)
+  if (!parsed) return plannedWeekStart(householdId)
+  const { firstDay } = await weekPrefs(householdId)
+  const snapped = snapToWeekStart(parsed, firstDay)
+  const floor = await earliestWeekStart(householdId)
+  return snapped < floor ? floor : snapped
 }
 
 // ---------------------------------------------------------------------------
@@ -165,8 +194,13 @@ export interface Session {
 
 export interface WeeklyPlanningView {
   config: WeeklyPlanningConfig
-  // The week a session would plan right now (or the open session's own week).
+  // The week THIS view is about — the requested one, snapped and clamped.
   weekStart: string
+  // The week a session plans when nobody asked for a particular one.
+  defaultWeekStart: string
+  // The earliest week that can be planned (the household's current week). Clients use
+  // it as the floor of the week stepper.
+  minWeekStart: string
   session: Session | null
   steps: SessionStep[]
 }
@@ -241,19 +275,24 @@ export async function resolveSteps(householdId: string, sessionId: string | null
 export const firstAvailableStep = (steps: SessionStep[]): string | null => steps.find((s) => s.available)?.key ?? null
 
 // The read behind the module's landing screen: config, the week in question, the open
-// session (if any) and every step with its availability and what it has decided.
-export async function getView(householdId: string): Promise<WeeklyPlanningView> {
-  const week = await plannedWeekStart(householdId)
+// session for THAT week (if any) and every step with its availability and what it has
+// decided. `rawWeekStart` is whatever the client asked for, if anything.
+export async function getView(householdId: string, rawWeekStart?: unknown): Promise<WeeklyPlanningView> {
+  const [week, defaultWeekStart, minWeekStart] = await Promise.all([
+    resolveWeekStart(householdId, rawWeekStart),
+    plannedWeekStart(householdId),
+    earliestWeekStart(householdId),
+  ])
   const session = await findSession(householdId, week)
   const [config, steps] = await Promise.all([getConfig(householdId), resolveSteps(householdId, session?.id ?? null)])
-  return { config, weekStart: session ? session.weekStart : week, session, steps }
+  return { config, weekStart: week, defaultWeekStart, minWeekStart, session, steps }
 }
 
-// Start the session for the planned week — or hand back the one that already exists,
-// finished or not. Idempotent on purpose: "run the session" is a button somebody taps
-// twice, and a second row for the same seven days would split the week's record.
-export async function startSession(tenant: Tenant): Promise<Session> {
-  const week = await plannedWeekStart(tenant.householdId)
+// Start the session for a week — or hand back the one that already exists, finished or
+// not. Idempotent on purpose: "run the session" is a button somebody taps twice, and a
+// second row for the same seven days would split the week's record.
+export async function startSession(tenant: Tenant, rawWeekStart?: unknown): Promise<Session> {
+  const week = await resolveWeekStart(tenant.householdId, rawWeekStart)
   const existing = await findSession(tenant.householdId, week)
   if (existing) return existing
   const steps = await resolveSteps(tenant.householdId, null)

@@ -44,18 +44,24 @@ export interface WeeklyPlanningConfig {
 
 export interface WeeklyPlanningView {
   config: WeeklyPlanningConfig
+  // The week this view is about (the server snapped and floored it).
   weekStart: string
+  // The week a session plans when nobody asked for a particular one.
+  defaultWeekStart: string
+  // The earliest plannable week — the floor of the week stepper.
+  minWeekStart: string
   session: PlanningSession | null
   steps: PlanningStep[]
 }
 
 export const weeklyPlanningApi = {
-  get: () => apiGet<WeeklyPlanningView>('/api/weekly-planning'),
+  get: (weekStart?: string) =>
+    apiGet<WeeklyPlanningView>(`/api/weekly-planning${weekStart ? `?weekStart=${encodeURIComponent(weekStart)}` : ''}`),
   getConfig: () => apiGet<{ config: WeeklyPlanningConfig; steps: PlanningStep[] }>('/api/weekly-planning/config'),
   setConfig: (patch: Partial<WeeklyPlanningConfig>) =>
     apiSend<{ config: WeeklyPlanningConfig }>('PUT', '/api/weekly-planning/config', patch).then((r) => { emit('weeklyPlanning'); return r }),
-  startSession: () =>
-    apiSend<{ session: PlanningSession }>('POST', '/api/weekly-planning/session', {}).then((r) => { emit('weeklyPlanning'); return r }),
+  startSession: (weekStart?: string) =>
+    apiSend<{ session: PlanningSession }>('POST', '/api/weekly-planning/session', weekStart ? { weekStart } : {}).then((r) => { emit('weeklyPlanning'); return r }),
   patchSession: (id: string, patch: { currentStep?: string; status?: 'active' | 'completed' }) =>
     apiSend<{ session: PlanningSession }>('PATCH', `/api/weekly-planning/session/${id}`, patch).then((r) => { emit('weeklyPlanning'); return r }),
   decideStep: (id: string, stepKey: string, status: StepStatus, data?: Record<string, unknown>) =>
@@ -82,15 +88,21 @@ export function stepsByAct(steps: PlanningStep[]): { act: string; steps: Plannin
   return out
 }
 
-// Where the driver is, resolved against what's actually available — a currentStep
-// pointing at a step whose module was turned off mid-week must not strand the session.
-export function resolveCurrent(view: WeeklyPlanningView | null): PlanningStep | null {
+// Which step is on screen, resolved against what's actually available. In order: the
+// step named in the URL, then the session's own pointer (which is what lets another
+// device resume where this one left off), then the first runnable step. A key that
+// isn't available — its module was turned off mid-week, or somebody typed it — must
+// never strand the session on a blank screen.
+export function resolveCurrent(view: WeeklyPlanningView | null, urlStep?: string | null): PlanningStep | null {
   if (!view) return null
   const avail = availableSteps(view.steps)
   if (!avail.length) return null
-  const key = view.session?.currentStep
-  return avail.find((s) => s.key === key) ?? avail[0]
+  return avail.find((s) => s.key === urlStep) ?? avail.find((s) => s.key === view.session?.currentStep) ?? avail[0]
 }
+
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000
+export const addWeeks = (iso: string, n: number): string =>
+  new Date(new Date(`${iso}T00:00:00Z`).getTime() + n * WEEK_MS).toISOString().slice(0, 10)
 
 export const nextStepAfter = (steps: PlanningStep[], key: string): PlanningStep | null => {
   const avail = availableSteps(steps)
@@ -101,7 +113,7 @@ export const nextStepAfter = (steps: PlanningStep[], key: string): PlanningStep 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 export const planningDayName = (dow: number) => WEEKDAYS[((dow % 7) + 7) % 7] ?? 'Sunday'
 
-export function useWeeklyPlanning() {
+export function useWeeklyPlanning(weekStart?: string) {
   const [view, setView] = useState<WeeklyPlanningView | null>(null)
   const [loading, setLoading] = useState(true)
   const [nonce, setNonce] = useState(0)
@@ -109,10 +121,10 @@ export function useWeeklyPlanning() {
   useRefetchOn(['weeklyPlanning'], refetch)
   useEffect(() => {
     let alive = true
-    weeklyPlanningApi.get()
+    weeklyPlanningApi.get(weekStart)
       .then((d) => { if (alive) { setView(d); setLoading(false) } })
       .catch(() => { if (alive) setLoading(false) })
     return () => { alive = false }
-  }, [nonce])
+  }, [nonce, weekStart])
   return { view, loading, refetch }
 }

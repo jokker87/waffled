@@ -1,5 +1,5 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
-import { MemoryRouter } from 'react-router'
+import { MemoryRouter, Routes, Route, useLocation } from 'react-router'
 import { WeeklyPlanning } from './WeeklyPlanning'
 
 // The session shell: the lobby, the chrome each step hangs off, the agenda sheet
@@ -52,6 +52,9 @@ function mockApi(view: Record<string, unknown>) {
 const baseView = (over: Record<string, unknown> = {}) => ({
   config: { dayOfWeek: 0, time: '17:00', steps: {}, showOnToday: true },
   weekStart: '2026-09-06',
+  defaultWeekStart: '2026-09-06',
+  // The floor: this household's current week is the one before the default.
+  minWeekStart: '2026-08-30',
   session: null,
   steps: STEPS,
   ...over,
@@ -68,7 +71,27 @@ const session = (over: Record<string, unknown> = {}) => ({
   ...over,
 })
 
-const draw = () => render(<MemoryRouter><WeeklyPlanning /></MemoryRouter>)
+// The URL is part of this screen's state, so the tests mount the real routes and read
+// the location back — asserting on component state alone would miss the address bar
+// going stale, which is the whole point of `/planning/:step`.
+function Where() {
+  const l = useLocation()
+  return <div data-testid="where">{l.pathname}{l.search}</div>
+}
+
+const drawAt = (path: string) =>
+  render(
+    <MemoryRouter initialEntries={[path]}>
+      <Where />
+      <Routes>
+        <Route path="/planning" element={<WeeklyPlanning />} />
+        <Route path="/planning/:step" element={<WeeklyPlanning />} />
+      </Routes>
+    </MemoryRouter>
+  )
+
+const draw = () => drawAt('/planning')
+const where = () => screen.getByTestId('where').textContent
 const sent = (m: string, frag: string) => calls.filter((c) => c.method === m && c.url.includes(frag))
 
 describe('weekly planning · the lobby', () => {
@@ -78,7 +101,7 @@ describe('weekly planning · the lobby', () => {
     expect(await screen.findByText(/Sunday's session/)).toBeTruthy()
     // The unavailable step is not counted — a household with family night off is
     // running four steps, not five.
-    expect(screen.getByText(/4 steps for/)).toBeTruthy()
+    expect(screen.getByText(/4 steps\./)).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: /Start the session/ }))
     await waitFor(() => expect(sent('POST', '/api/weekly-planning/session').length).toBe(1))
   })
@@ -178,6 +201,84 @@ describe('weekly planning · the record', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Reopen the session/ }))
     await waitFor(() => expect(sent('PATCH', '/session/s1')[0].body).toMatchObject({ status: 'active' }))
+  })
+})
+
+// The URL is the state. Leaving the module and coming back has to land you where you
+// were — and so does a refresh, the back button, and a link someone pasted.
+describe('weekly planning · the URL', () => {
+  it('rewrites bare /planning to the step the session resumed at', async () => {
+    mockApi(baseView({ session: session({ currentStep: 'horizon' }) }))
+    drawAt('/planning')
+    await waitFor(() => expect(where()).toBe('/planning/horizon'))
+  })
+
+  it('opens the step named in the path, over the session pointer', async () => {
+    // The session says 'calendar'; the link says 'recap'. The link wins — otherwise a
+    // pasted URL or a back-button press silently snaps you elsewhere.
+    mockApi(baseView({ session: session({ currentStep: 'calendar' }) }))
+    drawAt('/planning/recap')
+    expect(await screen.findByText('Recap')).toBeTruthy()
+    expect(where()).toBe('/planning/recap')
+  })
+
+  it('falls back to the resume step when the path names a step that cannot run', async () => {
+    mockApi(baseView({ session: session({ currentStep: 'calendar' }) }))
+    drawAt('/planning/familyNight')
+    // familyNight's module is off, so it is not a place you can be.
+    expect(await screen.findByText('Calendar')).toBeTruthy()
+    await waitFor(() => expect(where()).toBe('/planning/calendar'))
+  })
+
+  it('advances the path as the session advances', async () => {
+    mockApi(baseView({ session: session({ currentStep: 'calendar' }) }))
+    drawAt('/planning/calendar')
+    fireEvent.click(await screen.findByRole('button', { name: /Looks right/ }))
+    await waitFor(() => expect(where()).toBe('/planning/horizon'))
+  })
+
+  it('drops the step from the path when the session is saved', async () => {
+    mockApi(baseView({ session: session({ currentStep: 'recap' }) }))
+    drawAt('/planning/recap')
+    fireEvent.click(await screen.findByRole('button', { name: /Looks right/ }))
+    await waitFor(() => expect(sent('POST', '/session/s1/complete').length).toBe(1))
+    await waitFor(() => expect(where()).toBe('/planning'))
+  })
+})
+
+// Planning further ahead than the default week.
+describe('weekly planning · choosing the week', () => {
+  it('names the week and steps forward, carrying it in the query', async () => {
+    mockApi(baseView())
+    draw()
+    expect(await screen.findByText('6 Sun – 12 Sat')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Plan the next week' }))
+    await waitFor(() => expect(where()).toBe('/planning?week=2026-09-13'))
+    // …and the view for that week is what gets fetched.
+    await waitFor(() => expect(sent('GET', 'weekStart=2026-09-13').length).toBeGreaterThan(0))
+  })
+
+  it('will not step back past the household’s current week', async () => {
+    // weekStart === minWeekStart ⇒ there is no earlier week left to plan.
+    mockApi(baseView({ weekStart: '2026-08-30', defaultWeekStart: '2026-09-06' }))
+    draw()
+    const back = await screen.findByRole('button', { name: 'Plan the previous week' })
+    expect(back.hasAttribute('disabled')).toBe(true)
+  })
+
+  it('starts the session on the week being shown, not the default', async () => {
+    mockApi(baseView({ weekStart: '2026-09-20', defaultWeekStart: '2026-09-06' }))
+    drawAt('/planning?week=2026-09-20')
+    fireEvent.click(await screen.findByRole('button', { name: /Start the session/ }))
+    await waitFor(() => expect(sent('POST', '/api/weekly-planning/session').length).toBe(1))
+    expect(sent('POST', '/api/weekly-planning/session')[0].body).toMatchObject({ weekStart: '2026-09-20' })
+  })
+
+  it('keeps the everyday URL clean — stepping back to the default drops the query', async () => {
+    mockApi(baseView({ weekStart: '2026-09-13', defaultWeekStart: '2026-09-06' }))
+    drawAt('/planning?week=2026-09-13')
+    fireEvent.click(await screen.findByRole('button', { name: 'Plan the previous week' }))
+    await waitFor(() => expect(where()).toBe('/planning'))
   })
 })
 

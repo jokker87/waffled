@@ -61,6 +61,8 @@ const session = {
 const planningView = {
   config: { dayOfWeek: 0, time: '17:00', steps: {}, showOnToday: true },
   weekStart: '2026-09-06',
+  defaultWeekStart: '2026-09-06',
+  minWeekStart: '2026-08-30',
   session,
   steps,
 }
@@ -183,6 +185,32 @@ test('the phone gets the same screen, with the footer reachable', async ({ page 
 
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
   expect(overflow).toBeLessThanOrEqual(0)
+})
+
+test('the agenda sheet fits a phone instead of clipping its own text', async ({ page }) => {
+  // The sheet set an explicit `width: 520px`, and `.modal-overlay`'s implicit grid
+  // column sized to that, so `max-width: 100%` resolved to 520px too: on a phone the
+  // card overhung the screen and its own `overflow-y: auto` cropped the text rather
+  // than reflowing it. Nothing in the DOM looked wrong — only the geometry did.
+  await mockApi(page)
+  await signIn(page)
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/planning')
+  await page.locator('.wp-stepchip').click()
+  await expect(page.getByText('Intake')).toBeVisible()
+  await page.screenshot({ path: 'test-results/weekly-planning-sheet-phone.png' })
+
+  const fit = await page.evaluate(() => {
+    const el = document.querySelector('.wp-sheet') as HTMLElement | null
+    if (!el) return null
+    const r = el.getBoundingClientRect()
+    return { right: Math.round(r.right), left: Math.round(r.left), vw: window.innerWidth, clipped: el.scrollWidth - el.clientWidth }
+  })
+  expect(fit).not.toBeNull()
+  expect(fit!.left).toBeGreaterThanOrEqual(0)
+  expect(fit!.right).toBeLessThanOrEqual(fit!.vw)
+  // Nothing cropped inside the card either.
+  expect(fit!.clipped).toBeLessThanOrEqual(0)
 })
 
 test('a finished session reads back as a record', async ({ page }) => {

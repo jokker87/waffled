@@ -19,12 +19,18 @@ function mint(sub: string): string {
   return jwt.sign({}, SECRET, { algorithm: 'HS256', subject: sub, issuer: 'waffled-local', audience: 'waffled-api', expiresIn: '1h' })
 }
 
+// lambda-api reads the query off `queryStringParameters`, NOT off the path — a `?x=y`
+// left in `path` is silently invisible to the handler. Split it here, as
+// chores/meals.integration.test.ts do.
 function call(method: string, path: string, token?: string, body?: unknown) {
   const headers: Record<string, string> = {}
   if (token) headers.authorization = `Bearer ${token}`
   if (body !== undefined) headers['content-type'] = 'application/json'
+  const [rawPath, qs] = path.split('?')
+  const queryStringParameters: Record<string, string> = {}
+  if (qs) for (const pair of qs.split('&')) { const [k, v] = pair.split('='); queryStringParameters[k] = decodeURIComponent(v ?? '') }
   return app.run(
-    { httpMethod: method, path, headers, queryStringParameters: {}, body: body !== undefined ? JSON.stringify(body) : null, isBase64Encoded: false },
+    { httpMethod: method, path: rawPath, headers, queryStringParameters, body: body !== undefined ? JSON.stringify(body) : null, isBase64Encoded: false },
     {}
   ) as Promise<{ statusCode: number; body: string }>
 }
@@ -208,9 +214,77 @@ describe('weekly planning · the session record', () => {
     expect(view.session.completedAt).toBe(null)
   })
 
-  it('goes back behind the gate when the module is turned off', async () => {
+  it('goes back behind the gate when the module is turned off (and back)', async () => {
     await call('PATCH', '/api/household/modules', kevin, { weeklyPlanning: false })
     expect((await call('GET', '/api/weekly-planning', kevin)).statusCode).toBe(403)
     await call('PATCH', '/api/household/modules', kevin, { weeklyPlanning: true })
+  })
+})
+
+// Planning further than one week out. The default is the week ahead, but a family that
+// wants to get in front of a trip must be able to say so — and the SERVER still owns
+// which seven days any given week key means.
+describe('weekly planning · planning a week other than the default', () => {
+  const addDays = (iso: string, n: number) => {
+    const d = new Date(`${iso}T00:00:00Z`)
+    d.setUTCDate(d.getUTCDate() + n)
+    return d.toISOString().slice(0, 10)
+  }
+
+  it('says which week it defaults to, and the earliest one it will plan', async () => {
+    const view = json(await call('GET', '/api/weekly-planning', kevin))
+    expect(view.defaultWeekStart).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+    expect(view.minWeekStart).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+    // The floor is the household's CURRENT week — a session never plans a week that has
+    // already finished — and the default is that week or a later one.
+    expect(view.defaultWeekStart >= view.minWeekStart).toBe(true)
+    expect(view.weekStart).toBe(view.defaultWeekStart)
+  })
+
+  it('serves a later week when asked, and keeps its session separate', async () => {
+    const base = json(await call('GET', '/api/weekly-planning', kevin))
+    const later = addDays(base.defaultWeekStart, 14)
+
+    const view = json(await call('GET', `/api/weekly-planning?weekStart=${later}`, kevin))
+    expect(view.weekStart).toBe(later)
+    // A week nobody has planned yet has no session, even though the default week does.
+    expect(view.session).toBe(null)
+
+    const started = json(await call('POST', '/api/weekly-planning/session', kevin, { weekStart: later })).session
+    expect(started.weekStart).toBe(later)
+
+    // …and it did not disturb the default week's session.
+    const dflt = json(await call('GET', '/api/weekly-planning', kevin))
+    expect(dflt.session.id).not.toBe(started.id)
+    expect(dflt.weekStart).toBe(base.defaultWeekStart)
+
+    // Decisions are per-week, not per-household.
+    await call('POST', `/api/weekly-planning/session/${started.id}/step`, kevin, { stepKey: 'meals', status: 'done' })
+    const laterAgain = json(await call('GET', `/api/weekly-planning?weekStart=${later}`, kevin))
+    expect(laterAgain.steps.find((s: { key: string }) => s.key === 'meals').status).toBe('done')
+    // The default week's own meals answer is untouched.
+    expect(json(await call('GET', '/api/weekly-planning', kevin)).steps.find((s: { key: string }) => s.key === 'meals').status).toBe('pending')
+  })
+
+  it('snaps a mid-week date to that week rather than keying rows nothing will read', async () => {
+    const base = json(await call('GET', '/api/weekly-planning', kevin))
+    const midweek = addDays(base.defaultWeekStart, 3)
+    const view = json(await call('GET', `/api/weekly-planning?weekStart=${midweek}`, kevin))
+    expect(view.weekStart).toBe(base.defaultWeekStart)
+  })
+
+  it('refuses to plan the past — a week before the floor clamps to it', async () => {
+    const base = json(await call('GET', '/api/weekly-planning', kevin))
+    const longAgo = addDays(base.minWeekStart, -35)
+    expect(json(await call('GET', `/api/weekly-planning?weekStart=${longAgo}`, kevin)).weekStart).toBe(base.minWeekStart)
+    expect(json(await call('POST', '/api/weekly-planning/session', kevin, { weekStart: longAgo })).session.weekStart).toBe(base.minWeekStart)
+  })
+
+  it('falls back to the default week when the parameter is nonsense', async () => {
+    const base = json(await call('GET', '/api/weekly-planning', kevin))
+    for (const bad of ['not-a-date', '2026-13-45', '']) {
+      const view = json(await call('GET', `/api/weekly-planning?weekStart=${bad}`, kevin))
+      expect(view.weekStart).toBe(base.defaultWeekStart)
+    }
   })
 })
