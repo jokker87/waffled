@@ -182,6 +182,52 @@ describe('weekly planning · the agenda sheet', () => {
   })
 })
 
+// Coming back to Planning always RESUMES (that's what lets another device pick the
+// session up), which means the lobby is otherwise unreachable once a week is started.
+// So the session needs both doors: leave, and start over.
+describe('weekly planning · leaving and starting over', () => {
+  it('offers a way out of the session, without discarding it', async () => {
+    mockApi(baseView({ session: session() }))
+    draw()
+    fireEvent.click(await screen.findByRole('button', { name: /2 of 4/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Leave for now/ }))
+    await waitFor(() => expect(where()).toBe('/'))
+    // Leaving is not deleting.
+    expect(sent('DELETE', '/session/s1').length).toBe(0)
+  })
+
+  it('confirms before throwing a session away', async () => {
+    mockApi(baseView({ session: session() }))
+    draw()
+    fireEvent.click(await screen.findByRole('button', { name: /2 of 4/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Start this week over/ }))
+    // Says plainly what survives, so "start over" doesn't read as "undo my week".
+    expect(screen.getByText(/stays put; only the session is discarded/)).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: /^Keep it$/ }))
+    expect(sent('DELETE', '/session/s1').length).toBe(0)
+  })
+
+  it('discards the session and lands back on the lobby', async () => {
+    mockApi(baseView({ session: session() }))
+    draw()
+    fireEvent.click(await screen.findByRole('button', { name: /2 of 4/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Start this week over/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^Start over$/ }))
+    await waitFor(() => expect(sent('DELETE', '/session/s1').length).toBe(1))
+    await waitFor(() => expect(where()).toBe('/planning'))
+  })
+
+  it('offers the same door on a finished session', async () => {
+    mockApi(baseView({ session: session({ status: 'completed', completedAt: '2026-09-06T17:40:00.000Z' }) }))
+    draw()
+    expect(await screen.findByText('The week is decided')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /Start this week over/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^Start over$/ }))
+    await waitFor(() => expect(sent('DELETE', '/session/s1').length).toBe(1))
+  })
+})
+
 describe('weekly planning · the record', () => {
   it('reads back what was decided, and offers a way back in', async () => {
     mockApi(baseView({

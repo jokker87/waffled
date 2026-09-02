@@ -151,8 +151,26 @@
 .wp-sheet-step.on { color: var(--ink); font-weight: 750; }
 .wp-sheet-step.on .wp-sheet-n { background: var(--primary); color: var(--on-accent); }
 .wp-sheet-m { margin-left: auto; font-size: 12px; font-weight: 650; color: var(--ink-2); }
-.wp-sheet-f { display: flex; margin-top: 16px; }
+.wp-sheet-f { display: flex; gap: 10px; margin-top: 16px; }
 .wp-sheet-f .btn { flex: 1; justify-content: center; }
+
+/* Starting over is destructive and permanent, so it is quiet until asked for and then
+   confirms in place — never a same-weight button next to "Close". */
+.wp-sheet-danger { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--hair-2); text-align: center; }
+.wp-sheet-danger-open,
+.wp-sheet-danger-no {
+  background: none; border: 0; padding: 6px 8px; cursor: pointer;
+  font: inherit; font-size: 12.5px; font-weight: 700; color: var(--ink-3);
+}
+.wp-sheet-danger-open:hover, .wp-sheet-danger-no:hover { color: var(--ink); }
+.wp-sheet-danger-q { font-size: 12.5px; font-weight: 600; color: var(--ink-2); line-height: 1.5; text-align: left; }
+.wp-sheet-danger-acts { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+.wp-sheet-danger-yes {
+  border: 0; border-radius: 999px; padding: 8px 16px; cursor: pointer;
+  font: inherit; font-size: 13px; font-weight: 750;
+  background: var(--danger); color: var(--on-accent);
+}
+.wp-sheet-danger-yes:disabled { opacity: 0.5; cursor: default; }
 
 /* ── The week stepper ──────────────────────────────────────────────────────────
    The default is the week ahead, but a family getting in front of a trip can plan

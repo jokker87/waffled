@@ -359,3 +359,17 @@ export async function decideStep(householdId: string, sessionId: string, input: 
 export async function completeSession(householdId: string, id: string): Promise<Session | null> {
   return patchSession(householdId, id, { status: 'completed' })
 }
+
+// Throw the session away and put the week back to its lobby — starting one must not be
+// a one-way door (the wrong week, or a run the family wants to redo from the top).
+//
+// This discards the SESSION only. Everything the session decided lives in the module
+// that owns it — the event that got added, the chore that got assigned, the goal that
+// got featured — and those stay exactly as they are. Deleting them here would be a
+// destructive surprise, and the session has no business owning another module's data.
+// The step rows go with it (on delete cascade), so nothing is left claiming a week was
+// decided when its record is gone.
+export async function deleteSession(householdId: string, id: string): Promise<boolean> {
+  const { rowCount } = await query(`delete from planning_sessions where household_id = $1 and id = $2`, [householdId, id])
+  return (rowCount ?? 0) > 0
+}

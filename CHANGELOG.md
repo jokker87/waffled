@@ -27,7 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   type anything twice. The session defaults to the week ahead, but you can step forward and
   plan any later week — each week keeps its own session and its own record — and every step has
   its own web address, so leaving mid-session and coming back (or refreshing, or using the back
-  button) puts you exactly where you were.
+  button) puts you exactly where you were. You can also leave a session for now and pick it up
+  later, or start a week over from scratch — starting over throws away the session only;
+  anything it already decided (an event you added, a chore you handed out) stays where it is.
 - **A privacy policy and terms of service on waffled.app.** Two new pages —
   [waffled.app/privacy](https://waffled.app/privacy) and
   [waffled.app/terms](https://waffled.app/terms) — spelling out what a self-hosted install

@@ -71,6 +71,21 @@ This is deliberately **two** pointers, and they answer different questions: the 
 *this browser* is, and `planning_sessions.current_step` is where the *family* is — which is what
 lets the iPad resume where the phone left off. Answering a step writes both.
 
+## Both doors out of a session
+
+Because returning to Planning always **resumes**, the lobby is otherwise unreachable once a week
+has a session — so the session has to offer two exits, and both live in the agenda sheet (the
+"where am I" surface) rather than the step chrome:
+
+- **Leave for now** — go to Today; the session stays exactly where it is. The sheet already
+  promises you can "leave whenever the week is decided", so it has to offer the door.
+- **Start this week over** — `DELETE /session/:id`, which discards the session record and (by
+  cascade) its step decisions, putting the week back to its lobby. It confirms in place first,
+  and says plainly what survives: **everything the session decided stays where it landed** — the
+  event that got added, the chore that got assigned, the goal that got featured. The session
+  sequences decisions into other modules; it has no business deleting their data. Also offered on
+  the finished record, which is the other place you'd look for "do this week again".
+
 ## Steps and gating
 
 The ten steps are a **server-owned catalog** (`STEPS` in `weeklyPlanning.ts`) so web and iOS

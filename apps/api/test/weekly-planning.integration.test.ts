@@ -221,6 +221,32 @@ describe('weekly planning · the session record', () => {
   })
 })
 
+// Starting a session must not be a one-way door: a week started by mistake, or one the
+// family wants to run again from the top, has to be discardable.
+describe('weekly planning · starting over', () => {
+  it('discards the session and its decisions, putting the week back to its lobby', async () => {
+    const s = json(await call('POST', '/api/weekly-planning/session', kevin)).session
+    await call('POST', `/api/weekly-planning/session/${s.id}/step`, kevin, { stepKey: 'calendar', status: 'done' })
+    expect(json(await call('GET', '/api/weekly-planning', kevin)).steps.find((x: { key: string }) => x.key === 'calendar').status).toBe('done')
+
+    expect((await call('DELETE', `/api/weekly-planning/session/${s.id}`, kevin)).statusCode).toBe(200)
+
+    const after = json(await call('GET', '/api/weekly-planning', kevin))
+    expect(after.session).toBe(null)
+    // The step decisions went with it — nothing is left claiming the week was decided.
+    expect(after.steps.every((x: { status: string }) => x.status === 'pending')).toBe(true)
+
+    // …and starting again is a genuinely fresh session, not the old one resurrected.
+    const again = json(await call('POST', '/api/weekly-planning/session', kevin)).session
+    expect(again.id).not.toBe(s.id)
+    expect(again.status).toBe('active')
+  })
+
+  it('404s on a session that is not this household’s', async () => {
+    expect((await call('DELETE', '/api/weekly-planning/session/11111111-1111-1111-1111-111111111111', kevin)).statusCode).toBe(404)
+  })
+})
+
 // Planning further than one week out. The default is the week ahead, but a family that
 // wants to get in front of a trip must be able to say so — and the SERVER still owns
 // which seven days any given week key means.

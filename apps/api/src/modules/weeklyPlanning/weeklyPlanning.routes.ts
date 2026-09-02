@@ -9,6 +9,7 @@ import {
   patchSession,
   decideStep,
   completeSession,
+  deleteSession,
   getSessionById,
   resolveSteps,
   isStepKey,
@@ -92,6 +93,14 @@ export function registerWeeklyPlanningRoutes(api: Api): void {
     const steps = await decideStep(tenant.householdId, req.params.id!, { stepKey: body.stepKey, status: body.status, data })
     if (!steps) return res.status(404).json({ error: 'NotFound', message: 'session not found' })
     return { steps }
+  }))
+
+  // Throw it away and put the week back to its lobby. Discards the session record
+  // only — what the session decided lives in the modules that own it and stays put.
+  api.delete('/api/weekly-planning/session/:id', tenantRoute(async (tenant, req: Request, res: Response) => {
+    const removed = await deleteSession(tenant.householdId, req.params.id!)
+    if (!removed) return res.status(404).json({ error: 'NotFound', message: 'session not found' })
+    return { ok: true }
   }))
 
   // Finish it — the record gets its timestamp and Today becomes the surface again.

@@ -51,6 +51,9 @@ export function WeeklyPlanning() {
   const { view, loading, refetch } = useWeeklyPlanning(weekParam)
   const [sheet, setSheet] = useState(false)
   const [busy, setBusy] = useState(false)
+  // Two-tap confirm on discarding a session — it can't be undone, and it sits next to
+  // the everyday "Close".
+  const [confirmDiscard, setConfirmDiscard] = useState(false)
 
   const steps = view?.steps ?? []
   const runnable = useMemo(() => availableSteps(steps), [steps])
@@ -110,6 +113,21 @@ export function WeeklyPlanning() {
     go(() => weeklyPlanningApi.patchSession(session.id, { currentStep: key }))
   }
 
+  // Start the week over. The lobby is otherwise unreachable once a session exists —
+  // coming back to Planning always resumes — so without this a week started by mistake
+  // could never be undone.
+  const discard = () => {
+    if (!session) return
+    setSheet(false)
+    setConfirmDiscard(false)
+    go(async () => {
+      await weeklyPlanningApi.discard(session.id)
+      navigate(hrefFor(null), { replace: true })
+    })
+  }
+
+  const closeSheet = () => { setSheet(false); setConfirmDiscard(false) }
+
   // Moving to another week drops the step: that week has its own session (or none),
   // and carrying this week's step across would name a step of a different record.
   const goWeek = (week: string) => {
@@ -147,6 +165,27 @@ export function WeeklyPlanning() {
         onClick={() => goWeek(addWeeks(view.weekStart, 1))}
         aria-label="Plan the next week"
       >›</button>
+    </div>
+  )
+
+  // Reachable from the agenda sheet mid-session and from the record afterwards — the
+  // two places you'd look for "no, do this week again".
+  const DiscardBlock = () => (
+    <div className="wp-sheet-danger">
+      {confirmDiscard ? (
+        <>
+          <div className="wp-sheet-danger-q">
+            Throw this session away and start the week over? What it already decided —
+            events added, chores handed out — stays put; only the session is discarded.
+          </div>
+          <div className="wp-sheet-danger-acts">
+            <button type="button" className="wp-sheet-danger-no" onClick={() => setConfirmDiscard(false)}>Keep it</button>
+            <button type="button" className="wp-sheet-danger-yes" disabled={busy} onClick={discard}>Start over</button>
+          </div>
+        </>
+      ) : (
+        <button type="button" className="wp-sheet-danger-open" onClick={() => setConfirmDiscard(true)}>Start this week over</button>
+      )}
     </div>
   )
 
@@ -188,6 +227,7 @@ export function WeeklyPlanning() {
             </button>
           </div>
           <div className="wp-record-week">Plan another week <WeekStepper /></div>
+          <DiscardBlock />
         </div>
       </div>
     )
@@ -249,9 +289,9 @@ export function WeeklyPlanning() {
       </div>
 
       {sheet && (
-        <div className="modal-overlay" onClick={() => setSheet(false)}>
+        <div className="modal-overlay" onClick={closeSheet}>
           <div className="modal-card wp-sheet" onClick={(e) => e.stopPropagation()}>
-            <button type="button" className="modal-close" onClick={() => setSheet(false)} aria-label="Close">×</button>
+            <button type="button" className="modal-close" onClick={closeSheet} aria-label="Close">×</button>
             <div className="wp-sheet-t wf-serif">{planningDayName(view.config.dayOfWeek)}'s session</div>
             <div className="wp-sheet-s">{runnable.length} steps. Jump anywhere, leave whenever the week is decided.</div>
             <WeekStepper className="wp-weeknav-sheet" />
@@ -279,8 +319,12 @@ export function WeeklyPlanning() {
               </div>
             ))}
             <div className="wp-sheet-f">
-              <button type="button" className="btn btn-ghost" onClick={() => setSheet(false)}>Close</button>
+              <button type="button" className="btn btn-ghost" onClick={closeSheet}>Close</button>
+              {/* The sheet already promises you can "leave whenever" — so it has to
+                  offer the door. Leaving keeps the session exactly where it is. */}
+              <button type="button" className="btn btn-ghost" onClick={() => { closeSheet(); navigate('/') }}>Leave for now</button>
             </div>
+            <DiscardBlock />
           </div>
         </div>
       )}

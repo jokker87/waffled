@@ -4,7 +4,7 @@
 // arrives in the view; nothing here hardcodes it, so web and iOS can't drift on the
 // shape of the session. See docs/product/weekly-planning-plan.md.
 import { useEffect, useState } from 'react'
-import { apiGet, apiSend } from './client'
+import { apiGet, apiSend, apiDelete } from './client'
 import { useRefetchOn, emit } from './bus'
 
 export type StepStatus = 'pending' | 'done' | 'skipped'
@@ -70,6 +70,11 @@ export const weeklyPlanningApi = {
   complete: (id: string) =>
     apiSend<{ session: PlanningSession; steps: PlanningStep[] }>('POST', `/api/weekly-planning/session/${id}/complete`, {})
       .then((r) => { emit('weeklyPlanning'); return r }),
+  // Discard the session and put the week back to its lobby. What the session decided
+  // stays where it landed (the calendar, the chore board, the goals) — this only
+  // throws away the session record.
+  discard: (id: string) =>
+    apiDelete(`/api/weekly-planning/session/${id}`).then((r) => { emit('weeklyPlanning'); return r }),
 }
 
 // The steps this household actually runs, in order — the ones the session walks and
