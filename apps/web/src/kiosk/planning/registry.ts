@@ -17,6 +17,13 @@ export interface StepBodyProps {
   // Attach the crumb this step wants kept on the session record ("3 nights were
   // auto-filled and can still be undone"). NEVER a copy of module data: the recap reads
   // through to the modules, so duplicating here lets the two disagree. null clears it.
+  //
+  // IT IS ONLY PERSISTED WHEN THE STEP IS ANSWERED. This holds a ref in the shell until
+  // Skip or the affirmative sends it, so a step that is used and then left — assign
+  // something, walk away without answering — loses it. Never make it the authority for
+  // anything a step must find again: derive that from the module that owns it, and treat
+  // the crumb as a hint at most. (The Meals step's shopping trip works exactly this way,
+  // for exactly this reason.) A step needing a mid-step write should call its own route.
   setDecisionData: (data: Record<string, unknown> | null) => void
   // Re-read the session view — call after writing into another module so the agenda
   // sheet and the counter agree with what just happened.

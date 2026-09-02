@@ -25,7 +25,27 @@ Two things have no home yet and so get tables:
    it was finished (v4 step 10: "saving writes the session record with a timestamp").
 2. **Parked items** — what somebody wrote down during the week that "exists nowhere else yet"
    (v4 step 1's *Parked* group, and step 3's "park a note" with its optional step tag).
-   *Deferred to the step 1 commit*, so the shell ships no unused schema.
+   Landed with step 1 as `planning_parked_items` (**0100**), so the shell shipped no unused
+   schema. `session_id` is nullable `on delete set null`: discarding a session must not delete
+   a note somebody wrote down.
+
+### Step 1 routes; it does not resolve
+
+The one refinement wave 1 made to the claim above. v4's see-all screen says it outright —
+*"Routing here changes nothing in your modules — it only decides which step handles it"* — so
+**step 1 is triage**: an overdue chore is sent to *Tasks*, an appointment to *Calendar*, a kid's
+thing to *Kids*. The step that owns the work does it later, which is why the Tasks mock captions
+items "sent here in step 1". Only two of its actions write to a module: "It's done already" and
+"Drop it".
+
+**The routes contract** (read by steps 2, 6, 8, 9 and eventually 10): step 1 records
+`{ routes: [{ kind, id, title, source, to }] }` in its own `planning_session_steps.data`, where
+`to` is a step key. Every step already receives the whole view, so a consumer reads
+`view.steps.find(s => s.key === 'looseEnds')?.data.routes` and filters on its own key — no new
+table, and no shared file to edit. `LooseEndRoute` is exported from
+`apps/web/src/lib/api/planning/looseEnds.ts`. Re-routing replaces rather than stacks, `to: null`
+un-routes, and **a route is retired when its item is settled**, so a later step is never handed
+something its own module already considers done. The array is a decision *log*, not a queue.
 
 ## Surfaces & cadence
 
@@ -143,11 +163,22 @@ branches editing the shell is exactly what these seams exist to prevent.
 
 Three steps aren't free to go in any order:
 
-1. **`looseEnds` goes first** — it owns the `planning_parked_items` migration (**0100**), and
-   `horizon`'s "park a note" writes to the same table. `horizon` starts after it lands.
-2. **`recap` goes last** — it reads what every other step decided.
-3. Everything else (`calendar`, `familyNight`, `connection`, `goals`, `meals`, `tasks`, `kids`)
-   is independent.
+1. ~~**`looseEnds` goes first**~~ — **done.** It owns `planning_parked_items` (**0100**) and the
+   routes contract above. `horizon`'s "park a note" writes to the same table and can now start.
+2. **`recap` goes last** — it reads what every other step decided, including step 1's routes.
+3. Everything else (`familyNight`, `connection`, `kids`) is independent.
+
+**Wave 1 landed:** `looseEnds`, `calendar`, `goals`, `meals`, `tasks`. Remaining: `horizon`,
+`familyNight`, `connection`, `kids`, then `recap`.
+
+### Two things wave 1 taught, worth knowing before writing a step
+
+- **`setDecisionData` is not storage.** It only reaches the server when the step is *answered*,
+  so anything a step must find again on a later visit has to be derived from the module that owns
+  it, with the crumb as a hint at most. The Meals step's shopping trip is the worked example.
+- **A step body that throws costs only that step.** `StepErrorBoundary` wraps each body, so the
+  counter, the agenda sheet and both footer controls survive — don't add defensive try/catch
+  around a whole body to protect the session.
 
 **Migration numbers are assigned centrally, never picked by a step** — CI's migration-hygiene job
 fails the PR on a collision. Only `looseEnds` has one (0100). Any other step that turns out to

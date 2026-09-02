@@ -22,14 +22,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and one button to answer it — with the full ten-step agenda tucked behind the step counter
   so you can jump anywhere or leave whenever the week is decided. Skipping a step is a real
   answer, and finishing writes a record of what the week decided that you can reopen. The
-  individual steps (loose ends, the calendar, meals, tasks, goals and the rest) are being
-  filled in one at a time and read from the modules you already use rather than asking you to
-  type anything twice. The session defaults to the week ahead, but you can step forward and
-  plan any later week — each week keeps its own session and its own record — and every step has
-  its own web address, so leaving mid-session and coming back (or refreshing, or using the back
-  button) puts you exactly where you were. You can also leave a session for now and pick it up
-  later, or start a week over from scratch — starting over throws away the session only;
-  anything it already decided (an event you added, a chore you handed out) stays where it is.
+  session defaults to the week ahead, but you can step forward and plan any later week — each
+  week keeps its own session and its own record — and every step has its own web address, so
+  leaving mid-session and coming back (or refreshing, or using the back button) puts you exactly
+  where you were. You can also leave a session for now and pick it up later, or start a week over
+  from scratch — starting over throws away the session only; anything it already decided (an
+  event you added, a chore you handed out) stays where it is.
+
+  **Five of the ten steps are in, and none of them ask you to type anything twice:**
+
+  - **Loose ends** gathers what's still open — overdue chores, unchecked list items, rhythms past
+    due, goals short for the week — alongside anything somebody parked during the week, and hands
+    each one to the step that will deal with it. Sending a chore to Tasks changes nothing yet; it
+    just decides who's asked about it later. Dropping a parked note, or marking something already
+    done, are the two answers that act immediately.
+  - **Calendar** shows the week as it really is and lets you add what's missing on the day you
+    tapped — a line, a time, and everyone it's for. It's a real calendar event, and the later
+    steps plan around it.
+  - **Goals** gives each group — the family's list, a private one, one per person — a tab, and
+    asks which goal that group's week is about. Picking one features it, so it turns up on Today
+    and the Goals page; picking nothing is a real answer, and a goal you'd pinned yourself is
+    never quietly un-pinned.
+  - **Meals** puts the week's dinners in the same seven columns, with each night's events above
+    the dish so you can see why Thursday is a bad night to cook. It fills only the empty nights
+    when you ask it to, marks what it filled so you can undo it, and lets you hand the shopping
+    trip to somebody — which becomes a real chore on the Tasks board.
+  - **Tasks** lays the week out per person, with everything nobody has taken in a strip across the
+    top; tap a face to hand it over, or leave it up for grabs, which is also a real answer. Each
+    column says what that person already carries, so fairness is visible without anyone keeping
+    score.
 - **A privacy policy and terms of service on waffled.app.** Two new pages —
   [waffled.app/privacy](https://waffled.app/privacy) and
   [waffled.app/terms](https://waffled.app/terms) — spelling out what a self-hosted install

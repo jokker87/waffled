@@ -250,11 +250,16 @@ Legend: ✅ done · 🟡 partial / in progress · 🚧 planned · ⛔ dropped (s
   catalog so web and iOS can't drift on the shape of the session. **Shipped so far:** the
   module shell — Settings → Modules panel (session day/time, per-step opt-out), the
   `/planning` screen with its lobby, the step chrome (counter → agenda sheet, the one
-  question, progress hair, skip/affirm footer) and the saved record. **Pending:** the ten
-  step bodies, which land one commit at a time, then iOS parity for all of them. Nine of the
-  ten are a *read* over modules that already exist — the session sequences decisions rather
-  than storing them. Design: `Weekly Planning v4` canvas; plan:
-  `docs/product/weekly-planning-plan.md`.
+  question, progress hair, skip/affirm footer), the saved record, plus a step-in-the-URL
+  scheme, planning any later week, and both exits (leave for now / start the week over) —
+  **and 5 of the 10 steps: Loose ends, Calendar, Goals, Meals, Tasks**, built in parallel
+  behind a per-step file seam (see the plan doc's "Building the steps in parallel").
+  **Pending:** Horizon scan, Family night, Connection, Kids, Recap, then iOS parity for all
+  of it. The architectural point held: the session stores almost nothing — two tables
+  (`planning_sessions`, `planning_session_steps`) plus `planning_parked_items` — and every
+  decision lands in the module that owns it. Step 1 is the one exception and it stores nothing
+  either: it *routes* items to later steps, recorded in the session's own jsonb. Design:
+  `Weekly Planning v4` canvas; plan: `docs/product/weekly-planning-plan.md`.
 
 - **Waffled-Bites (kid companion device)** — the pairing system and the parent-facing
   control panel (Family → tap a kid → Waffled-Bite: quiet time, night light, wake-up
