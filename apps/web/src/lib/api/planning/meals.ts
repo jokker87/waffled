@@ -68,10 +68,16 @@ export interface PlanningMealsView {
 }
 
 // What a fill wrote — and everything the undo needs to prove a night is still that.
+//
+// `mealId` is part of the proof, not decoration: a slot holds a recipe, a saved plate
+// or a bare title, and a plate is recipe-less with THE PLATE'S NAME as its title — so
+// a night filled with the title "BBQ Sunday" and a night since hand-changed to the
+// PLATE "BBQ Sunday" agree on everything else. Round-trip it untouched.
 export interface PlanningFilledNight {
   date: string
   entryId: string
   recipeId: string | null
+  mealId: string | null
   title: string | null
 }
 

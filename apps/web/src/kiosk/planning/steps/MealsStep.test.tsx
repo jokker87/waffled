@@ -81,7 +81,16 @@ const filledView = () => {
   return v
 }
 
-const FILLED = [day(3), day(5), day(6)].map((d) => ({ date: d, entryId: `auto-${d}`, recipeId: `rr-${d}`, title: null }))
+// The receipt, exactly as the server hands it back — `mealId` included, null for the
+// recipe nights a fill writes. It has to round-trip untouched: it is the proof the
+// undo checks, and a dropped field would make every night look changed.
+const FILLED = [day(3), day(5), day(6)].map((d) => ({ date: d, entryId: `auto-${d}`, recipeId: `rr-${d}`, mealId: null, title: null }))
+
+// A saved plate, as GET /api/meals returns one.
+const plate = (id: string, name: string) => ({
+  id, name, servings: 6, isSaved: true, createdBy: null, createdAt: '2026-07-01T00:00:00.000Z',
+  recipeCount: 2, emojis: ['🍗', '🥔'], totalMinutes: 70, onHand: null, toBuy: 0, toBuyNames: [], recipes: [],
+})
 
 const calls: { url: string; method: string; body: Record<string, unknown> | null }[] = []
 
@@ -94,7 +103,11 @@ const titleOnly = (id: string, title: string) => ({ id, title })
 // nights the planner asked about — never a fixed week of its own.
 const PICKS: Record<string, string> = { [day(3)]: 'Chili', [day(5)]: 'Stir fry', [day(6)]: 'Soup' }
 
-function mockApi(opts: { view?: PlanningMealsView; recipes?: { id: string; title: string }[] | (() => { id: string; title: string }[]) } = {}) {
+function mockApi(opts: {
+  view?: PlanningMealsView
+  recipes?: { id: string; title: string }[] | (() => { id: string; title: string }[])
+  meals?: ReturnType<typeof plate>[]
+} = {}) {
   calls.length = 0
   let view = opts.view ?? baseView()
   globalThis.fetch = vi.fn(async (url: string, init?: RequestInit) => {
@@ -123,6 +136,16 @@ function mockApi(opts: { view?: PlanningMealsView; recipes?: { id: string; title
     if (u.includes('/api/recipes')) {
       const r = typeof opts.recipes === 'function' ? opts.recipes() : opts.recipes
       return { ok: true, json: async () => ({ recipes: r ?? [titleOnly('r-9', 'Chili')] }) }
+    }
+    // Scheduling a plate onto a night — its OWN endpoint, not the slot write the
+    // other four paths use, because this is where copy-on-schedule lives.
+    if (/\/api\/meals\/[^/]+\/schedule$/.test(u)) {
+      return { ok: true, json: async () => ({ entry: { id: 'e-plate', date: day(5), mealType: 'dinner', mealId: 'm-copy' }, meal: opts.meals?.[0] ?? plate('m-1', 'BBQ Sunday') }) }
+    }
+    // The saved-plate library. Must be distinguished from /api/meals/plan,
+    // /api/meals/plan-week and /api/meals/week above.
+    if (/\/api\/meals(\?|$)/.test(u)) {
+      return { ok: true, json: async () => ({ meals: opts.meals ?? [plate('m-1', 'BBQ Sunday')] }) }
     }
     if (u.includes('/api/persons')) {
       return { ok: true, json: async () => ({ persons: [{ id: 'p-kelly', name: 'Kelly', avatarEmoji: '🦊' }, { id: 'p-kevin', name: 'Kevin', avatarEmoji: '🐻' }] }) }
@@ -276,6 +299,44 @@ describe('meals step · the week as it stands', () => {
     // every column carries the events block that keeps the dishes on one line.
     expect(document.querySelectorAll('.wpm-ev-none')).toHaveLength(5)
     expect(document.querySelectorAll('.wpm-night > .wpm-events')).toHaveLength(7)
+  })
+})
+
+// A plate night is `recipe_id NULL` carrying a meal_id — the same shape MealsColumn's
+// "cook the whole meal" path keys on. The step has to read that shape the same way,
+// because everything else about a plate night looks like a bare title.
+describe('meals step · a night that is a plate', () => {
+  const plateNight = (title: string) => {
+    const v = baseView()
+    v.nights = v.nights.map((n) =>
+      n.date === day(5)
+        ? { ...n, dinner: { ...dinner(), entryId: 'e-plate', title, emoji: null, recipeId: null, mealId: 'm-copy', minutes: null } }
+        : n
+    )
+    v.emptyDates = [day(3), day(6)]
+    return v
+  }
+
+  it('renders the plate by name, and calls it what it is', async () => {
+    mockApi({ view: plateNight('BBQ Sunday') })
+    draw()
+    await screen.findByText('BBQ Sunday')
+    const tile = nights()[5].querySelector('.wpm-dish')!
+    // No recipe to read a cook time off, so the honest line is what it IS.
+    expect(tile.querySelector('.wpm-dish-c')!.textContent).toMatch(/a whole plate/i)
+  })
+
+  it('never reads a plate as takeout, however it is named', async () => {
+    // `isEatingOut` matches a recipe-LESS row's title, and a plate is recipe-less
+    // with the plate's name as its title — so this plate would have worn the takeout
+    // tile and claimed "no cooking" for a night somebody is cooking four dishes on.
+    mockApi({ view: plateNight('Takeout Tuesday') })
+    draw()
+    await screen.findByText('Takeout Tuesday')
+    const tile = nights()[5].querySelector('.wpm-dish')!
+    expect(tile.className).toBe('wpm-dish')
+    expect(tile.querySelector('.wpm-dish-c')!.textContent).not.toMatch(/no cooking/i)
+    expect(tile.querySelector('.wpm-dish-c')!.textContent).toMatch(/a whole plate/i)
   })
 })
 
@@ -596,6 +657,38 @@ describe('meals step · picking a dish for one night', () => {
     lib = [titleOnly('r-1', 'Dummy recipe')]
     picker = openNight(6)
     await waitFor(() => expect(cardNamed(picker, 'Dummy recipe')).toBeTruthy())
+  })
+
+  // PLATE PARITY. A saved plate is a first-class citizen of the recipe library
+  // (decision 11), and the browser already lists plates beside recipes — but only for
+  // a caller that can say WHERE one goes, because the date lives in the caller's
+  // closure and never in the browser. Supplying `onPickMeal` is the whole of it.
+  it('offers the household\'s saved plates beside its recipes', async () => {
+    mockApi({ recipes: library(), meals: [plate('m-1', 'BBQ Sunday')] })
+    draw()
+    await screen.findByText('Pasta bake')
+    const picker = openNight(5)
+
+    await waitFor(() => expect(cardNamed(picker, 'BBQ Sunday')).toBeTruthy())
+    // Never mistaken for a recipe: the plate wears its own badge.
+    expect(within(cardNamed(picker, 'BBQ Sunday')).getByText(/meal · 2/i)).toBeTruthy()
+    expect(cardNamed(picker, 'Chili')).toBeTruthy()
+  })
+
+  it('plans a night as a plate through the schedule endpoint, not a slot write', async () => {
+    mockApi({ recipes: library(), meals: [plate('m-1', 'BBQ Sunday')] })
+    draw()
+    await screen.findByText('Pasta bake')
+    const picker = openNight(5)
+    await waitFor(() => expect(cardNamed(picker, 'BBQ Sunday')).toBeTruthy())
+
+    selectCard(picker, 'BBQ Sunday')
+    // Its OWN endpoint: that is where copy-on-schedule lives, so that editing the
+    // library plate later can never rewrite a night that already happened.
+    await waitFor(() => expect(sent('POST', '/api/meals/m-1/schedule')).toHaveLength(1))
+    expect(sent('POST', '/api/meals/m-1/schedule')[0].body).toMatchObject({ date: day(5), mealType: 'dinner' })
+    expect(planned()).toHaveLength(0)
+    await waitFor(() => expect(document.querySelector('.wpm-picker')).toBeNull())
   })
 
   it('says so plainly when there is nothing in the library yet', async () => {

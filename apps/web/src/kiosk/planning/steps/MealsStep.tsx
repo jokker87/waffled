@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react'
-import { mealsApi, personsApi, planningMealsApi, useRecipes, type Person } from '../../../lib/api'
+import { mealBuilderApi, mealsApi, personsApi, planningMealsApi, useRecipes, type Meal, type Person } from '../../../lib/api'
 import { isEatingOut } from '../../components/MealsColumn'
 import { PlanWeek } from '../../components/PlanWeek'
 import { RecipeBrowser } from '../../components/RecipeBrowser'
@@ -221,6 +221,31 @@ async function planNight(weekStart: string, date: string, slot: { recipeId?: str
   refresh()
 }
 
+// A night can also be a PLATE — one of the household's saved meals, dropped whole
+// onto the night. It cannot go through `planSlot` with the other four: a plate is
+// scheduled by POST /api/meals/:id/schedule, which is where the copy-on-schedule
+// lives (editing next week's BBQ Sunday must not rewrite the one that already went
+// out). That endpoint writes through the SAME `upsertEntry` the fill uses and fires
+// the same mirror-event and prep-reminder syncs, so a plate night is an ordinary
+// planned night in every way the rest of this step cares about — including the undo,
+// which now compares meal_id.
+async function planPlate(weekStart: string, date: string, mealId: string, refresh: () => void) {
+  if (state.busy) {
+    set({ error: "Something else was still saving — that night wasn't planned. Try again." })
+    return
+  }
+  set({ busy: true, error: null })
+  try {
+    await mealBuilderApi.schedule(mealId, { date, mealType: MEAL_TYPE })
+    set({ ...forget(date), kept: [], groceryAdded: null })
+    await reread(weekStart)
+    set({ busy: false })
+  } catch {
+    set({ busy: false, error: "That didn't take — try again." })
+  }
+  refresh()
+}
+
 async function clearNight(weekStart: string, date: string, refresh: () => void) {
   if (state.busy) {
     set({ error: "Something else was still saving — that night wasn't cleared. Try again." })
@@ -261,6 +286,9 @@ function attribution(d: PlanningNightDinner, auto: boolean, out: boolean): React
     )
   }
   if (auto) return 'the app picked this'
+  // A plate has no recipe to read a time off, so the honest line is what it IS —
+  // several dishes cooked together, not a single dish with unknown timings.
+  if (d.mealId) return 'a whole plate'
   if (d.minutes) return `${d.minutes} min`
   if (out) return 'no cooking'
   return null
@@ -418,6 +446,7 @@ function Body(p: StepBodyProps) {
           // write is in flight, and a picker still on screen would invite the second
           // tap that hits exactly that.
           onPick={(slot) => { setEditing(null); void planNight(p.weekStart, night.date, slot, p.refresh) }}
+          onPickMeal={(meal) => { setEditing(null); void planPlate(p.weekStart, night.date, meal.id, p.refresh) }}
           onClear={() => { setEditing(null); void clearNight(p.weekStart, night.date, p.refresh) }}
         />
       )}
@@ -436,7 +465,11 @@ function NightColumn({ night, auto, disabled, onOpen }: {
   onOpen: () => void
 }) {
   const d = night.dinner
-  const out = !!d && isEatingOut({ recipeId: d.recipeId, title: d.title })
+  // A PLATE IS NEVER TAKEOUT. `isEatingOut` reads a recipe-less row's title, and a
+  // plate is recipe-less with the plate's NAME as its title — so a plate somebody
+  // called "Takeout Tuesday" would wear the takeout tile and claim "no cooking".
+  // `!recipeId && mealId` is the plate branch MealsColumn checks first; same here.
+  const out = !!d && !d.mealId && isEatingOut({ recipeId: d.recipeId, title: d.title })
   const cls = d ? (auto ? ' auto' : out ? ' out' : '') : ' empty'
   const attrib = d ? attribution(d, auto, out) : null
   return (
@@ -512,10 +545,11 @@ function NightColumn({ night, auto, disabled, onOpen }: {
 // the list used to be cached in this file's module state behind `if (recipes) return`,
 // and an EMPTY library is a truthy `[]`, so a household that opened the picker before
 // adding its first recipe was told "no recipes yet" for the rest of the page's life.
-function NightPicker({ night, onClose, onPick, onClear }: {
+function NightPicker({ night, onClose, onPick, onPickMeal, onClear }: {
   night: PlanningMealsNight
   onClose: () => void
   onPick: (slot: { recipeId?: string | null; title?: string | null }) => void
+  onPickMeal: (meal: Meal) => void
   onClear: () => void
 }) {
   const { recipes, loading, error } = useRecipes()
@@ -545,6 +579,11 @@ function NightPicker({ night, onClose, onPick, onClear }: {
         // which still shows every untagged recipe, and "All" is one tap away.
         slot="dinner"
         onPick={(r) => onPick({ recipeId: r.id, title: null })}
+        // Plates only appear when a caller can say WHERE one goes — the date lives
+        // in this closure, never in the browser. Supplying it is the whole of plate
+        // parity: the grid then lists the household's saved meals beside its
+        // recipes, searched server-side, exactly as the Meals screen's picker does.
+        onPickMeal={onPickMeal}
         // The same three literals the Meals screen writes, so the classifiers that
         // render them agree across both screens.
         onEatingOut={() => onPick({ title: 'Eating out', recipeId: null })}

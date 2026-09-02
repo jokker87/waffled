@@ -62,6 +62,10 @@ interface Night {
     entryId: string
     title: string | null
     recipeId: string | null
+    // A plate night is `recipe_id NULL` carrying a meal_id — a first-class shape,
+    // not an implementation detail: it is what MealsColumn's "cook the whole meal"
+    // path keys on, and what tells a title-only night apart from a plate.
+    mealId: string | null
     cookName: string | null
     cookAvatar: string | null
     minutes: number | null
@@ -83,7 +87,7 @@ interface StepView {
   choresOn: boolean
   shopping: Trip | null
 }
-interface Filled { date: string; entryId: string; recipeId: string | null; title: string | null }
+interface Filled { date: string; entryId: string; recipeId: string | null; mealId: string | null; title: string | null }
 
 const stepView = async (week = weekStart): Promise<StepView> =>
   json(await call('GET', `/api/weekly-planning/meals?weekStart=${week}`, kevin))
@@ -101,6 +105,25 @@ async function seedRecipe(title: string, ingredient: string): Promise<string> {
   expect(r.statusCode).toBe(201)
   return json(r).recipe.id
 }
+
+// A SAVED plate of two dishes. Saved matters: scheduling a saved plate COPIES it
+// (POST /api/meals/:id/schedule → copyMeal), so the meal_id that lands on the night
+// is a fresh id and never the library plate's — which is exactly what makes the undo
+// receipt's plate check strong rather than coincidental.
+async function seedPlate(name: string, recipeIds: string[]): Promise<string> {
+  const r = await call('POST', '/api/meals', kevin, {
+    name,
+    servings: 4,
+    isSaved: true,
+    recipes: recipeIds.map((recipeId, i) => ({ recipeId, sortOrder: i })),
+  })
+  expect(r.statusCode).toBe(201)
+  return json(r).meal.id
+}
+
+// Schedule a plate onto a night exactly the way the picker does.
+const schedulePlate = (mealId: string, date: string) =>
+  call('POST', `/api/meals/${mealId}/schedule`, kevin, { date, mealType: 'dinner' })
 
 beforeAll(async () => {
   pg = await new PostgreSqlContainer('postgres:16').start()
@@ -397,6 +420,100 @@ describe('weekly planning · meals · the picker\'s library', () => {
     expect((await planDinner(days[3], { recipeId: id })).statusCode).toBe(200)
     expect((await stepView()).nights[3].dinner!.title).toBe('Dummy recipe')
     await call('DELETE', `/api/meals/plan?date=${days[3]}&mealType=dinner`, kevin)
+  })
+})
+
+// PLATE PARITY. A night can be a saved plate, not just a recipe or a bare title —
+// and the whole risk of that is the undo receipt, which used to compare only
+// (entryId, recipeId, title). A plate is `recipe_id NULL` + `meal_id` + the plate's
+// NAME as the title, and `upsertEntry` keeps the row id across an overwrite, so a
+// night auto-filled with the title "BBQ Sunday" and then hand-changed to the PLATE
+// "BBQ Sunday" matched on all three — and the undo would have cleared somebody's
+// decision. `meal_id` is the dimension that tells those two nights apart.
+describe('weekly planning · meals · a night can be a plate', () => {
+  let plate: string
+
+  it('plans a night as a plate, and the step reads it back as one', async () => {
+    const chicken = await seedRecipe('BBQ Chicken', 'chicken thighs')
+    const salad = await seedRecipe('Potato Salad', 'potatoes')
+    plate = await seedPlate('BBQ Sunday', [chicken, salad])
+
+    // days[3] is one of the three empty nights the file has kept free throughout.
+    expect((await schedulePlate(plate, days[3])).statusCode).toBe(200)
+
+    const view = await stepView()
+    const night = view.nights.find((n) => n.date === days[3])!
+    // The dish reads as the PLATE: its name, no recipe, and a meal_id — which is
+    // also what stops the step's takeout classifier firing on a plate's name.
+    expect(night.dinner!.title).toBe('BBQ Sunday')
+    expect(night.dinner!.recipeId).toBeNull()
+    expect(night.dinner!.mealId).toBeTruthy()
+    // Scheduling a SAVED plate copies it, so the night points at the copy.
+    expect(night.dinner!.mealId).not.toBe(plate)
+    expect(view.emptyDates).toEqual([days[5], days[6]])
+
+    await call('DELETE', `/api/meals/plan?date=${days[3]}&mealType=dinner`, kevin)
+    expect((await stepView()).emptyDates).toEqual([days[3], days[5], days[6]])
+  })
+
+  it('KEEPS a filled night that was hand-changed to a plate of the same name', async () => {
+    // The adversarial case, built to fail on (entryId, recipeId, title) alone: the
+    // fill writes the bare title "BBQ Sunday", then somebody schedules the PLATE of
+    // that name onto the same night. Same row id, both recipe-less, same title.
+    const cards = [{ date: days[3], mealType: 'dinner', title: 'BBQ Sunday', recipeId: null }]
+    const fill = await call('POST', '/api/weekly-planning/meals/fill', kevin, { weekStart, cards })
+    expect(fill.statusCode).toBe(200)
+    const wrote: Filled[] = json(fill).filled
+    expect(wrote.map((f) => f.date)).toEqual([days[3]])
+    expect(wrote[0].title).toBe('BBQ Sunday')
+    // A fill writes recipes and titles, never plates — so the receipt says so.
+    expect(wrote[0].mealId).toBeNull()
+
+    expect((await schedulePlate(plate, days[3])).statusCode).toBe(200)
+    const after = (await stepView()).nights.find((n) => n.date === days[3])!.dinner!
+    expect(after.entryId).toBe(wrote[0].entryId) // upsert kept the row id
+    expect(after.title).toBe('BBQ Sunday') // …and the title
+    expect(after.mealId).toBeTruthy() // only meal_id tells them apart
+
+    const undo = await call('POST', '/api/weekly-planning/meals/undo', kevin, { weekStart, filled: wrote })
+    expect(undo.statusCode).toBe(200)
+    expect(json(undo).cleared).toEqual([])
+    expect(json(undo).kept).toEqual([days[3]])
+    // The plate somebody chose is still there — an undo has no business taking it.
+    const view: StepView = json(undo).view
+    expect(view.nights.find((n) => n.date === days[3])!.dinner!.mealId).toBeTruthy()
+
+    await call('DELETE', `/api/meals/plan?date=${days[3]}&mealType=dinner`, kevin)
+    expect((await stepView()).emptyDates).toEqual([days[3], days[5], days[6]])
+  })
+
+  it('still undoes a plain recipe fill — the plate check must not break what worked', async () => {
+    const fill = await call('POST', '/api/weekly-planning/meals/fill', kevin, { weekStart })
+    const wrote: Filled[] = json(fill).filled
+    expect(wrote).toHaveLength(3)
+    // Every claim carries the dimension, null for a recipe or title night.
+    for (const f of wrote) expect(f.mealId).toBeNull()
+
+    const undo = await call('POST', '/api/weekly-planning/meals/undo', kevin, { weekStart, filled: wrote })
+    expect(json(undo).cleared.sort()).toEqual([days[3], days[5], days[6]])
+    expect(json(undo).kept).toEqual([])
+    expect((await stepView()).emptyDates).toEqual([days[3], days[5], days[6]])
+  })
+
+  it('undoes a night that really is the plate the receipt names', async () => {
+    // The mirror image of the `kept` case: when the receipt's meal_id IS the row's,
+    // the night is the one that was written and clearing it is right. The fill never
+    // writes plates, so the claim is built from what the schedule actually wrote —
+    // which is also the shape a future plate-aware fill would hand back.
+    const sched = await schedulePlate(plate, days[5])
+    expect(sched.statusCode).toBe(200)
+    const entry = json(sched).entry as { id: string; mealId: string | null }
+    const claim = [{ date: days[5], entryId: entry.id, recipeId: null, mealId: entry.mealId, title: 'BBQ Sunday' }]
+
+    const undo = await call('POST', '/api/weekly-planning/meals/undo', kevin, { weekStart, filled: claim })
+    expect(json(undo).cleared).toEqual([days[5]])
+    expect(json(undo).kept).toEqual([])
+    expect((await stepView()).emptyDates).toEqual([days[3], days[5], days[6]])
   })
 })
 

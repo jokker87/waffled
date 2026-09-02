@@ -141,10 +141,20 @@ export interface ShoppingTrip {
 // What a fill wrote, and everything an undo needs to prove the night is still the one
 // it wrote. `entryId` alone is not enough: upsertEntry's `on conflict do update`
 // preserves the row id, so a hand-edit keeps it — the dish itself is the evidence.
+//
+// `mealId` IS PART OF THE EVIDENCE, not decoration. A slot holds a recipe, a plate or
+// a bare title, and a plate is `recipe_id NULL` + `meal_id` + THE PLATE'S NAME as the
+// title — so a night this filled with the title "BBQ Sunday" and a night somebody
+// then hand-changed to the PLATE "BBQ Sunday" agree on entryId, recipeId and title.
+// Without meal_id the undo would clear a decision it never made. It is also a strong
+// check rather than a lucky one: scheduling a saved plate COPIES it
+// (POST /api/meals/:id/schedule → copyMeal), so re-picking the same library plate
+// writes a DIFFERENT meal_id and correctly reads as a change.
 export interface FilledNight {
   date: string
   entryId: string
   recipeId: string | null
+  mealId: string | null
   title: string | null
 }
 
@@ -310,8 +320,8 @@ async function suggestFor(tenant: Tenant, weekStart: string, dates: string[]): P
 }
 
 const plannedDinner = async (householdId: string, date: string) => {
-  const { rows } = await query<{ id: string; recipe_id: string | null; title: string | null }>(
-    `select id, recipe_id, title from meal_plan_entries
+  const { rows } = await query<{ id: string; recipe_id: string | null; meal_id: string | null; title: string | null }>(
+    `select id, recipe_id, meal_id, title from meal_plan_entries
       where household_id = $1 and date = $2 and meal_type = $3 and deleted_at is null`,
     [householdId, date, MEAL_TYPE]
   )
@@ -384,7 +394,7 @@ export async function fillEmptyDinners(tenant: Tenant, weekStart: string, chosen
     // would be the one night of the week missing from the calendar.
     await syncMealEventForEntry(tenant, entry.id).catch((err) => console.error('meal event sync failed', err))
     await syncPrepReminderForEntry(tenant, entry.id).catch((err) => console.error('prep reminder sync failed', err))
-    filled.push({ date: entry.date, entryId: entry.id, recipeId: entry.recipe_id, title: entry.title })
+    filled.push({ date: entry.date, entryId: entry.id, recipeId: entry.recipe_id, mealId: entry.meal_id, title: entry.title })
   }
 
   if (filled.length) await rebuildGroceries(tenant, weekStart)
@@ -415,9 +425,13 @@ export async function undoFilledDinners(tenant: Tenant, weekStart: string, claim
 
     const row = await plannedDinner(tenant.householdId, claim.date)
     if (!row) continue // already gone — nothing to undo and nothing kept
+    // Every side is normalized to null: a claim off the wire may simply omit a
+    // field, and `undefined === null` is false — which would make every ordinary
+    // recipe undo look like a change and quietly stop clearing anything.
     const same =
       row.id === claim.entryId &&
       (row.recipe_id ?? null) === (claim.recipeId ?? null) &&
+      (row.meal_id ?? null) === (claim.mealId ?? null) &&
       (row.title ?? null) === (claim.title ?? null)
     if (!same) {
       kept.push(claim.date)
@@ -558,6 +572,7 @@ export function parseFilledNights(raw: unknown): FilledNight[] {
       date: c.date,
       entryId: typeof c.entryId === 'string' ? c.entryId : '',
       recipeId: typeof c.recipeId === 'string' ? c.recipeId : null,
+      mealId: typeof c.mealId === 'string' ? c.mealId : null,
       title: typeof c.title === 'string' ? c.title : null,
     })
   }
