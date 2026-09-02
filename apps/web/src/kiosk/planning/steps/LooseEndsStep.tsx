@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { ApiSendError } from '../../../lib/api/client'
 import {
   looseEndsApi,
@@ -29,6 +29,14 @@ import '../../../styles/planning-looseEnds.css'
 // the week and exists nowhere else yet, so its verbs differ (a parked thing might turn
 // out to be nothing) and Drop is a real answer there. The switch is the entire
 // explanation of the two kinds, so the note travels under it.
+//
+// THE SWITCH BELONGS TO THE DECK, NOT TO SEE-ALL. See-all lists BOTH groups under
+// their own headings, so a switch there governs nothing while still looking selected —
+// which read as "these are my not-done items" when it wasn't. The v4 mock's boardList
+// frame settles it: two labelled sections and the disclaimer, no switch. So the switch
+// renders only in card mode, where it really does pick the deck you are working
+// through; the way back is the "One at a time" control that was always in the bar, and
+// the group you were on survives the round trip because nothing here resets it.
 //
 // THREE THINGS WRITE, AND ONLY THREE. "It's done already" and "Drop it" go to the
 // module / our own table; the capture bar parks a new note. Everything else is either
@@ -118,6 +126,8 @@ function Body({ step, sessionId, weekStart, setDecisionData, busy }: StepBodyPro
   )
   const [answered, setAnswered] = useState(0)
   const [note, setNote] = useState('')
+  // The see-all sections, so opening it can land on the group you were toggled to.
+  const sections = useRef<Partial<Record<LooseEndGroup, HTMLElement | null>>>({})
 
   const load = useCallback(async () => {
     try {
@@ -136,6 +146,15 @@ function Body({ step, sessionId, weekStart, setDecisionData, busy }: StepBodyPro
   // A different week is a different set of loose ends, so the aside list and the tally
   // start again with it.
   useEffect(() => { setSetAside([]); setAnswered(0) }, [weekStart])
+
+  // Opening see-all lands on the section for the group you were on. Both sections are
+  // always rendered — this is a starting POSITION, not a second filter, which is the
+  // distinction that matters: the whole bug was a control that looked like it filtered
+  // and didn't. Guarded because jsdom has no scrollIntoView.
+  useEffect(() => {
+    if (!seeAll) return
+    sections.current[group]?.scrollIntoView?.({ block: 'start' })
+  }, [seeAll, group])
 
   const routedKeys = useMemo(() => new Set(routes.map(routeKey)), [routes])
 
@@ -278,31 +297,41 @@ function Body({ step, sessionId, weekStart, setDecisionData, busy }: StepBodyPro
   return (
     <div className="wp-le">
       <div className="wp-le-bar">
-        {/* The switch carries the distinction AND both counts, so you always know what
-            is left in the group you are not looking at. A cleared group shows a check
-            instead of a zero. */}
-        <div className="wp-le-switch" role="group" aria-label="Which loose ends">
-          {LOOSE_END_GROUPS.map((g) => (
-            <button
-              key={g.key}
-              type="button"
-              className={`wp-le-tab${g.key === group ? ' on' : ''}`}
-              aria-pressed={g.key === group}
-              onClick={() => { setGroup(g.key); setError(null) }}
-            >
-              {g.label}{' '}
-              <span className="wp-le-n">{remaining[g.key] === 0 ? '✓' : remaining[g.key]}</span>
-            </button>
-          ))}
-        </div>
-        {/* The escape hatch for the week someone dropped twenty things. */}
+        {seeAll ? (
+          // No switch here. See-all shows BOTH groups under their own headings, so a
+          // switch would sit there looking selected while governing nothing on screen —
+          // the exact thing that made this screen read as a filtered list. A plain
+          // label says what you are looking at instead.
+          <div className="wp-le-all-t">Everything still open</div>
+        ) : (
+          /* The switch carries the distinction AND both counts, so you always know what
+             is left in the group you are not looking at. A cleared group shows a check
+             instead of a zero. */
+          <div className="wp-le-switch" role="group" aria-label="Which loose ends">
+            {LOOSE_END_GROUPS.map((g) => (
+              <button
+                key={g.key}
+                type="button"
+                className={`wp-le-tab${g.key === group ? ' on' : ''}`}
+                aria-pressed={g.key === group}
+                onClick={() => { setGroup(g.key); setError(null) }}
+              >
+                {g.label}{' '}
+                <span className="wp-le-n">{remaining[g.key] === 0 ? '✓' : remaining[g.key]}</span>
+              </button>
+            ))}
+          </div>
+        )}
+        {/* The escape hatch for the week someone dropped twenty things — and, from
+            see-all, the only way back, which is why it never moves. */}
         <button type="button" className="wp-le-seeall" aria-pressed={seeAll} onClick={() => setSeeAll((v) => !v)}>
           {seeAll ? 'One at a time' : 'See all'}
         </button>
       </div>
 
-      {/* The mock uses the switch as the entire explanation of the two kinds. */}
-      <div className="wp-le-note">{groupNote}</div>
+      {/* The switch is the entire explanation of the two kinds, so the note goes with
+          it — in see-all each section carries its own caption instead. */}
+      {!seeAll && <div className="wp-le-note">{groupNote}</div>}
 
       {error && <div className="wp-le-err" role="alert">{error}</div>}
 
@@ -313,9 +342,18 @@ function Body({ step, sessionId, weekStart, setDecisionData, busy }: StepBodyPro
             Routing here changes nothing in your modules — it only decides which step handles it.
           </div>
           {LOOSE_END_GROUPS.map((g) => (
-            <section key={g.key} className="wp-le-sec">
+            <section
+              key={g.key}
+              id={`wp-le-sec-${g.key}`}
+              className="wp-le-sec"
+              ref={(el) => { sections.current[g.key] = el }}
+            >
+              {/* With no switch above, the heading is the whole label for what follows:
+                  the name, the count the switch used to carry, and the mock's four-word
+                  version of what the group means. */}
               <h3 className="wp-le-sec-h">
                 {g.label} <span className="wp-le-n">{remaining[g.key] === 0 ? '✓' : remaining[g.key]}</span>
+                <span className="wp-le-sec-cap">· {g.caption}</span>
               </h3>
               {openIn(g.key).length === 0 ? (
                 <div className="wp-le-empty wp-le-empty-sm">

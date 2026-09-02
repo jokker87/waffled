@@ -90,13 +90,16 @@ export interface LooseEndsView {
   sources: string[]
 }
 
-// What each group is called on screen and in the switch, plus the one line that
-// explains it. The mock uses the switch as the ENTIRE explanation of the two kinds, so
-// the note travels with the label.
+// What each group is called on screen, plus the two lengths of explanation it needs.
+// `note` is the full one, and it travels with the SWITCH — in the one-at-a-time mode
+// the switch is the entire explanation of the two kinds. `caption` is the mock's
+// four-word version ("Not done · already in the app"), for the see-all screen, where
+// there is no switch and the section headings do the grouping themselves.
 export const LOOSE_END_GROUPS = [
   {
     key: 'notDone' as const,
     label: 'Not done',
+    caption: 'already in the app',
     // Names the grocery list specifically, because seeing "Whole milk" here is exactly
     // what made the step feel wrong: a shopping list that rebuilds itself every week
     // isn't a leftover, and a dozen of its rows bury the things that are.
@@ -105,6 +108,7 @@ export const LOOSE_END_GROUPS = [
   {
     key: 'parked' as const,
     label: 'Parked',
+    caption: 'somebody wrote it down',
     note: 'What somebody wrote down during the week that exists nowhere else yet. Which is why one of the answers here is to drop it.',
   },
 ]

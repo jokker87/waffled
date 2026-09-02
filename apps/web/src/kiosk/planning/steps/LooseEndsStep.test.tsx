@@ -109,6 +109,17 @@ function mockApi(initial: Record<string, unknown> = VIEW) {
   }) as unknown as typeof fetch
 }
 
+// jsdom has no scrollIntoView at all. Record WHICH section the component scrolls to —
+// that is the behaviour ("see all opens where you were"), and the pixels are not
+// something a jsdom test could speak to anyway.
+const scrolled: string[] = []
+beforeAll(() => {
+  Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+    configurable: true,
+    value(this: HTMLElement) { scrolled.push(this.id) },
+  })
+})
+
 const setDecisionData = vi.fn()
 const refresh = vi.fn()
 
@@ -291,6 +302,59 @@ describe('loose ends · see all', () => {
     expect(screen.getByText('Ask about the school trip')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /Not done/ })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /Parked/ })).toBeInTheDocument()
+  })
+
+  // THE IA BUG. The switch used to stay on screen in see-all, still looking selected,
+  // while it no longer governed anything on it — so "Not done" + See all read as a
+  // filtered list of not-done items when in fact BOTH groups were listed. The v4 mock's
+  // boardList frame is the answer: it renders the two labelled sections and the
+  // disclaimer, and no switch. In see-all the section headings ARE the grouping, so a
+  // switch there is redundant AND misleading; it belongs to the one-at-a-time mode,
+  // where it genuinely picks the deck you are working through.
+  it('drops the group switch — in see all the section headings ARE the grouping', async () => {
+    mockApi()
+    renderStep()
+    expect(await screen.findByRole('group', { name: /which loose ends/i })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /see all/i }))
+    await screen.findByRole('heading', { name: /Not done/ })
+    expect(screen.queryByRole('group', { name: /which loose ends/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Not done/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Parked/ })).not.toBeInTheDocument()
+    // Nothing is lost with it: the headings carry both counts, and the way back is the
+    // control that was always there.
+    expect(screen.getByRole('heading', { name: /Not done 2/ })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /Parked 1/ })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /one at a time/i }))
+    expect(await screen.findByRole('group', { name: /which loose ends/i })).toBeInTheDocument()
+  })
+
+  it('comes back to the group you left it on, not to the top of the deck', async () => {
+    mockApi()
+    renderStep()
+    fireEvent.click(await screen.findByRole('button', { name: /Parked 1/ }))
+    expect(await screen.findByText('Ask about the school trip')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /see all/i }))
+    await screen.findByRole('heading', { name: /Parked/ })
+    fireEvent.click(screen.getByRole('button', { name: /one at a time/i }))
+
+    expect(await screen.findByText('Ask about the school trip')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Parked 1/ })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  // Not a second filter — both sections are always there. Entering from Parked just
+  // lands you on the Parked one, so the transition keeps the context you were in
+  // instead of appearing to throw it away.
+  it('opens on the section you were toggled to', async () => {
+    scrolled.length = 0
+    mockApi()
+    renderStep()
+    fireEvent.click(await screen.findByRole('button', { name: /Parked 1/ }))
+    fireEvent.click(screen.getByRole('button', { name: /see all/i }))
+    await screen.findByRole('heading', { name: /Parked/ })
+    await waitFor(() => expect(scrolled).toEqual(['wp-le-sec-parked']))
   })
 
   it('routes from the list too, without leaving it', async () => {
