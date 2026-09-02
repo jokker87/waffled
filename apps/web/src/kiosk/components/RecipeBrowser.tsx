@@ -68,6 +68,14 @@ function useBrowserMeals(enabled: boolean, q: string): Meal[] {
 // the caller's `onPick` closure and is never passed down here, so scheduling a plate
 // has to happen where the date is; a caller that can't do that simply doesn't
 // advertise meals.
+//
+// `onFreeText` is a RENDER CONTRACT, not a passive hook: supply it and the grid grows
+// one more card, shown whenever the search box has something in it, offering to use
+// what was typed verbatim — and `onFreeText(query)` is what a select on it calls. It
+// exists for the caller that must be able to plan a one-off dish that is neither in
+// the library nor one of the three placeholder nights ("Grandma's lasagne",
+// "breakfast for dinner"), without standing a second text field next to this one.
+// Callers that don't pass it are unchanged: no card, and the search box is a filter.
 export function RecipeBrowser({
   recipes,
   loading,
@@ -78,6 +86,7 @@ export function RecipeBrowser({
   onEatingOut,
   onLeftovers,
   onTrySomething,
+  onFreeText,
   selectLabel,
 }: {
   recipes: Recipe[]
@@ -89,6 +98,7 @@ export function RecipeBrowser({
   onEatingOut?: () => void
   onLeftovers?: () => void
   onTrySomething?: () => void
+  onFreeText?: (title: string) => void
   selectLabel?: string
 }) {
   const browse = !onPick
@@ -113,6 +123,10 @@ export function RecipeBrowser({
   // A plate has no breakfast/lunch/dinner category of its own, so the meal-type
   // chips leave saved meals alone — they show whenever meals are on offer.
   const meals = useBrowserMeals(!!onPickMeal, q)
+  // The typed text, exactly as typed — `query` is lower-cased for matching, and
+  // planning a dish should keep the capitals somebody wrote.
+  const typed = q.trim()
+  const freeText = !!onFreeText && !!typed
 
   return (
     <div className="meals-picker">
@@ -138,6 +152,20 @@ export function RecipeBrowser({
       </div>
 
       <div className="picker-grid">
+        {/* First in the grid, because it is the answer to "it isn't in here" and
+            that is exactly what somebody typing a dish nobody saved is asking. */}
+        {freeText && (
+          <div className="rc mp-card" role="button" tabIndex={0} onClick={() => onFreeText!(typed)}>
+            <div className="rc-img" style={{ background: 'linear-gradient(135deg,#e8e3d7,#d0c7b3)', fontSize: 34, display: 'grid', placeItems: 'center' }}>✍️</div>
+            <div className="rc-b" style={{ padding: '12px 14px 14px' }}>
+              <div className="rc-t" style={{ fontSize: 16 }}>“{typed}”</div>
+              <div className="rc-m"><span>Plan it as typed — no recipe needed</span></div>
+              <div className="mp-actions">
+                <button type="button" className="pill btn-primary mp-select" onClick={(e) => { e.stopPropagation(); onFreeText!(typed) }}>Select</button>
+              </div>
+            </div>
+          </div>
+        )}
         {onEatingOut && (
           <div className="rc mp-card" role="button" tabIndex={0} onClick={onEatingOut}>
             <div className="rc-img" style={{ background: 'linear-gradient(135deg,#d9e7f6,#bcd0e9)', fontSize: 34, display: 'grid', placeItems: 'center' }}>🍴</div>
@@ -187,7 +215,7 @@ export function RecipeBrowser({
             />
           ))}
         {loading && <div className="muted picker-empty">Loading recipes…</div>}
-        {!loading && shown.length === 0 && meals.length === 0 && (
+        {!loading && shown.length === 0 && meals.length === 0 && !freeText && (
           <div className="muted picker-empty">
             {filter === 'all' ? 'No recipes yet.' : `No ${MEAL_LABEL[filter].toLowerCase()} recipes yet — tag a recipe with this meal to see it here.`}
           </div>

@@ -161,15 +161,6 @@
 .wpm-modal-t { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; }
 .wpm-modal-s { font-size: 13px; font-weight: 600; color: var(--ink-3); margin-top: -8px; }
 .wpm-modal-h { font-size: 11.5px; font-weight: 750; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-3); }
-.wpm-recipes { display: flex; flex-wrap: wrap; gap: 7px; max-height: 210px; overflow-y: auto; }
-.wpm-recipe {
-  display: inline-flex; align-items: center; gap: 7px; cursor: pointer;
-  font: inherit; font-size: 13px; font-weight: 650;
-  background: var(--panel); color: var(--ink); border: 1px solid transparent;
-  border-radius: 999px; padding: 8px 14px;
-}
-.wpm-recipe:hover { border-color: var(--hair-2); }
-.wpm-recipe:disabled { opacity: 0.55; cursor: default; }
 .wpm-modal-f { display: flex; align-items: center; gap: 9px; }
 .wpm-modal-sp { flex: 1; }
 
@@ -202,3 +193,46 @@
   .wpm-planner-head { padding: 0 16px 10px; }
   .wpm-planner-n { display: none; }
 }
+
+/* ── One night, by hand: the app's own recipe browser ───────────────────────── */
+/* The step does NOT draw a picker. Tapping a night opens `RecipeBrowser` — the same
+   component behind the Meals screen's "Add a dinner · Sun Aug 30", PlanMonth's manual
+   swap and Cook-from-pantry — so a night picked in a planning session looks and works
+   like a night picked anywhere else. It is full-screen for the same reason the
+   planner is: the browser is a card GRID with its own search and filter rows, and
+   folding that into a 520px modal is what made the old chip list fall apart past a
+   handful of recipes. Same overlay vocabulary as `.wpm-planner`, one layer below it —
+   only ever one of the two is open. */
+.wpm-picker {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  padding: 12px 0 0;
+}
+.wpm-picker-head {
+  display: flex; align-items: center; gap: 14px; flex: none;
+  padding: 0 30px 12px;
+}
+.wpm-picker-t { font-size: 20px; font-weight: 600; letter-spacing: -0.02em; }
+/* What the night is right now — the sentence the old modal opened with, kept because
+   overwriting is the common case here and you should see what you are replacing. */
+.wpm-picker-n { font-size: 12.5px; font-weight: 650; color: var(--ink-3); }
+/* Emptying the slot has nowhere else to go once the body belongs to the browser. */
+.wpm-picker-clear { margin-left: auto; flex: none; white-space: nowrap; }
+.wpm-picker .meals-picker { flex: 1; min-height: 0; }
+
+/* The browser's grid is a fixed 4-up, which is right on a kiosk and unreadable on a
+   phone. Scoped to this overlay so the Meals screen is untouched. */
+@media (max-width: 1100px) { .wpm-picker .picker-grid { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 860px) { .wpm-picker .picker-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 720px) {
+  .wpm-picker-head { padding: 0 16px 10px; gap: 10px; }
+  .wpm-picker-n { display: none; }
+  .wpm-picker .picker-search,
+  .wpm-picker .picker-filters { padding-left: 16px; padding-right: 16px; }
+  .wpm-picker .picker-grid { padding-left: 16px; padding-right: 16px; }
+}
+@media (max-width: 520px) { .wpm-picker .picker-grid { grid-template-columns: 1fr; } }

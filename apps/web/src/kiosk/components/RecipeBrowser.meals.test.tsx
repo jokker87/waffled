@@ -131,3 +131,41 @@ describe('RecipeBrowser — saved meals in the slot picker', () => {
     expect(await screen.findByText('BBQ Sunday')).toBeInTheDocument()
   })
 })
+
+// `onFreeText` is a render contract, not a passive hook: it grows one more card in
+// the grid, and only while the search box has something in it. It exists so a caller
+// that must be able to plan a dish nobody saved ("Grandma's lasagne") can do it
+// through THIS search box instead of standing a second text field beside it.
+describe('RecipeBrowser — planning what was typed', () => {
+  const type = (v: string) => fireEvent.change(document.querySelector('.picker-search input')!, { target: { value: v } })
+
+  it('offers no such card to a caller that did not ask for one', () => {
+    renderBrowser({ onPick: () => {} })
+    type('Grandma')
+    expect(screen.queryByText(/plan it as typed/i)).not.toBeInTheDocument()
+  })
+
+  it('offers it only once something is typed, and hands back exactly that', () => {
+    const picked: string[] = []
+    renderBrowser({ onPick: () => {}, onFreeText: (t) => picked.push(t) })
+    // Nothing typed, nothing offered — the grid is the library.
+    expect(screen.queryByText(/plan it as typed/i)).not.toBeInTheDocument()
+
+    type("  Grandma's lasagne  ")
+    expect(screen.getByText(/plan it as typed/i)).toBeInTheDocument()
+    // Trimmed, but not lower-cased: the filter folds case, a planned dish shouldn't.
+    expect(screen.getByText(/“Grandma's lasagne”/)).toBeInTheDocument()
+
+    const card = screen.getByText(/plan it as typed/i).closest('.mp-card') as HTMLElement
+    fireEvent.click(within(card).getByRole('button', { name: /select/i }))
+    expect(picked).toEqual(["Grandma's lasagne"])
+  })
+
+  it('replaces the "no recipes" line rather than sitting under it', () => {
+    renderBrowser({ recipes: [], onPick: () => {}, onFreeText: () => {} })
+    type('zzz')
+    // One answer to "there is nothing here", not two.
+    expect(screen.getByText(/plan it as typed/i)).toBeInTheDocument()
+    expect(document.querySelector('.picker-empty')).toBeNull()
+  })
+})

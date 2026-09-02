@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react'
-import { mealsApi, personsApi, planningMealsApi, useRecipes, type Person, type Recipe } from '../../../lib/api'
+import { mealsApi, personsApi, planningMealsApi, useRecipes, type Person } from '../../../lib/api'
 import { isEatingOut } from '../../components/MealsColumn'
 import { PlanWeek } from '../../components/PlanWeek'
+import { RecipeBrowser } from '../../components/RecipeBrowser'
 import type {
   PlanCard,
   PlanningMealsView,
@@ -202,7 +203,12 @@ async function runUndo(weekStart: string, refresh: () => void) {
 // does. Deciding a night by hand also stops it being an auto-fill.
 
 async function planNight(weekStart: string, date: string, slot: { recipeId?: string | null; title?: string | null }, refresh: () => void) {
-  if (state.busy) return
+  // The picker has already closed by the time this runs, so a quiet return would
+  // report a night that was never planned. Only another write in flight gets here.
+  if (state.busy) {
+    set({ error: "Something else was still saving — that night wasn't planned. Try again." })
+    return
+  }
   set({ busy: true, error: null })
   try {
     await mealsApi.planSlot({ date, mealType: MEAL_TYPE, ...slot })
@@ -216,7 +222,10 @@ async function planNight(weekStart: string, date: string, slot: { recipeId?: str
 }
 
 async function clearNight(weekStart: string, date: string, refresh: () => void) {
-  if (state.busy) return
+  if (state.busy) {
+    set({ error: "Something else was still saving — that night wasn't cleared. Try again." })
+    return
+  }
   set({ busy: true, error: null })
   try {
     await mealsApi.clearSlot(date, MEAL_TYPE)
@@ -264,17 +273,6 @@ function tripLabel(t: PlanningShoppingTrip | null): string {
   const when = `${dow(t.dueOn)}${t.dueTime ? ` ${t.dueTime}` : ''}`
   if (!t.personName) return `Up for grabs · ${when}`
   return `${t.personAvatar ?? '\u{1F464}'} ${t.personName} shops ${when}`
-}
-
-// What a typed search is matched against — the SAME fields the Recipes library
-// searches, so "cucumber" finds the same recipe on both screens. Every one of them is
-// nullable and a brand-new recipe may have only a title, so this filters the nulls out
-// rather than letting one drop the row.
-function haystack(r: Recipe): string {
-  return [r.title, r.cuisine, r.protein, r.base, r.mealType, r.effort, r.cookMethod, r.collection, ...(r.tags ?? []), ...(r.vegetables ?? []), ...(r.dietary ?? [])]
-    .filter(Boolean)
-    .join(' ')
-    .toLowerCase()
 }
 
 // "Undo the three" is the design's own phrasing, so small counts read as words.
@@ -407,14 +405,18 @@ function Body(p: StepBodyProps) {
         </div>
       )}
 
-      {night && (
-        <NightModal
-          // Keyed by the night so switching nights starts with a fresh text field
-          // rather than carrying the last night's half-typed dish across.
+      {/* Never both: the two overlays are the same surface, and the planner is the
+          one that was opened from a footer the picker would be covering. */}
+      {night && !s.planner && (
+        <NightPicker
+          // Keyed by the night so switching nights starts on a fresh search rather
+          // than carrying the last night's half-typed query across.
           key={night.date}
           night={night}
-          busy={s.busy}
           onClose={() => setEditing(null)}
+          // Close FIRST, write second: `planNight` refuses to run while another
+          // write is in flight, and a picker still on screen would invite the second
+          // tap that hits exactly that.
           onPick={(slot) => { setEditing(null); void planNight(p.weekStart, night.date, slot, p.refresh) }}
           onClear={() => { setEditing(null); void clearNight(p.weekStart, night.date, p.refresh) }}
         />
@@ -486,87 +488,79 @@ function NightColumn({ night, auto, disabled, onOpen }: {
   )
 }
 
-// "Overwriting a set night is a tap on that night." Deliberately the smallest thing
-// that can be: the library, a free-text dish (leftovers, eating out), and a way to
-// empty the slot. The Meals screen is where a week gets built; this is where one night
-// gets fixed.
+// "Overwriting a set night is a tap on that night." What that tap opens is the app's
+// OWN recipe browser — the same `RecipeBrowser` behind the Meals screen's "Add a
+// dinner · Sun Aug 30" screen, PlanMonth's manual swap and Cook-from-pantry. It was
+// always the right component; this step drew a flat chip list instead, which worked
+// at one recipe and fell apart at fifty: a search that only narrowed a wrapping row
+// of pills, no meal-type tabs, no View, no way to write a recipe without leaving, and
+// a free-text field approximating the three recipe-less nights the browser already
+// has proper cards for.
 //
-// ONE FIELD, TWO JOBS — and it has to be, because there is only room for one. What
-// you type narrows the library as you go AND is the dish if nothing there fits, so
-// "chi" filters to Chili while "chi" + Plan it makes the night literally "chi". The
-// label says both; picking a recipe always beats the text.
+// FULL-SCREEN over the step rather than inside the 520px modal, because the browser
+// IS a four-up card grid with its own search and filter rows — and because a night
+// picked here should look like a night picked on the Meals screen.
 //
-// The library is read through `useRecipes`, the same hook the Recipes screen and the
-// week planner use — so it fetches when the picker opens and refetches on the
-// `recipes` bus topic. The bug that made this necessary: the list used to be cached
-// in this file's module state behind `if (recipes) return`, and an EMPTY library is a
-// truthy `[]`, so a household that opened the picker before adding its first recipe
-// was told "no recipes yet" for the rest of the page's life.
-function NightModal({ night, busy, onClose, onPick, onClear }: {
+// THE THREE PLACEHOLDER CARDS are the point of the swap. "Eating out", "Leftovers"
+// and "Try something new" write exactly the literals Meals.tsx writes, which are
+// exactly what `isEatingOut` / `isLeftovers` / `isTryNew` classify — so a night
+// planned here and the same night planned on the Meals screen are the same row, and
+// the dish tile's `out` state above keeps agreeing with the rest of the app.
+//
+// The library still comes through `useRecipes` — the hook fetches when the picker
+// mounts and refetches on the `recipes` bus topic. That is deliberate and must stay:
+// the list used to be cached in this file's module state behind `if (recipes) return`,
+// and an EMPTY library is a truthy `[]`, so a household that opened the picker before
+// adding its first recipe was told "no recipes yet" for the rest of the page's life.
+function NightPicker({ night, onClose, onPick, onClear }: {
   night: PlanningMealsNight
-  busy: boolean
   onClose: () => void
   onPick: (slot: { recipeId?: string | null; title?: string | null }) => void
   onClear: () => void
 }) {
-  const [title, setTitle] = useState('')
   const { recipes, loading, error } = useRecipes()
 
-  const q = title.trim().toLowerCase()
-  const matches = useMemo(() => (q ? recipes.filter((r) => haystack(r).includes(q)) : recipes), [recipes, q])
-
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-card wpm-modal" onClick={(e) => e.stopPropagation()}>
-        <button type="button" className="modal-close" onClick={onClose} aria-label="Close">×</button>
-        <div className="wpm-modal-t wf-serif">{dow(night.date)} dinner</div>
-        <div className="wpm-modal-s">
-          {night.dinner ? `Currently ${night.dinner.title}.` : 'Nothing planned yet.'} {dayNum(night.date)}
-        </div>
-
-        <label className="field">
-          <span>Search your recipes, or type any dish</span>
-          <input
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="Chili · leftovers · eating out…"
-            aria-label="Search your recipes, or type any dish"
-            onKeyDown={(e) => { if (e.key === 'Enter' && title.trim()) onPick({ title: title.trim(), recipeId: null }) }}
-          />
-        </label>
-
-        <div className="wpm-modal-h">From your recipes</div>
-        <div className="wpm-recipes">
-          {loading && <div className="wpm-msg">Loading…</div>}
-          {!loading && error && <div className="wpm-msg">Couldn&apos;t read your recipes — reload and try again.</div>}
-          {/* Three different silences, and they must not read alike: an empty
-              library, a search with no hit, and a list. Saying "no recipes yet" to
-              somebody who has forty of them is what made this look broken. */}
-          {!loading && !error && recipes.length === 0 && (
-            <div className="wpm-msg">Your recipe library is empty — whatever you type above is planned as the dish.</div>
-          )}
-          {!loading && !error && recipes.length > 0 && matches.length === 0 && (
-            <div className="wpm-msg">No recipe matches “{title.trim()}” — Plan it uses what you typed.</div>
-          )}
-          {matches.map((r) => (
-            <button key={r.id} type="button" className="wpm-recipe" disabled={busy} onClick={() => onPick({ recipeId: r.id, title: null })}>
-              <span aria-hidden>{r.emoji ?? '🍽️'}</span>
-              {r.title}
-            </button>
-          ))}
-        </div>
-
-        <div className="wpm-modal-f">
-          {night.dinner && (
-            <button type="button" className="btn btn-ghost" disabled={busy} onClick={onClear}>Clear this night</button>
-          )}
-          <div className="wpm-modal-sp" />
-          <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
-          <button type="button" className="btn btn-primary" disabled={busy || !title.trim()} onClick={() => onPick({ title: title.trim(), recipeId: null })}>
-            Plan it
-          </button>
-        </div>
+    <div className="wpm-picker" role="dialog" aria-label={`Plan ${dow(night.date)} dinner`}>
+      <div className="wpm-picker-head">
+        <button type="button" className="pill wpm-planner-back" onClick={onClose}>‹ Back to the week</button>
+        <span className="wpm-picker-t wf-serif">{dow(night.date)} dinner · {dayNum(night.date)}</span>
+        <span className="wpm-picker-n">
+          {error
+            ? "Couldn't read your recipes — reload and try again."
+            : night.dinner
+              ? `Currently ${night.dinner.title}`
+              : 'Nothing planned yet'}
+        </span>
+        {/* Emptying the slot has nowhere else to live once the body is the browser,
+            so it sits with the night it is about rather than in the grid. */}
+        {night.dinner && (
+          <button type="button" className="btn btn-ghost wpm-picker-clear" onClick={onClear}>Clear this night</button>
+        )}
       </div>
+      <RecipeBrowser
+        recipes={recipes}
+        loading={loading}
+        // Dinner is what this step plans, so the browser opens on the dinner tab —
+        // which still shows every untagged recipe, and "All" is one tap away.
+        slot="dinner"
+        onPick={(r) => onPick({ recipeId: r.id, title: null })}
+        // The same three literals the Meals screen writes, so the classifiers that
+        // render them agree across both screens.
+        onEatingOut={() => onPick({ title: 'Eating out', recipeId: null })}
+        onLeftovers={() => onPick({ title: 'Leftovers', recipeId: null })}
+        onTrySomething={() => onPick({ title: 'Try something new', recipeId: null })}
+        // KEPT, and only this: the three cards cover the canonical recipe-less
+        // nights and "＋ New recipe" covers "put it in my library", but neither
+        // covers the one-off named dish nobody wants to write a recipe for —
+        // "Grandma's lasagne", "breakfast for dinner", which the step's own design
+        // copy names. It rides the browser's search box, so there is still one field.
+        onFreeText={(text) => onPick({ title: text, recipeId: null })}
+        // Names the night on the View preview's confirm button. The grid cards say
+        // plain "Select" — that's the browser's own copy and the Meals screen's too,
+        // so it is deliberately left alone rather than diverged here.
+        selectLabel={`Plan for ${dow(night.date)}`}
+      />
     </div>
   )
 }

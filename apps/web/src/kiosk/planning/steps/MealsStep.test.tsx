@@ -465,119 +465,177 @@ describe('meals step · plan the rest for me', () => {
   })
 })
 
-// The bug the family hit: "why didn't this pull from my recipes? I added one and
-// started typing and nothing happened." Two things were wrong and both are covered
-// here — the field never filtered anything, and the library was cached behind a
-// truthy empty array so a recipe added afterwards never appeared.
-describe('meals step · picking a dish from the library', () => {
+// Tapping a night opens the app's OWN recipe browser — the same `RecipeBrowser`
+// behind the Meals screen's "Add a dinner · Sun Aug 30", PlanMonth's manual swap and
+// Cook-from-pantry. The step used to draw a flat list of chips, which worked at one
+// recipe and fell apart at fifty. What is asserted here is that the browser is really
+// what opens, that its search narrows the grid, and that every way out of it —
+// a recipe, a placeholder night, a dish nobody saved — writes through the same
+// meal-plan endpoint the Meals screen uses.
+describe('meals step · picking a dish for one night', () => {
   const library = () => [titleOnly('r-9', 'Chili'), titleOnly('r-8', 'Fish tacos'), titleOnly('r-7', 'Soup')]
 
-  const openNight = async (i: number) => {
+  const openNight = (i: number): HTMLElement => {
     fireEvent.click(nights()[i].querySelector('.wpm-dish')!)
-    const card = document.querySelector('.modal-card') as HTMLElement
-    await within(card).findByRole('button', { name: /chili/i })
-    return card
+    return document.querySelector('.wpm-picker') as HTMLElement
   }
+  const cards = (picker: HTMLElement) => Array.from(picker.querySelectorAll('.mp-card')) as HTMLElement[]
+  const titles = (picker: HTMLElement) => cards(picker).map((c) => c.querySelector('.rc-t')?.textContent ?? '')
+  const cardNamed = (picker: HTMLElement, title: string): HTMLElement => {
+    const found = cards(picker).find((c) => (c.querySelector('.rc-t')?.textContent ?? '').includes(title))
+    if (!found) throw new Error(`no card titled ${title} — saw ${JSON.stringify(titles(picker))}`)
+    return found
+  }
+  const selectCard = (picker: HTMLElement, title: string) =>
+    fireEvent.click(cardNamed(picker, title).querySelector('.mp-select')!)
+  const search = (picker: HTMLElement) => picker.querySelector('.picker-search input') as HTMLInputElement
+  const planned = () => sent('POST', '/api/meals/plan').filter((c) => !c.url.includes('plan-week'))
 
-  it('filters the library as you type, and picking one plans that night', async () => {
+  it("opens the app's recipe browser, not a list of chips", async () => {
     mockApi({ recipes: library() })
     draw()
     await screen.findByText('Pasta bake')
-    const card = await openNight(5)
-    expect(card.querySelectorAll('.wpm-recipe')).toHaveLength(3)
+    const picker = openNight(5)
 
-    // One field, two jobs — so it has to actually narrow the list.
-    fireEvent.change(within(card).getByLabelText(/search your recipes/i), { target: { value: 'chi' } })
-    expect(card.querySelectorAll('.wpm-recipe')).toHaveLength(1)
-    expect(within(card).getByRole('button', { name: /chili/i })).toBeTruthy()
-
-    fireEvent.click(within(card).getByRole('button', { name: /chili/i }))
-    await waitFor(() => expect(sent('POST', '/api/meals/plan')).toHaveLength(1))
-    // Picking a recipe beats the text: the night is the recipe, not "chi".
-    expect(sent('POST', '/api/meals/plan')[0].body).toMatchObject({ date: day(5), mealType: 'dinner', recipeId: 'r-9' })
-    expect(sent('POST', '/api/meals/plan')[0].body!.title).toBeNull()
+    // The browser itself — its own search, its meal-type tabs, its card grid.
+    expect(picker.querySelector('.meals-picker')).toBeTruthy()
+    expect(search(picker).placeholder).toMatch(/search recipes by name/i)
+    expect(picker.querySelectorAll('.picker-filters .mp-filter').length).toBeGreaterThan(1)
+    await waitFor(() => expect(cardNamed(picker, 'Chili')).toBeTruthy())
+    // …and the chip list this step used to draw is gone for good.
+    expect(document.querySelectorAll('.wpm-recipe')).toHaveLength(0)
+    // The night it is about is named, and so is what it currently holds.
+    expect(within(picker).getByText(/fri dinner/i)).toBeTruthy()
   })
 
-  it('finds a recipe that has nothing but a title', async () => {
-    // Every other field is absent, which is how a just-created recipe arrives — the
-    // search must filter the nulls out rather than let one drop the row.
-    mockApi({ recipes: [titleOnly('r-1', 'Dummy recipe')] })
+  it('filters the grid as you type', async () => {
+    mockApi({ recipes: library() })
     draw()
     await screen.findByText('Pasta bake')
-    fireEvent.click(nights()[5].querySelector('.wpm-dish')!)
-    const card = document.querySelector('.modal-card') as HTMLElement
-    await within(card).findByRole('button', { name: /dummy recipe/i })
-    fireEvent.change(within(card).getByLabelText(/search your recipes/i), { target: { value: 'dumm' } })
-    expect(within(card).getByRole('button', { name: /dummy recipe/i })).toBeTruthy()
+    const picker = openNight(5)
+    await waitFor(() => expect(titles(picker)).toEqual(expect.arrayContaining(['Chili', 'Fish tacos', 'Soup'])))
+
+    fireEvent.change(search(picker), { target: { value: 'chi' } })
+    const shown = titles(picker)
+    expect(shown).toContain('Chili')
+    expect(shown).not.toContain('Soup')
+    expect(shown).not.toContain('Fish tacos')
+  })
+
+  it('plans the night from the recipe card', async () => {
+    mockApi({ recipes: library() })
+    draw()
+    await screen.findByText('Pasta bake')
+    const picker = openNight(5)
+    await waitFor(() => expect(cardNamed(picker, 'Chili')).toBeTruthy())
+
+    selectCard(picker, 'Chili')
+
+    await waitFor(() => expect(planned()).toHaveLength(1))
+    expect(planned()[0].body).toMatchObject({ date: day(5), mealType: 'dinner', recipeId: 'r-9' })
+    expect(planned()[0].body!.title).toBeNull()
+    // The browser closes back onto the week.
+    await waitFor(() => expect(document.querySelector('.wpm-picker')).toBeNull())
+  })
+
+  // The three placeholder cards are the reason this component was the right one:
+  // they write the exact recipe-less rows `isEatingOut` / `isLeftovers` / `isTryNew`
+  // classify, which the step's own dish tile reads. A free-text box approximating
+  // them is how the same night ends up looking like takeout on one screen and a
+  // cooked dinner on another.
+  it.each([
+    ['Eating out', 'Eating out'],
+    ['Leftovers', 'Leftovers'],
+    ['Try something new', 'Try something new'],
+  ])('plans %s as the same recipe-less row the Meals screen writes', async (card, title) => {
+    mockApi({ recipes: library() })
+    draw()
+    await screen.findByText('Pasta bake')
+    const picker = openNight(5)
+
+    selectCard(picker, card)
+    await waitFor(() => expect(planned()).toHaveLength(1))
+    expect(planned()[0].body).toMatchObject({ date: day(5), mealType: 'dinner', title, recipeId: null })
+  })
+
+  it('still plans a one-off dish that is in neither the library nor the cards', async () => {
+    // "Grandma's lasagne" is not a recipe anybody wants to write and is not one of
+    // the three placeholder nights — so the browser's own search box doubles as the
+    // way to say it, rather than this step standing a second text field beside it.
+    mockApi({ recipes: library() })
+    draw()
+    await screen.findByText('Pasta bake')
+    const picker = openNight(5)
+    await waitFor(() => expect(cardNamed(picker, 'Chili')).toBeTruthy())
+
+    // No card offering free text until there is something typed to offer.
+    expect(picker.querySelector('.picker-grid')!.textContent).not.toMatch(/plan it as typed/i)
+    fireEvent.change(search(picker), { target: { value: "Grandma's lasagne" } })
+    expect(within(picker).getByText(/plan it as typed/i)).toBeTruthy()
+
+    selectCard(picker, "Grandma's lasagne")
+    await waitFor(() => expect(planned()).toHaveLength(1))
+    // The capitals somebody typed survive — the filter lower-cases, the plan doesn't.
+    expect(planned()[0].body).toMatchObject({ date: day(5), title: "Grandma's lasagne", recipeId: null })
   })
 
   it('picks up a recipe added since the step was first opened', async () => {
     // The old picker cached the list in module state behind `if (recipes) return` —
     // and an EMPTY library is a truthy `[]`, so a household that opened the picker
-    // before adding its first recipe was told "no recipes yet" for good.
+    // before adding its first recipe was told "no recipes yet" for good. `useRecipes`
+    // is what keeps that dead, and it has to stay the source.
     let lib: { id: string; title: string }[] = []
     mockApi({ recipes: () => lib })
     draw()
     await screen.findByText('Pasta bake')
 
-    fireEvent.click(nights()[5].querySelector('.wpm-dish')!)
-    let card = document.querySelector('.modal-card') as HTMLElement
-    expect(await within(card).findByText(/recipe library is empty/i)).toBeTruthy()
-    fireEvent.click(within(card).getByRole('button', { name: /^cancel$/i }))
+    let picker = openNight(5)
+    await waitFor(() => expect(picker.querySelector('.picker-empty')).toBeTruthy())
+    fireEvent.click(within(picker).getByRole('button', { name: /back to the week/i }))
 
     lib = [titleOnly('r-1', 'Dummy recipe')]
-    fireEvent.click(nights()[6].querySelector('.wpm-dish')!)
-    card = document.querySelector('.modal-card') as HTMLElement
-    expect(await within(card).findByRole('button', { name: /dummy recipe/i })).toBeTruthy()
+    picker = openNight(6)
+    await waitFor(() => expect(cardNamed(picker, 'Dummy recipe')).toBeTruthy())
   })
 
-  it('says the library is empty plainly, and still plans what you type', async () => {
+  it('says so plainly when there is nothing in the library yet', async () => {
     mockApi({ recipes: [] })
     draw()
     await screen.findByText('Pasta bake')
-    fireEvent.click(nights()[5].querySelector('.wpm-dish')!)
-    const card = document.querySelector('.modal-card') as HTMLElement
+    const picker = openNight(5)
 
-    // Plain, and it says what to do instead — not a bare "nothing here".
-    expect(await within(card).findByText(/your recipe library is empty/i)).toBeTruthy()
-    fireEvent.change(within(card).getByLabelText(/search your recipes/i), { target: { value: 'Leftovers' } })
-    fireEvent.click(within(card).getByRole('button', { name: /plan it/i }))
-    await waitFor(() => expect(sent('POST', '/api/meals/plan')).toHaveLength(1))
-    expect(sent('POST', '/api/meals/plan')[0].body).toMatchObject({ date: day(5), title: 'Leftovers', recipeId: null })
-  })
-
-  it('distinguishes "no match" from "no recipes", and still plans the typed dish', async () => {
-    mockApi({ recipes: library() })
-    draw()
-    await screen.findByText('Pasta bake')
-    const card = await openNight(5)
-
-    fireEvent.change(within(card).getByLabelText(/search your recipes/i), { target: { value: 'zzz' } })
-    // A household with three recipes must never be told it has none.
-    expect(within(card).queryByText(/library is empty/i)).toBeNull()
-    expect(within(card).getByText(/no recipe matches/i)).toBeTruthy()
-    expect(card.querySelectorAll('.wpm-recipe')).toHaveLength(0)
-
-    fireEvent.click(within(card).getByRole('button', { name: /plan it/i }))
-    await waitFor(() => expect(sent('POST', '/api/meals/plan')).toHaveLength(1))
-    expect(sent('POST', '/api/meals/plan')[0].body).toMatchObject({ date: day(5), title: 'zzz', recipeId: null })
+    // Plain, and never a blank screen: the three placeholder nights and a way to
+    // write the first recipe are still on offer.
+    await waitFor(() => expect(picker.querySelector('.picker-empty')!.textContent).toMatch(/no dinner recipes yet/i))
+    expect(cardNamed(picker, 'Eating out')).toBeTruthy()
+    expect(within(picker).getByRole('button', { name: /new recipe/i })).toBeTruthy()
   })
 })
 
 describe('meals step · overwriting a set night', () => {
+  const openNight = (i: number): HTMLElement => {
+    fireEvent.click(nights()[i].querySelector('.wpm-dish')!)
+    return document.querySelector('.wpm-picker') as HTMLElement
+  }
+  const planned = () => sent('POST', '/api/meals/plan').filter((c) => !c.url.includes('plan-week'))
+  const selectCard = (picker: HTMLElement, title: string) => {
+    const found = (Array.from(picker.querySelectorAll('.mp-card')) as HTMLElement[])
+      .find((c) => (c.querySelector('.rc-t')?.textContent ?? '').includes(title))!
+    fireEvent.click(found.querySelector('.mp-select')!)
+  }
+
   it('is a tap on that night, and writes through the existing meal-plan endpoint', async () => {
     mockApi()
     draw()
     await screen.findByText('Pasta bake')
 
-    fireEvent.click(nights()[5].querySelector('.wpm-dish')!)
-    const card = document.querySelector('.modal-card')!
-    expect(card).toBeTruthy()
-
-    // The library loads when the modal opens.
-    fireEvent.click(await within(card as HTMLElement).findByRole('button', { name: /chili/i }))
-    await waitFor(() => expect(sent('POST', '/api/meals/plan')).toHaveLength(1))
-    expect(sent('POST', '/api/meals/plan')[0].body).toMatchObject({ date: day(5), mealType: 'dinner', recipeId: 'r-9' })
+    const picker = openNight(5)
+    expect(picker).toBeTruthy()
+    // The library loads when the picker opens.
+    await waitFor(() => expect(picker.textContent).toContain('Chili'))
+    selectCard(picker, 'Chili')
+    await waitFor(() => expect(planned()).toHaveLength(1))
+    expect(planned()[0].body).toMatchObject({ date: day(5), mealType: 'dinner', recipeId: 'r-9' })
   })
 
   it('clears a night through the existing endpoint too', async () => {
@@ -585,8 +643,10 @@ describe('meals step · overwriting a set night', () => {
     draw()
     await screen.findByText('Pasta bake')
 
-    fireEvent.click(nights()[0].querySelector('.wpm-dish')!)
-    fireEvent.click(within(document.querySelector('.modal-card') as HTMLElement).getByRole('button', { name: /clear this night/i }))
+    const picker = openNight(0)
+    // Emptying the slot rides with the night it is about, above the browser.
+    expect(within(picker).getByText(/currently pasta bake/i)).toBeTruthy()
+    fireEvent.click(within(picker).getByRole('button', { name: /clear this night/i }))
     await waitFor(() => expect(sent('DELETE', '/api/meals/plan')).toHaveLength(1))
     expect(sent('DELETE', '/api/meals/plan')[0].url).toContain(`date=${day(0)}`)
   })
@@ -601,11 +661,27 @@ describe('meals step · overwriting a set night', () => {
 
     // Overwrite one of the three by hand — it is now a decision, not an auto-fill.
     // (`filledView()` still marks it, so this proves the mark is dropped too.)
-    fireEvent.click(nights()[5].querySelector('.wpm-dish')!)
-    const modal = document.querySelector('.modal-card') as HTMLElement
-    fireEvent.click(await within(modal).findByRole('button', { name: /chili/i }))
+    const picker = openNight(5)
+    await waitFor(() => expect(picker.textContent).toContain('Chili'))
+    selectCard(picker, 'Chili')
 
     await waitFor(() => expect(setDecisionData).toHaveBeenLastCalledWith({ autoFilled: [day(3), day(6)] }))
     expect(await within(screen.getByTestId('foot')).findByRole('button', { name: /undo the two/i })).toBeTruthy()
+  })
+
+  it('opening the week planner wins over an open night picker', async () => {
+    mockApi()
+    draw()
+    await screen.findByText('Pasta bake')
+    openNight(5)
+    expect(document.querySelector('.wpm-picker')).toBeTruthy()
+
+    // Both overlays are the same surface. In a browser the picker covers the footer,
+    // so this is hard to reach — but jsdom has no layout and the two flags DO live in
+    // different places (one in Body, one in the store), so the guard in Body is what
+    // makes "only one" structural rather than a lucky z-index.
+    fireEvent.click(within(screen.getByTestId('foot')).getByRole('button', { name: /plan the rest for me/i }))
+    await screen.findByRole('dialog', { name: /plan the rest of the week/i })
+    expect(document.querySelector('.wpm-picker')).toBeNull()
   })
 })
