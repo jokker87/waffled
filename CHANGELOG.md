@@ -15,6 +15,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Family Night can say what each part actually is, and put this week on the calendar.**
+  Activity, Treat and Check-in each get their own line to write what it's going to be —
+  "charades, kids vs parents", "the good ice cream" — beside the person whose turn it is.
+  Naming a part doesn't claim it: whoever the rotation suggested still stands until you tap
+  a face. And a planning session can now get *this week's* gathering onto the calendar,
+  either as a new event on the night (named after your theme) or by pointing at something
+  already on the week — "this week it's the movie night that's already on Friday". That's
+  separate from the standing weekly event in Settings, so you can have one, the other, or
+  both.
+
 - **The recipe picker can build a whole meal, not just write a new recipe.** Anywhere you
   pick a dish for a night — the meal planner, and Weekly Planning's Meals step — there's now
   a **＋ New meal** button beside ＋ New recipe. It opens the real Meal Builder over the
@@ -101,6 +111,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   honestly set them.
 
 ### Fixed
+
+- **A note you park for a later step now turns up in that step.** Tagging a parked note for
+  Meals, Tasks, Calendar, Goals, Family Night or Connection recorded the tag but never
+  showed it again — the note only reappeared in the Recap, after the step that could have
+  acted on it had gone by. Every step now opens with what you parked for it, with
+  **Handled** and **Drop it** beside each one; walking past a note leaves it parked, same
+  as before. Notes nobody tagged still wait for the Recap's last call, and Loose ends is
+  unchanged since it already lists everything.
+
+- **The Connection step no longer hides a pairing you just gave time to.** Only three
+  pairings were ever drawn, ranked by how long it had been since it was just those two —
+  and that ranking only looks at the weeks *before* the one you're planning, so making a
+  pairing didn't move it up. On a household with four or more people the event saved to
+  your calendar and the row stayed invisible, which looked exactly like a failed save. Any
+  pairing with time already on the week is now always shown.
+
+- **The Horizon scan's month stops shrinking as you park more notes.** The parked list took
+  its height straight out of the calendar, squeezing six weeks into a strip. It now lays
+  out in columns and scrolls once it's a few rows deep, so the month keeps its size however
+  much you park. The note explaining the difference between adding an event and parking a
+  note has been rewritten, too.
+
+- **Kids: your own answer now looks like an answer.** Typing something under "＋ Something
+  else" saved it, but the chip kept the dashed grey styling of the empty prompt, so it read
+  as though nothing had happened — and tapping it again opened an empty box, throwing away
+  what you'd written. It now shows as chosen like any other option, and reopening it lets
+  you edit what's there. The text box also uses the app's own field styling instead of a
+  bare browser input.
+
+- **The Recap reads back in the calendar's colours.** Events in the week strip were plain
+  grey text; they're now tinted per person exactly as the month and week views do, with
+  whole-family events in your family colour. Hovering a decision row also has room around
+  it now instead of hugging the text.
 
 ### Security
 

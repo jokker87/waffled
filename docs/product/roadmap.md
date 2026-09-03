@@ -255,10 +255,13 @@ Legend: ✅ done · 🟡 partial / in progress · 🚧 planned · ⛔ dropped (s
   **and all ten steps** — Loose ends, Calendar, Horizon scan, Family night, Connection,
   Goals, Meals, Tasks, Kids, Recap — built in parallel behind a per-step file seam (see the
   plan doc's "Building the steps in parallel"), five at a time in two waves that merged with
-  no conflicts. **Pending: iOS parity for all of it.** The architectural point held: the session stores almost nothing — two tables
+  no conflicts, then a validation pass that fixed ten reported defects across five of them.
+  **Pending: iOS parity for all of it.** The architectural point held: the session stores almost nothing — two tables
   (`planning_sessions`, `planning_session_steps`) plus `planning_parked_items` — and every
   decision lands in the module that owns it. Step 1 is the one exception and it stores nothing
-  either: it *routes* items to later steps, recorded in the session's own jsonb. Design:
+  either: it *routes* items to later steps, recorded in the session's own jsonb — and the
+  step it routes to now opens with the note, a shell-level handoff every step (and the iOS
+  pass) inherits rather than implements. Design:
   `Weekly Planning v4` canvas; plan: `docs/product/weekly-planning-plan.md`.
 
 - **Waffled-Bites (kid companion device)** — the pairing system and the parent-facing

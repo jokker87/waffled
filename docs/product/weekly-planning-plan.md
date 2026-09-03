@@ -221,6 +221,67 @@ happened to end in Done" — leave the step and come back and it reads 0. A prov
 cannot fail that way. The crumbs recap *does* read are the ones that ARE the decision and have
 no module row: the goals focus map and the kids' answers.
 
+### The parked-note handoff belongs to the shell
+
+`planning_parked_items.step_key` names a DESTINATION — "which step is going to look at
+this" — and both producers write it: step 1's triage when it routes a loose end, and step
+3's park bar when somebody tags a note. For a while nothing read it. Only steps 1, 3 and
+10 touched the table at all, so a note tagged for Meals or Tasks was never seen again
+until the recap's last call, which is *after* the step that could have acted on it. It was
+reported exactly that way: "I added a bunch to the park it thing, expecting to go over
+them in the appropriate step but I never saw them again, where did they go?"
+
+(Kids looks like a counter-example and isn't. It honours the ROUTES contract, but
+`resolveRoutedKeys` maps only goals and chore instances, and its own comment says a parked
+note "belongs to no particular child" and is left alone. Free text reached nothing.)
+
+**The banner is the shell's, not each step's** — `Handoff` in `WeeklyPlanning.tsx`, fed by
+`SessionStep.parked` on the session view:
+
+- it is identical on all ten steps, so ten copies would be nine chances to drift;
+- the shell already refetches the session view after every write, so a note dealt with
+  anywhere stops being offered everywhere for free;
+- each step's OWN affordances are what act on the note. The banner's job is to put it back
+  in front of you at the moment it is actionable, not to become a tenth way to add a chore.
+
+It rides on the session view rather than a new endpoint, and both answers go through the
+resolve route steps 1 and 10 already use — no second mechanism for either half. **iOS
+parity gets this for free from the shell**; there is nothing per-step to build.
+
+Three exclusions are deliberate: `looseEnds` (it already draws the whole board — handing
+its own notes back would double every row), a NULL tag (an untagged note is nobody's yet,
+which is precisely the recap's last call; giving it to all ten steps would put the same
+unanswered note on every screen), and anything past six on one step (a nudge, not an
+inbox). It is **not** scoped to the session either: surviving the session that wrote it is
+what parking is FOR.
+
+### Family night grew two columns, and one of them is subtler than it looks
+
+`assignments.detail` is the obvious half: the tables recorded only WHO had a part, and
+`occurrences.notes` is one note for the whole gathering, so three parts sharing it meant
+three answers in one field with nowhere to render each beside its person.
+
+`assignments.person_set` is the half worth remembering. Writing what a part IS says nothing
+about whose turn it is, so a detail-only write must leave the rotation's suggestion
+standing — and `person_id IS NULL` could not carry that, because it already means
+"pinned to nobody", the result of taking a pin back off, which the module deliberately
+keeps distinct from snapping back to the rotation's guess. Hence a third column, defaulting
+TRUE so every existing row keeps reading as pinned, and sticky on update so a later
+detail-only write can't hand a claimed part back to the rotation.
+
+That distinction runs to the wire: **presence is the message.** The occurrence route copies
+each field only when the caller sent it, and the client sends a detail with no `personId`
+key at all. The route used to do `{ partId, personId: a.personId ?? null }`, which would
+have turned "I named the treat" into "…and nobody has it".
+
+`occurrences.event_id` is this week's calendar event, distinct from
+`settings.familyNight.eventId`'s standing recurring series — one field for every week, set
+in Settings, which cannot express "this week it's the movie night already on Friday".
+Creating one is a SERVER call (`createOccurrenceEvent`, modelled on the existing
+`scheduleEvent`) and deliberately not a create-then-adopt round trip: the web app writes
+events LOCALLY first and PowerSync uploads afterwards, so an id handed back by the client
+may not exist server-side yet and the link would 404 on a race nobody could reproduce.
+
 ### What wave 2 found, and what is still open
 
 Building a step against a shipped module is also an audit of it. Three findings survived:
