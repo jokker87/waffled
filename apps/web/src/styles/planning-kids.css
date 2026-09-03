@@ -1,0 +1,181 @@
+/* Weekly Planning · step 9 — Kids (planning/steps/KidsStep.tsx).
+
+   THE ONE STEP THE KIDS THEMSELVES READ, and every size below follows from that: a
+   nine-year-old and a six-year-old are standing at the board, so the type is bigger
+   than anywhere else in the session and the two cards sit side by side on one screen —
+   no per-kid navigation for a family of two.
+
+   Built on the same tokens as planning.css, so dark mode comes for free.
+   NEVER hardcode a hex here.
+
+   VOCABULARY
+     Frame   — .wpk .wpk-title .wpk-note
+     Picker  — .wpk-tabs .wpk-tab (.on) .wpk-tab-face .wpk-tab-n  (PHONE ONLY)
+     Card    — .wpk-cards .wpk-card (.on) .wpk-h .wpk-face .wpk-id .wpk-nm .wpk-ag
+               .wpk-stars .wpk-sec .wpk-lab
+     Week    — .wpk-chips .wpk-chip (.late) .wpk-chip-t .wpk-chip-n
+     Focus   — .wpk-opts .wpk-opt (.on .more) .wpk-opt-e .wpk-opt-main .wpk-opt-t
+               .wpk-opt-s .wpk-routed .wpk-opt-num .wpk-num .wpk-den
+     Forward — .wpk-fwd .wpk-fchip (.on .more)
+     Said    — .wpk-said .wpk-said-e .wpk-said-b .wpk-big .wpk-cap
+     Typing  — .wpk-type
+
+   The segmented picker below RESTATES .wpg-tabs / .wpg-tab from planning-goals.css
+   rather than sharing them: the two are meant to be the same control (v4 describes the
+   Goals step as borrowing this one — Goals just shipped first), but a step may only
+   edit its own stylesheet. Promoting it to a shared component is a shell change; see
+   the step's report. Keep the two in step by hand until then.
+
+   Person avatars are the household's real `avatarEmoji` on a tint of their own
+   `colorHex`, the way the Tasks step's .wpt-face does it — there is no shared
+   person-avatar component on web.
+*/
+
+.wpk { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.wpk-note { color: var(--ink-3); font-weight: 600; max-width: 58ch; line-height: 1.55; margin: auto 0; }
+
+/* The kids' NAMES are the heading. The step catalog's title is the word "Kids" and is
+   server-owned, so the names have to live in the body — which is where they belong
+   anyway: this card is addressed to the child standing in front of it. */
+.wpk-title {
+  font-family: var(--serif); font-size: 22px; font-weight: 600; letter-spacing: -0.02em;
+  color: var(--ink); margin: 0;
+}
+
+/* ── The per-kid picker · PHONE ONLY ────────────────────────────────────────── */
+/* On anything wider, both cards are on screen and a picker would be a control that
+   changes nothing. */
+.wpk-tabs { display: none; }
+.wpk-tab {
+  display: inline-flex; align-items: center; gap: 8px;
+  font: inherit; font-size: 14px; font-weight: 700; letter-spacing: -0.01em;
+  color: var(--ink-2); background: var(--panel);
+  border: 1px solid transparent; border-radius: 999px; padding: 7px 14px 7px 7px; cursor: pointer;
+}
+.wpk-tab.on { color: var(--ink); background: var(--card); border-color: var(--line); box-shadow: var(--sh-1); }
+.wpk-tab-face {
+  flex: none; width: 28px; height: 28px; border-radius: 999px;
+  display: grid; place-items: center; font-size: 15px; line-height: 1;
+}
+.wpk-tab-n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 12ch; }
+
+/* ── The cards ──────────────────────────────────────────────────────────────── */
+.wpk-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px; align-items: start; }
+
+.wpk-card {
+  display: flex; flex-direction: column; gap: 18px; min-width: 0;
+  background: var(--card); border: 1px solid var(--hair); border-radius: var(--r-lg);
+  padding: 20px;
+}
+
+.wpk-h { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.wpk-face {
+  flex: none; width: 54px; height: 54px; border-radius: 999px;
+  display: grid; place-items: center; font-size: 28px; line-height: 1;
+}
+.wpk-id { flex: 1; min-width: 0; }
+/* Their name, at the size a name deserves when it is the title of the card. */
+.wpk-nm { font-family: var(--serif); font-size: 24px; font-weight: 600; letter-spacing: -0.02em; color: var(--ink); }
+.wpk-ag { margin-top: 1px; font-size: 12.5px; font-weight: 650; color: var(--ink-3); }
+.wpk-stars {
+  flex: none; display: inline-flex; align-items: center; gap: 5px;
+  font-size: 15px; font-weight: 750; letter-spacing: -0.01em; color: var(--ink);
+  background: var(--panel); border-radius: 999px; padding: 6px 12px;
+}
+
+.wpk-sec { display: flex; flex-direction: column; gap: 9px; min-width: 0; }
+.wpk-lab {
+  font-size: 11.5px; font-weight: 750; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+/* ── Their week ─────────────────────────────────────────────────────────────── */
+.wpk-chips { display: flex; flex-wrap: wrap; gap: 7px; list-style: none; margin: 0; padding: 0; }
+.wpk-chip {
+  display: inline-flex; align-items: baseline; gap: 7px; max-width: 100%;
+  font-size: 13.5px; font-weight: 650; color: var(--ink);
+  background: var(--panel); border-radius: 999px; padding: 6px 13px;
+}
+.wpk-chip-t { flex: none; font-size: 12px; font-weight: 750; color: var(--ink-3); }
+.wpk-chip-n { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Still open from before the week. The alarm colour, quietly — a kid reading their own
+   card should notice it without being told off by it. */
+.wpk-chip.late { background: var(--danger-t, var(--panel)); }
+.wpk-chip.late .wpk-chip-t { color: var(--danger); }
+
+/* ── One thing to focus on ──────────────────────────────────────────────────── */
+.wpk-opts { display: flex; flex-direction: column; gap: 10px; }
+
+.wpk-opt {
+  display: flex; align-items: center; gap: 14px; width: 100%; text-align: left;
+  font: inherit; color: var(--ink);
+  background: var(--card-2); border: 1px solid var(--hair); border-radius: var(--r-md);
+  padding: 14px 16px; cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.wpk-opt:hover:not(:disabled) { border-color: var(--line); }
+.wpk-opt:disabled { opacity: 0.55; cursor: default; }
+.wpk-opt.on { border-color: var(--primary); background: var(--primary-t); }
+/* The escape hatch. Deliberately the quietest thing in the list and deliberately last:
+   the whole design is that a kid recognises their week rather than invents it. */
+.wpk-opt.more { background: transparent; border-style: dashed; color: var(--ink-3); font-weight: 700; justify-content: center; }
+
+.wpk-opt-e { flex: none; font-size: 26px; line-height: 1; }
+.wpk-opt-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+/* Sized for the reader, who is nine. */
+.wpk-opt-t { font-size: 17px; font-weight: 700; letter-spacing: -0.015em; line-height: 1.25; }
+.wpk-opt-s { font-size: 13px; font-weight: 600; color: var(--ink-2); line-height: 1.4; }
+.wpk-routed { display: block; font-size: 11.5px; font-weight: 700; color: var(--primary); }
+
+/* The number is on the goal's OWN axis — see goalDisplayProgress in lib/api. Never an
+   inline read of totalProgress, which would show a habit's lifetime count. */
+.wpk-opt-num { flex: none; display: flex; align-items: baseline; gap: 3px; }
+.wpk-num { font-size: 22px; font-weight: 750; letter-spacing: -0.02em; }
+.wpk-den { font-size: 13px; font-weight: 650; color: var(--ink-2); }
+
+/* ── Something to look forward to ───────────────────────────────────────────── */
+.wpk-fwd { display: flex; flex-wrap: wrap; gap: 8px; }
+.wpk-fchip {
+  display: inline-flex; align-items: center; gap: 8px; max-width: 100%;
+  font: inherit; font-size: 15px; font-weight: 700; letter-spacing: -0.01em; color: var(--ink);
+  background: var(--card-2); border: 1px solid var(--hair); border-radius: 999px;
+  padding: 9px 15px; cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.wpk-fchip:hover:not(:disabled) { border-color: var(--line); }
+.wpk-fchip:disabled { opacity: 0.55; cursor: default; }
+.wpk-fchip.on { border-color: var(--primary); background: var(--primary-t); }
+.wpk-fchip.more { background: transparent; border-style: dashed; color: var(--ink-3); }
+.wpk-fchip-n { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── The read-back ──────────────────────────────────────────────────────────── */
+/* "The part they'll actually remember" — so it gets the weight of a statement, not the
+   weight of a status line. */
+.wpk-said {
+  display: flex; align-items: center; gap: 16px; min-width: 0;
+  background: var(--panel); border-radius: var(--r-md); padding: 18px;
+}
+.wpk-said-e { flex: none; font-size: 34px; line-height: 1; }
+.wpk-said-b { flex: 1; min-width: 0; }
+.wpk-big {
+  font-family: var(--serif); font-size: 23px; font-weight: 600; letter-spacing: -0.02em;
+  color: var(--ink); line-height: 1.2;
+}
+.wpk-cap { margin-top: 5px; font-size: 12.5px; font-weight: 650; color: var(--ink-3); }
+
+/* ── The escape hatch's form ────────────────────────────────────────────────── */
+.wpk-type { display: flex; gap: 8px; align-items: center; }
+.wpk-type input { flex: 1; min-width: 0; }
+
+/* ── Phone: one kid at a time ───────────────────────────────────────────────── */
+@media (max-width: 760px) {
+  .wpk-tabs {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    padding-bottom: 14px; border-bottom: 1px solid var(--hair);
+  }
+  .wpk-cards { grid-template-columns: 1fr; }
+  /* BOTH cards stay in the DOM — the picker only decides which one is on screen, so
+     nothing is lost (or refetched) by switching, and the desktop layout above is the
+     same markup rather than a second one. */
+  .wpk-card:not(.on) { display: none; }
+}
