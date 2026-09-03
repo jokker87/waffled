@@ -1,0 +1,186 @@
+/* Weekly Planning · step 5 — Connection (ConnectionStep.tsx).
+
+   A stack of pairing rows, then "Make a pairing" at full width under them. The rows are
+   a PROMPT, not the list, so the composer is not styled as a footnote: it is the widest
+   thing on the screen and it reads as the real offer.
+
+   The faces borrow the Tasks step's `.wpt-face` shape (a round tinted bubble carrying
+   the person's own colour) rather than inventing a second kind of person chip — same
+   size, same radius, same lift on hover. Everything else here is only what that
+   vocabulary doesn't have: the paired faces, the status sentence, the slot chips, and
+   the muted "already counts" chip that lets a row say the week has this covered.
+
+   Every colour is a token, so dark mode comes for free. Never hardcode a hex here — the
+   ONE exception is the per-person tint, which is a person's own `colorHex` from the
+   API applied inline at 13% (`…22`), exactly as the Tasks step does it.
+
+   VOCABULARY
+     .wpn                 the step body (a scrolling column of rows)
+     .wpn-row             one pairing: faces, the sentence, the chips
+     .wpn-faces .wpn-face the two (or three) people it is between
+     .wpn-who .wpn-stat   their names, and the one line under them
+     .wpn-slots .wpn-slot the gaps the week left behind
+     .wpn-counts          the muted chip: time that already exists gets credit
+     .wpn-add             "＋ Another time" / "Pick a date and time" — dashed, an opener
+     .wpn-make-open       the collapsed "＋ Make a pairing", full width
+     .wpn-make            the open composer: WHO (a query input) and WHEN (the gaps)
+     .wpn-note            what the rows are, and what they aren't
+*/
+
+.wpn {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 4px 28px 26px;
+  overflow-y: auto;
+  height: 100%;
+}
+
+.wpn-empty {
+  padding: 40px 28px;
+  color: var(--ink-3);
+  font-size: 14.5px;
+  text-align: center;
+}
+
+/* ── A pairing row ───────────────────────────────────────────────────────────── */
+.wpn-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 16px;
+  background: var(--card);
+  border: 1px solid var(--hair);
+  border-radius: var(--r-lg);
+  box-shadow: var(--sh-1);
+}
+
+/* The faces overlap slightly: two people, one pairing. */
+.wpn-faces { display: flex; flex: none; }
+.wpn-faces > * + * { margin-left: -10px; }
+
+.wpn-face {
+  width: 34px; height: 34px; flex: none;
+  border: 1px solid var(--hair-2); border-radius: 999px;
+  display: inline-grid; place-items: center;
+  font-size: 17px; line-height: 1;
+  background: var(--card-2);
+}
+
+.wpn-main { flex: 1 1 auto; min-width: 0; }
+.wpn-who {
+  font-family: var(--serif);
+  font-size: 17px; font-weight: 600;
+  color: var(--ink);
+}
+.wpn-stat {
+  margin: 3px 0 0;
+  font-size: 13.5px; line-height: 1.45;
+  color: var(--ink-2);
+}
+
+/* ── The chips ───────────────────────────────────────────────────────────────── */
+.wpn-slots {
+  display: flex; flex-wrap: wrap; gap: 7px;
+  flex: none; max-width: 46%;
+  justify-content: flex-end;
+}
+.wpn-slots-left { justify-content: flex-start; max-width: none; }
+
+.wpn-slot {
+  font: inherit; font-family: var(--sans);
+  font-size: 13px; font-weight: 650;
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--hair-2);
+  background: var(--card-2);
+  color: var(--ink);
+  cursor: pointer;
+  transition: border-color .12s ease, color .12s ease, background .12s ease, transform .12s ease;
+}
+.wpn-slot:hover:not(:disabled) { border-color: var(--person-3); color: var(--person-3); transform: translateY(-1px); }
+.wpn-slot:disabled { cursor: default; opacity: 0.5; }
+
+/* An opener, not a decision — dashed, like the Tasks step's add tile. */
+.wpn-add {
+  border-style: dashed;
+  background: transparent;
+  color: var(--ink-3);
+}
+
+/* TIME THAT ALREADY EXISTS. Muted on purpose: it is not one more thing to schedule,
+   it is the row admitting the week already answers this. Pressed, it reads as claimed. */
+.wpn-counts {
+  background: transparent;
+  border-color: transparent;
+  color: var(--ink-3);
+  font-weight: 600;
+}
+.wpn-counts:hover:not(:disabled) { border-color: var(--hair-2); color: var(--ink-2); }
+.wpn-counts.on {
+  background: var(--success-t);
+  border-color: var(--success);
+  color: var(--success);
+}
+
+/* ── Make a pairing ──────────────────────────────────────────────────────────── */
+/* Full width and dashed: the first-class action, not an afterthought in a corner. */
+.wpn-make-open {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  width: 100%;
+  padding: 16px;
+  font: inherit; font-family: var(--sans);
+  font-size: 14.5px; font-weight: 700;
+  color: var(--ink-2);
+  background: transparent;
+  border: 2px dashed var(--hair);
+  border-radius: var(--r-lg);
+  cursor: pointer;
+  transition: border-color .14s, color .14s, background .14s;
+}
+.wpn-make-open:hover:not(:disabled) { border-color: var(--person-3); color: var(--person-3); background: var(--person-3-t); }
+.wpn-make-open:disabled { cursor: default; opacity: 0.6; }
+.wpn-make-lead { text-align: left; }
+
+.wpn-make {
+  display: flex; flex-direction: column; gap: 12px;
+  padding: 16px;
+  background: var(--card);
+  border: 1px solid var(--person-3);
+  border-radius: var(--r-lg);
+  box-shadow: var(--sh-2);
+}
+.wpn-make-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.wpn-lab {
+  width: 52px; flex: none;
+  font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--ink-3);
+}
+.wpn-picks { display: flex; gap: 8px; flex-wrap: wrap; }
+/* A face that IS a control here — choosing who is the input to the slot query. */
+.wpn-pick { cursor: pointer; border-width: 1.5px; }
+.wpn-pick:hover:not(:disabled) { transform: translateY(-2px); }
+.wpn-pick.on { border-width: 1.5px; box-shadow: var(--sh-1); }
+.wpn-pick:not(.on) { opacity: 0.55; }
+.wpn-pick:disabled { cursor: default; opacity: 0.4; }
+
+.wpn-picked, .wpn-hint {
+  font-size: 13.5px; font-weight: 650;
+  color: var(--ink-2);
+}
+.wpn-hint { font-weight: 500; color: var(--ink-3); }
+
+.wpn-note {
+  margin: 4px 0 0;
+  font-size: 12.5px; line-height: 1.5;
+  color: var(--ink-3);
+}
+
+/* ── Narrow / phone ──────────────────────────────────────────────────────────── */
+/* Two lines: faces + name + one clause, then the chips wrapping under them. */
+@media (max-width: 720px) {
+  .wpn { padding: 4px 16px 20px; }
+  .wpn-row { flex-wrap: wrap; }
+  .wpn-slots { max-width: none; width: 100%; justify-content: flex-start; }
+  .wpn-lab { width: 100%; }
+}
