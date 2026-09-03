@@ -35,7 +35,7 @@ const step = (
   extra: Record<string, unknown> = {}
 ) => ({
   key, number, title, act, ask: `${title} — the one question?`, primary: 'Looks right',
-  available: true, status: 'pending', data: {}, decidedAt: null, ...extra,
+  available: true, status: 'pending', data: {}, decidedAt: null, parked: [], ...extra,
 })
 
 // Chores/goals/meals are off in this household, so their steps come back unavailable —
@@ -225,4 +225,66 @@ test('a finished session reads back as a record', async ({ page }) => {
   await expect(page.getByText('Skipped — a real answer')).toBeVisible()
   await expect(page.getByRole('button', { name: /Reopen the session/ })).toBeVisible()
   await page.screenshot({ path: 'test-results/weekly-planning-record.png' })
+})
+
+// ── The validation pass ────────────────────────────────────────────────────────
+// Two of the ten defects reported against these steps were things NO unit test could
+// have caught: a layout that squeezed the month grid, and a hover fill with no room
+// around it. Both were only visible in a browser, which is why they are asserted here
+// rather than in jsdom.
+
+// The parked-note handoff, which the shell draws above whichever step body is up.
+const handoffView = {
+  ...planningView,
+  steps: steps.map((st) =>
+    st.key === 'calendar'
+      ? step('calendar', 2, 'Calendar', 'Frame the week', {
+          parked: [
+            { id: 'pk1', note: 'book the campsite before it fills up', byline: 'Alex · 2 weeks ago' },
+            { id: 'pk2', note: 'ask about the field trip form', byline: 'Alex · yesterday' },
+          ],
+        })
+      : st
+  ),
+}
+
+test('a parked note is handed to its step, above the body and on screen', async ({ page }) => {
+  await mockApi(page, handoffView)
+  await signIn(page)
+  await page.goto('/planning')
+  await expect(page.locator('.wp-title')).toHaveText('Calendar')
+
+  const banner = page.locator('.wp-handoff')
+  await expect(banner).toBeVisible()
+  await expect(banner).toContainText('book the campsite before it fills up')
+  await expect(banner).toContainText('Alex · 2 weeks ago')
+  await page.screenshot({ path: 'test-results/weekly-planning-handoff.png' })
+
+  // It must not cost the footer its place — the banner is a sibling of the step body in
+  // `.wp-body`, and anything there that isn't `flex: none` competes for height.
+  expect(await withinViewport(page, '.wp-foot')).toBe(true)
+  await expect(page.getByRole('button', { name: 'Handled' }).first()).toBeVisible()
+
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+  expect(overflow).toBeLessThanOrEqual(0)
+})
+
+test('the handoff stacks its two answers under the note on a phone', async ({ page }) => {
+  // Sign in at board size FIRST: `signIn` waits on the nav rail, which the phone layout
+  // hides, so resizing before the sign-in makes the helper wait for something that will
+  // never appear. Resize once the session is up.
+  await mockApi(page, handoffView)
+  await signIn(page)
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/planning')
+  await expect(page.locator('.wp-handoff')).toBeVisible()
+  await page.screenshot({ path: 'test-results/weekly-planning-handoff-phone.png' })
+
+  // The two answers go full width rather than crushing the note into a column the width
+  // of a word: on a 390px screen the row is taller than a single line.
+  const row = page.locator('.wp-handoff-row').first()
+  expect((await row.boundingBox())!.height).toBeGreaterThan(60)
+
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+  expect(overflow).toBeLessThanOrEqual(0)
 })
