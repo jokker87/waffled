@@ -360,3 +360,69 @@ describe('pairingSentence', () => {
     expect(pairingSentence(base, false)).toBe('Nothing on the calendar with just the two of you.')
   })
 })
+
+describe('Connection · a pairing with time on it is never hidden', () => {
+  // "I added a custom time and it pre-filled the people … but then when I saved nothing
+  // showed up on the connection page. Actually, I went and checked the calendar tab, the
+  // events did save but they didn't populate on the connection tab."
+  //
+  // The event saved and the client DOES re-read the board. What hid it was `slice(0, 3)`:
+  // the rows are ranked by how long it has been since it was just those two, and that
+  // ranking reads only history BEFORE the planned week — so giving a pairing time inside
+  // the week does not move it up, and a pairing ranked 4th stays invisible no matter what
+  // you just did for it.
+  //
+  // Three rows is still the right PROMPT. But a pairing with time already on the week is
+  // not a prompt, it is a fact about the week, and the step's own design leads with
+  // "time that already exists gets credit".
+  it('draws a pairing that already has time this week even below the prompt cap', async () => {
+    const withCredit = {
+      ...BOARD,
+      pairings: [
+        ...BOARD.pairings.slice(0, 3),
+        { ...BOARD.pairings[3], alreadyThisWeek: [evt({ id: 'made', title: 'Just us', day: 'Thursday', time: '7:00 PM', when: 'Thursday 7:00 PM' })] },
+      ],
+    }
+    mockApi(withCredit)
+    renderStep()
+    expect(await row('p3-p4')).toBeTruthy()
+    // And it says why it is there.
+    expect((await row('p3-p4')).textContent).toMatch(/counts/i)
+  })
+
+  it('still caps the pairings it is only SUGGESTING at three', async () => {
+    // The fourth pairing has nothing on the week, so it stays a suggestion the step
+    // declines to make — otherwise a six-person household reads fifteen rows.
+    mockApi()
+    renderStep()
+    await row('p1-p2')
+    expect(screen.queryByTestId('wpn-pair-p3-p4')).toBeNull()
+  })
+
+  it('never drops a pairing with credit, even past the cap', async () => {
+    // The rule: three is a cap on what the step SUGGESTS. A pairing with time already on
+    // the week is not a suggestion, so all four are drawn here and no suggestion is —
+    // there is nothing left to prompt about.
+    const allWithCredit = {
+      ...BOARD,
+      pairings: BOARD.pairings.map((p, i) => ({
+        ...p,
+        alreadyThisWeek: [evt({ id: `a${i}`, title: 'Just us', day: 'Thursday', time: '7:00 PM', when: 'Thursday 7:00 PM' })],
+      })),
+    }
+    mockApi(allWithCredit)
+    renderStep()
+    await row('p1-p2')
+    expect(screen.getAllByTestId(/^wpn-pair-/)).toHaveLength(4)
+  })
+
+  it('keeps the server’s ranking rather than floating credit rows to the top', async () => {
+    // The board is ordered by how long it has been since it was just those two, and that
+    // order is the step's argument. Surfacing a hidden row must not reorder the rest.
+    mockApi()
+    renderStep()
+    await row('p1-p2')
+    const drawn = screen.getAllByTestId(/^wpn-pair-/).map((el) => el.getAttribute('data-testid'))
+    expect(drawn).toEqual(['wpn-pair-p1-p2', 'wpn-pair-p1-p3', 'wpn-pair-p2-p4'])
+  })
+})

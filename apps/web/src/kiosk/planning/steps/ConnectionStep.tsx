@@ -50,6 +50,11 @@ import '../../../styles/planning-connection.css'
 // How many suggested pairings the step draws. The server ranks them all; this is purely
 // a layout decision, which is why the footnote below says "the rows above" and never
 // names a count — a two-person household has exactly ONE pairing.
+// How many pairings the step shows. A pairing that already has time on the week is a
+// fact about the week rather than a prompt, so it is never the one dropped: those are
+// kept first and the rest of the cap is filled with the best-ranked guesses. Three
+// stays the number — a six-person household would otherwise read fifteen rows — and it
+// only grows when more than three pairings genuinely have time on them.
 const ROWS = 3
 // How many of a pairing's gaps fit on a row before "Another time" takes over.
 const SLOTS = 2
@@ -69,6 +74,38 @@ function durationWords(min: number): string {
     return `${h} ${h === 1 ? 'hour' : 'hours'}`
   }
   return `${min} minutes`
+}
+
+/**
+ * Which pairings the step draws, IN THE SERVER'S OWN ORDER.
+ *
+ * `slice(0, ROWS)` was reported as a disappearing act: "I added a custom time … the
+ * events did save but they didn't populate on the connection tab." The board is ranked
+ * by how long it has been since it was just those two, and that ranking reads only
+ * history BEFORE the planned week — so giving a pairing time INSIDE the week does not
+ * move it up, and a pairing ranked fourth stayed invisible no matter what you had just
+ * done for it. A row you cannot see is indistinguishable from a write that never
+ * happened, which is exactly how it was read.
+ *
+ * So the pairings with time on the week claim their places first, and what's left of the
+ * cap goes to the best-ranked pairings that have none. The step's first rule is that
+ * time which already exists gets credit; this is that rule applied to which rows exist
+ * at all.
+ *
+ * Filtered, not partitioned: re-grouping would float credit rows to the top and throw
+ * away the ranking, which is the step's actual argument.
+ */
+export function visible<T extends { alreadyThisWeek: unknown[] }>(pairings: T[]): T[] {
+  const credited = pairings.filter((p) => p.alreadyThisWeek.length)
+  let guesses = Math.max(0, ROWS - credited.length)
+  const keep = new Set(credited)
+  for (const p of pairings) {
+    if (guesses <= 0) break
+    if (keep.has(p)) continue
+    keep.add(p)
+    guesses -= 1
+  }
+  return pairings.filter((p) => keep.has(p))
 }
 
 /** "20:30" for EventModal's time field, from the instant the gap opens. */
@@ -171,7 +208,7 @@ function Body({ weekStart, setDecisionData, refresh, busy }: StepBodyProps) {
 
   return (
     <div className="wpn">
-      {board.pairings.slice(0, ROWS).map((p) => {
+      {visible(board.pairings).map((p) => {
         const key = p.personIds.join('-')
         const people = p.personIds.map((id) => byId.get(id)).filter(Boolean) as Person[]
         const acknowledged = counted.has(key)
@@ -241,8 +278,10 @@ function Body({ weekStart, setDecisionData, refresh, busy }: StepBodyProps) {
 
       <p className="wpn-note">
         The rows above are just the pairings the app can see — they aren’t the list.{' '}
-        <b>Make a pairing</b> takes any two people (or three) and any time, and the slots offered are the
-        gaps the week already left behind. Either way it ends up as a normal calendar event.
+        <b>Make a pairing</b> takes any two people and any time, and the slots offered are the gaps the
+        week already left behind. Either way it ends up as a normal calendar event. Add a third person
+        and it still lands on the calendar — it just counts as time together rather than as time with
+        just the two of them.
       </p>
 
       {/* The app's own event modal — NOT a second event form. It carries the people and
