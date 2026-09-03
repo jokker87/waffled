@@ -38,7 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from scratch — starting over throws away the session only; anything it already decided (an
   event you added, a chore you handed out) stays where it is.
 
-  **Nine of the ten steps are in, and none of them ask you to type anything twice:**
+  **All ten steps are in, and none of them ask you to type anything twice:**
 
   - **Loose ends** gathers what's still open — overdue chores, unchecked list items, rhythms past
     due, goals short for the week — alongside anything somebody parked during the week, and hands
@@ -76,6 +76,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     and two questions: one thing to focus on, and one thing to look forward to. Both are answered
     from what already exists (a goal they're behind on, an overdue chore, something already on their
     calendar), and the last screen reads their answers back to them.
+  - **Recap** reads the week back one last time and lists what the session changed, grouped by
+    where each decision actually lives — Calendar, Meals, Chores, Goals, Family Night, Kids — with
+    a link through to the step that owns it. Two things it is careful to show: a last call on notes
+    nobody has picked up yet (including how long they have been waiting), and a column for what you
+    left alone **on purpose**, because deciding something needs nothing is still a decision. Every
+    line points at live data rather than copying it, so the record can never quietly disagree with
+    your calendar.
 - **A privacy policy and terms of service on waffled.app.** Two new pages —
   [waffled.app/privacy](https://waffled.app/privacy) and
   [waffled.app/terms](https://waffled.app/terms) — spelling out what a self-hosted install

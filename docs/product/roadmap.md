@@ -252,10 +252,10 @@ Legend: ✅ done · 🟡 partial / in progress · 🚧 planned · ⛔ dropped (s
   `/planning` screen with its lobby, the step chrome (counter → agenda sheet, the one
   question, progress hair, skip/affirm footer), the saved record, plus a step-in-the-URL
   scheme, planning any later week, and both exits (leave for now / start the week over) —
-  **and 5 of the 10 steps: Loose ends, Calendar, Goals, Meals, Tasks**, built in parallel
-  behind a per-step file seam (see the plan doc's "Building the steps in parallel").
-  **Pending:** Horizon scan, Family night, Connection, Kids, Recap, then iOS parity for all
-  of it. The architectural point held: the session stores almost nothing — two tables
+  **and all ten steps** — Loose ends, Calendar, Horizon scan, Family night, Connection,
+  Goals, Meals, Tasks, Kids, Recap — built in parallel behind a per-step file seam (see the
+  plan doc's "Building the steps in parallel"), five at a time in two waves that merged with
+  no conflicts. **Pending: iOS parity for all of it.** The architectural point held: the session stores almost nothing — two tables
   (`planning_sessions`, `planning_session_steps`) plus `planning_parked_items` — and every
   decision lands in the module that owns it. Step 1 is the one exception and it stores nothing
   either: it *routes* items to later steps, recorded in the session's own jsonb. Design:

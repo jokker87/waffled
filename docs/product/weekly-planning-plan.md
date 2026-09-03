@@ -197,8 +197,29 @@ Three steps aren't free to go in any order:
 
 **Wave 1 landed:** `looseEnds`, `calendar`, `goals`, `meals`, `tasks`.
 **Wave 2 landed:** `horizon`, `familyNight`, `connection`, `kids` — four agents in four
-worktrees, merged with zero conflicts. **Remaining: `recap`**, which goes last because it
-reads what every other step decided.
+worktrees, merged with zero conflicts. **`recap` landed last**, because it reads what every
+other step decided. **All ten steps are built on web.** What remains for the module is iOS
+parity.
+
+### The recap stores nothing, and why that is the whole design
+
+The record is **a receipt of what was decided, not a copy of it** — "every line is a pointer".
+So step 10 writes no snapshot: `GET /api/weekly-planning/recap` resolves every line at read
+time, and the distinction that makes it safe is worth keeping:
+
+- **A statement about the WEEK is live** — "6 tasks with an owner and a day" is re-resolved on
+  every read, so it cannot go stale. Storing that number *is* the copy the design forbids.
+- **A statement about the SESSION is provenance** — "2 events added since you started" is
+  `created_at >= session.started_at` on the row the decision actually wrote. Delete the event
+  and the line goes with it. Historical *and* re-derivable, which is what lets one receipt be
+  both a delta and a pointer.
+
+**The step crumbs are deliberately NOT used for tallies**, even though several hold exactly the
+numbers the mock wants. `setDecisionData` is cleared on every step change and persisted only
+when a step is *answered*, so `{ added: 2 }` really means "2 added during the visit that
+happened to end in Done" — leave the step and come back and it reads 0. A provenance query
+cannot fail that way. The crumbs recap *does* read are the ones that ARE the decision and have
+no module row: the goals focus map and the kids' answers.
 
 ### What wave 2 found, and what is still open
 

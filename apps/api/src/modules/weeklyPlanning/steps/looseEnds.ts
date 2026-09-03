@@ -423,10 +423,13 @@ export async function listParked(householdId: string): Promise<LooseEnd[]> {
 
 export interface ParkInput {
   note?: unknown
-  // Optional tag naming the step this note belongs to. Step 1's capture bar leaves it
-  // null; step 3 ("Horizon scan") parks with 'horizon'; routing a parked note sets it
-  // to the step that will handle it. Validated against the server-owned catalog so a
-  // typo can't create a tag nothing will ever match.
+  // Optional tag naming the step that should ACT on this note — always a destination,
+  // never the step that wrote it. Step 1's capture bar leaves it null; routing a parked
+  // note sets it to the step that will handle it; step 3 ("Horizon scan") sets it when
+  // somebody parks against a tag, and writes the SAME values, so a consumer can't tell
+  // the two producers apart. Validated against the server-owned catalog so a typo can't
+  // create a tag nothing will ever match. (This comment used to say step 3 parks with
+  // 'horizon' — it never has, and step 10 reads a null tag as "nobody said yet".)
   stepKey?: unknown
   // The session it was parked during, if any. Optional, and the row survives that
   // session being discarded (on delete set null) — see the migration.
