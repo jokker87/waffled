@@ -6,6 +6,10 @@ import { query } from '../../platform/db'
 import { tenantRoute } from '../../platform/route-guards'
 import { listGoals } from '../goals/goals.service'
 import { listCurrencies, getDefaultCurrencyKey, presentCurrency } from '../currencies/currencies'
+// Weekly Planning's Kids step owns the answer; this reads it. Gated on the module below,
+// because the whole feature is opt-in.
+import { focusForPerson } from '../weeklyPlanning/steps/kids'
+import { moduleEnabled } from '../../platform/modules'
 
 type Api = ReturnType<typeof createAPI>
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -227,6 +231,17 @@ export async function personOverview(householdId: string, personId: string) {
   )
   const streak = buildStreak(act.rows.map((r) => r.day), today)
 
+  // "This week's one thing", said on planning night. Read from the session record rather
+  // than copied onto anything here, so the profile and the Kids step can never disagree.
+  // Null whenever the module is off, no session covers today, or nobody answered for
+  // this person — three different reasons the profile renders nothing, all of which mean
+  // the same thing to a reader.
+  const settings = await query<{ settings: unknown }>(`select settings from households where id = $1`, [householdId])
+    .then((r) => r.rows[0]?.settings)
+  const planningFocus = moduleEnabled(settings, 'weeklyPlanning')
+    ? await focusForPerson(householdId, personId)
+    : null
+
   return {
     person: { id: person.id, name: person.name, avatarEmoji: person.avatar_emoji, colorHex: person.color_hex, age: ageFrom(person.birthday), memberType: person.member_type },
     activeGoals: goals.length,
@@ -242,6 +257,7 @@ export async function personOverview(householdId: string, personId: string) {
     rewardShop,
     savingToward,
     streak,
+    planningFocus,
   }
 }
 

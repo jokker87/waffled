@@ -108,3 +108,104 @@ describe('person + family overview', () => {
     expect(me).toMatchObject({ activeGoals: 1, stars: 7, avgProgressPct: 60 })
   })
 })
+
+describe('person overview · the planning focus is gated on the module', () => {
+  it('says nothing while weeklyPlanning is off — which is the default', async () => {
+    const d = JSON.parse((await call('GET', `/api/persons/${kevinId}/overview`, kevin)).body)
+    expect(d.planningFocus).toBeNull()
+  })
+})
+
+describe('person overview · this week\'s planning focus', () => {
+  // "where does that save? or where would I be able to see that focus outside of the
+  // weekly planning? do we put it or surface it anywhere else in the UI?"
+  //
+  // It saved to `planning_session_steps.data.kids` and was read by exactly two things:
+  // the Kids step, which shows it back, and the Recap. So the answer was "nowhere" — a
+  // child said what their one thing was on planning night and then never saw it again.
+  //
+  // It surfaces on their profile, which is where "what they're working on" already lives
+  // (goals, streak, stars). Read here rather than copied: the session record stays the
+  // one place it is stored, exactly as the recap treats it.
+  const iso = (d: Date) => d.toISOString().slice(0, 10)
+
+  // The whole feature is opt-in, so the profile shows nothing until the module is on —
+  // asserted below before this runs.
+  beforeAll(async () => {
+    await withClient((c) =>
+      c.query(
+        // NOT jsonb_set with a two-level path: it can only create the LAST level, so with
+        // no `settings.modules` object yet it returns the row UNCHANGED and silently — a
+        // module that never turns on and a test that fails for the wrong reason.
+        `update households
+            set settings = coalesce(settings, '{}'::jsonb)
+                           || jsonb_build_object('modules',
+                                coalesce(settings -> 'modules', '{}'::jsonb)
+                                || jsonb_build_object('weeklyPlanning', true))
+          where id = $1`,
+        [householdId]
+      )
+    )
+  })
+
+  async function sessionFor(weekStart: string, answers: unknown) {
+    return withClient(async (c) => {
+      const s = await c.query<{ id: string }>(
+        `insert into planning_sessions (household_id, week_start, status, driver_person_id)
+           values ($1, $2::date, 'active', $3) returning id`,
+        [householdId, weekStart, kevinId]
+      )
+      await c.query(
+        `insert into planning_session_steps (session_id, step_key, status, data)
+           values ($1, 'kids', 'done', jsonb_build_object('kids', $2::jsonb))`,
+        [s.rows[0].id, JSON.stringify(answers)]
+      )
+      return s.rows[0].id
+    })
+  }
+
+  const focus = (label: string) => ({
+    [kevinId]: { focus: { source: 'goal', id: null, emoji: '📚', label, detail: '3 of 20 books' }, forward: null },
+  })
+
+  it('reports nothing when no session has asked', async () => {
+    const d = JSON.parse((await call('GET', `/api/persons/${kevinId}/overview`, kevin)).body)
+    expect(d.planningFocus).toBeNull()
+  })
+
+  it('surfaces the focus from the session covering TODAY', async () => {
+    // The week we are actually in — not the week a session was planning. A session run on
+    // Sunday plans the week ahead, so by Wednesday the focus somebody is living with is
+    // the one from the session whose week contains today.
+    const today = new Date()
+    const start = new Date(today)
+    start.setDate(start.getDate() - start.getDay()) // this household starts weeks on Sunday
+    await sessionFor(iso(start), focus('Read 20 minutes a day'))
+
+    const d = JSON.parse((await call('GET', `/api/persons/${kevinId}/overview`, kevin)).body)
+    expect(d.planningFocus).toMatchObject({ label: 'Read 20 minutes a day', emoji: '📚', detail: '3 of 20 books' })
+  })
+
+  it('ignores a focus from a week that has already passed', async () => {
+    // Last week's one thing is over. Showing it would be the profile quietly disagreeing
+    // with the Kids step, which only ever asks about the week being planned.
+    const old = new Date()
+    old.setDate(old.getDate() - 28)
+    old.setDate(old.getDate() - old.getDay())
+    await sessionFor(iso(old), focus('Something from a month ago'))
+
+    const d = JSON.parse((await call('GET', `/api/persons/${kevinId}/overview`, kevin)).body)
+    expect(d.planningFocus?.label).not.toBe('Something from a month ago')
+  })
+
+  it('reports nothing for a person nobody answered for', async () => {
+    const other = await withClient((c) =>
+      c.query<{ id: string }>(
+        `insert into persons (household_id, name, member_type) values ($1, 'Nobody', 'kid') returning id`,
+        [householdId]
+      ).then((r) => r.rows[0].id)
+    )
+    const d = JSON.parse((await call('GET', `/api/persons/${other}/overview`, kevin)).body)
+    expect(d.planningFocus).toBeNull()
+  })
+})

@@ -782,6 +782,63 @@ async function priorAnswersExist(householdId: string, weekStart: string): Promis
   return Object.values(await priorAnswers(householdId, weekStart)).some((a) => a.focus || a.forward)
 }
 
+/** One child's "one thing", as another screen shows it. */
+export interface PlanningFocus {
+  emoji: string
+  label: string
+  /** "3 of 20 books" — the line the Kids step composed, reused rather than recomputed. */
+  detail: string | null
+  /** Which week said it (YYYY-MM-DD), so a caller can say "this week" truthfully. */
+  weekStart: string
+}
+
+/**
+ * This person's focus for the week we are IN, or null.
+ *
+ * Answers a question the design left open: "where would I be able to see that focus
+ * outside of the weekly planning?" It was nowhere — the answers live in
+ * `planning_session_steps.data.kids`, read only by this step and the recap, so a child
+ * said what their one thing was on planning night and never saw it again.
+ *
+ * READ, never copied. The session record stays the single place it is stored, exactly as
+ * the recap treats it: nothing to keep in sync, and changing the answer changes every
+ * screen at once.
+ *
+ * The week is found by CONTAINMENT (`week_start <= today < week_start + 7`) rather than by
+ * computing a boundary here. A session run on Sunday plans the week ahead, so by
+ * Wednesday the focus somebody is living with belongs to the session whose week contains
+ * today — and containment gets that right without this query needing to know how the
+ * household cuts a week (`week_start` is SUNDAY or MONDAY per household, and a boundary
+ * computed here could disagree with the one the session was created under).
+ */
+export async function focusForPerson(householdId: string, personId: string): Promise<PlanningFocus | null> {
+  const { rows } = await query<{ data: unknown; week_start: string }>(
+    `select st.data, to_char(s.week_start, 'YYYY-MM-DD') as week_start
+       from planning_session_steps st
+       join planning_sessions s on s.id = st.session_id
+      where s.household_id = $1
+        and st.step_key = $2
+        and st.data ? 'kids'
+        and s.week_start <= (now() at time zone coalesce(
+              (select timezone from households where id = $1), 'UTC'))::date
+        and s.week_start + 7 > (now() at time zone coalesce(
+              (select timezone from households where id = $1), 'UTC'))::date
+      order by s.week_start desc
+      limit 1`,
+    [householdId, STEP_KEY]
+  )
+  const row = rows[0]
+  if (!row) return null
+  const answer = parseAnswers(row.data)[personId]
+  if (!answer?.focus) return null
+  return {
+    emoji: answer.focus.emoji,
+    label: answer.focus.label,
+    detail: answer.focus.detail,
+    weekStart: row.week_start,
+  }
+}
+
 export type KidsRepeatResult = { ok: true; view: KidsStepView } | { ok: false; status: 404; message: string }
 
 // Copy last week's answers forward — but only the ones that still STAND. An answer naming

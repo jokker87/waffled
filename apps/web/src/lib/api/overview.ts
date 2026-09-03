@@ -88,6 +88,24 @@ export interface PersonOverview {
   rewardShop: ShopReward[]
   savingToward: SavingToward | null
   streak: StreakSummary
+  /**
+   * "This week's one thing", said at Weekly Planning's Kids step. Null when the module is
+   * off, when no session covers today, or when nobody answered for this person — three
+   * reasons that all mean the same thing to a reader, so the card simply isn't there.
+   *
+   * READ from the session record rather than copied onto the person, so the profile and
+   * the Kids step can never disagree about what somebody said.
+   */
+  planningFocus: PlanningFocus | null
+}
+
+export interface PlanningFocus {
+  emoji: string
+  label: string
+  /** "3 of 20 books" — the line the Kids step composed, not recomputed here. */
+  detail: string | null
+  /** The week that said it, so the card can be honest about which week it means. */
+  weekStart: string
 }
 
 export interface StreakDay {

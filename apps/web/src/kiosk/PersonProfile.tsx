@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
 import { useTopbarFull } from './topbar-slot'
-import { usePersonOverview, useConversions, usePersons, useHousehold, useGoalLists, can, personsApi, rewardsApi, fmtGoalNum, useWaffledBiteDevice, type OverviewGoal, type CategoryBalance, type ShopReward, type SavingToward, type OverviewCurrency, type StreakSummary } from '../lib/api'
+import { usePersonOverview, useConversions, usePersons, useHousehold, useGoalLists, can, personsApi, rewardsApi, fmtGoalNum, useWaffledBiteDevice, type OverviewGoal, type CategoryBalance, type ShopReward, type SavingToward, type OverviewCurrency, type StreakSummary, type PlanningFocus } from '../lib/api'
 import { TradeModal } from './components/TradeModal'
 import { SpotAwardModal } from './components/SpotAwardModal'
 import { WaffledBitePairModal } from './components/WaffledBitePairModal'
@@ -113,6 +113,35 @@ function Jar({ pct, color }: { pct: number; color: string }) {
 }
 
 // Weekly fire row + consecutive-day count — chores and goals both keep it alive.
+/**
+ * "This week's one thing", from Weekly Planning's Kids step.
+ *
+ * It answers a question the feature left open — a child said what they were focusing on
+ * during planning night and then never saw it again, because the answer lived only in the
+ * session record. This is where "what they're working on" already lives (goals, streak,
+ * stars), so it goes here rather than becoming a fourth place to look.
+ *
+ * Presence-gated: absent when the module is off, when no session covers this week, or
+ * when nobody answered for this person. All three mean "nothing to say", so the card
+ * simply isn't rendered rather than explaining itself.
+ */
+function FocusCard({ focus }: { focus: PlanningFocus }) {
+  return (
+    <div className="card pp-card pp-focus">
+      <div className="pp-focus-lab">This week&rsquo;s one thing</div>
+      <div className="pp-focus-main">
+        <span className="pp-focus-emo" aria-hidden>{focus.emoji}</span>
+        <div className="pp-focus-body">
+          <div className="pp-focus-title">{focus.label}</div>
+          {focus.detail && <div className="pp-focus-sub">{focus.detail}</div>}
+        </div>
+      </div>
+      {/* Where it came from, because a line nobody can trace is a line nobody trusts. */}
+      <div className="pp-focus-from">said at this week&rsquo;s planning session</div>
+    </div>
+  )
+}
+
 function StreakCard({ streak }: { streak: StreakSummary }) {
   return (
     <div className="card pp-card pp-streak">
@@ -327,6 +356,7 @@ export function PersonProfile() {
       </div>
 
       <div className="pp-right">
+        {data.planningFocus && <FocusCard focus={data.planningFocus} />}
         <StreakCard streak={data.streak} />
 
         {rewardsOn && (
