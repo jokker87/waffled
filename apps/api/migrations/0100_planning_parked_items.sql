@@ -36,11 +36,14 @@ create table planning_parked_items (
   -- that the thing has no shape yet; giving it one would push it into a module.
   note text not null,
 
-  -- Optional tag naming the STEP THIS NOTE BELONGS TO, and it is written from both
-  -- ends of the session: step 3 ("Horizon scan") parks a note tagged 'horizon', and
-  -- step 1 sets it when somebody ROUTES the note ("make it a task" → 'tasks'). Either
-  -- way it answers the same question — which step is going to look at this? — so one
-  -- column serves both, and a later step can find the notes addressed to it.
+  -- Optional tag naming the STEP THAT SHOULD ACT ON THIS NOTE — always a DESTINATION,
+  -- never the step that wrote it. Both producers write the same thing: step 1 sets it
+  -- when somebody ROUTES a note ("make it a task" → 'tasks'), and step 3 ("Horizon
+  -- scan") sets it when somebody parks a note against a tag. So a consumer cannot tell
+  -- the two apart, which is the point — it answers "which step is going to look at
+  -- this?", and the answer is never the step it came from. (An earlier draft of this
+  -- comment said step 3 tags 'horizon'; that contradicts the sentence above it, and
+  -- nothing has ever read such a value.)
   --
   -- Deliberately NOT a foreign key or a check constraint: the step catalog (STEPS in
   -- weeklyPlanning.ts) grows one step per commit and is validated in the service,

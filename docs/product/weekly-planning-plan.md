@@ -195,8 +195,40 @@ Three steps aren't free to go in any order:
 2. **`recap` goes last** — it reads what every other step decided, including step 1's routes.
 3. Everything else (`familyNight`, `connection`, `kids`) is independent.
 
-**Wave 1 landed:** `looseEnds`, `calendar`, `goals`, `meals`, `tasks`. Remaining: `horizon`,
-`familyNight`, `connection`, `kids`, then `recap`.
+**Wave 1 landed:** `looseEnds`, `calendar`, `goals`, `meals`, `tasks`.
+**Wave 2 landed:** `horizon`, `familyNight`, `connection`, `kids` — four agents in four
+worktrees, merged with zero conflicts. **Remaining: `recap`**, which goes last because it
+reads what every other step decided.
+
+### What wave 2 found, and what is still open
+
+Building a step against a shipped module is also an audit of it. Three findings survived:
+
+- **Skipping a family night advances the rotation.** `rotationIndex()` counts every
+  occurrence regardless of status, so calling a week off costs somebody their turn — which
+  contradicts the design ("marks the occurrence skipped *without advancing the rotation*").
+  The fix is one predicate in `familyNight.ts`, outside the step's seams and visible on the
+  Today card, so it was left as a product call. `weekly-planning-familyNight.integration.test.ts`
+  pins the current behaviour to a specific shift, so it goes red the day someone fixes it.
+- **The rotation is positional, not historical** — it never reads `family_night_assignments`,
+  so pinning someone who was already next means they can come up twice. The mock's line
+  "worked out from who did what last time" was rewritten to "each part taken in turn, in your
+  family's order", because the original is a promise the software can't keep.
+- **A parked note's `step_key` is the DESTINATION step, never `'horizon'`.** 0100's comment
+  sketched step 3 tagging its own name; that contradicts the column's own stated semantics
+  ("which step is going to look at this?" — never the step that wrote it) and would make a
+  note parked at the horizon invisible to the step meant to act on it. Corrected in the
+  migration's comment.
+
+Two defects the unit tests structurally could not see, both found by driving :8081:
+
+- **The month grid overflowed its box in Horizon** and painted over the park bar. `.cal` is a
+  grid item, so its default `min-height: auto` refused to shrink below six rows of content;
+  the calendar page never shows this because its own ancestors already zero that out.
+- **The meal plan filled the kids' cards.** Planning a dinner mirrors it onto the calendar as
+  a real event with the household on it, so every kid's week read "Dinner · chicken, Dinner ·
+  Spaghetti…" and their look-forward-to options became the meal plan. Mirror origins are now
+  excluded, the same exclusion `goal-calendar.ts` already makes.
 
 ### Two things wave 1 taught, worth knowing before writing a step
 

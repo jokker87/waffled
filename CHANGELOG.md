@@ -38,7 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from scratch — starting over throws away the session only; anything it already decided (an
   event you added, a chore you handed out) stays where it is.
 
-  **Five of the ten steps are in, and none of them ask you to type anything twice:**
+  **Nine of the ten steps are in, and none of them ask you to type anything twice:**
 
   - **Loose ends** gathers what's still open — overdue chores, unchecked list items, rhythms past
     due, goals short for the week — alongside anything somebody parked during the week, and hands
@@ -61,6 +61,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     a real answer. Tap a task's name — or the day beside it — to open the chore editor and fix a
     typo, change the stars or move it to another day, without leaving the session. Each column
     says what that person already carries, so fairness is visible without anyone keeping score.
+  - **Horizon scan** is the month you already have — the real calendar, not a copy of it — so you
+    can see what's coming before it arrives. Two different things sit on it: ＋ on a day adds a
+    genuine event, and the bar underneath *parks a note* that isn't an event yet ("we're going
+    camping, we need to pack"), optionally tagged for the step that should deal with it.
+  - **Family night** shows the week's gathering and who the rotation says has each part. Most weeks
+    you read it and move on. Tap a face to pin that part for this week only, set an optional theme,
+    or call the week off — which leaves the recurring calendar event alone.
+  - **Connection** asks who gets time with whom. It shows the pairings the app can already see,
+    with the honest answer included: if Saturday's yard work is already two hours of the two of you,
+    that counts, and it says so instead of inventing a new commitment. Any pairing you like can be
+    made from scratch, and the times offered are the gaps your week actually left.
+  - **Kids** is the one step the children can read — a card each with their own week, their stars,
+    and two questions: one thing to focus on, and one thing to look forward to. Both are answered
+    from what already exists (a goal they're behind on, an overdue chore, something already on their
+    calendar), and the last screen reads their answers back to them.
 - **A privacy policy and terms of service on waffled.app.** Two new pages —
   [waffled.app/privacy](https://waffled.app/privacy) and
   [waffled.app/terms](https://waffled.app/terms) — spelling out what a self-hosted install
