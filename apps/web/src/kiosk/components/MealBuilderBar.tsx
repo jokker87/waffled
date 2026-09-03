@@ -70,12 +70,12 @@ export function MealBuilderBar({
         </div>
       </div>
 
-      <div className="mb-bar-stat">
+      <div className="mb-bar-stat mb-bar-time">
         <span className="mb-bar-l">Hands-on time</span>
         <span className="mb-bar-v">{`≈ ${hoursMinutes(totalMinutes)}`}</span>
       </div>
 
-      <div className="mb-bar-stat">
+      <div className="mb-bar-stat mb-bar-grocery">
         <span className="mb-bar-l">Groceries</span>
         <span className="mb-bar-v">{`${toBuy} to buy`}</span>
       </div>

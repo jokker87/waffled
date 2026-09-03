@@ -268,10 +268,12 @@ export function RecipeBrowser({
       )}
 
       {building && onPickMeal && (
-        <div className="modal-overlay">
+        <div className="modal-overlay picker-plate-overlay">
           <div className="modal-card picker-new-card picker-plate-card" onClick={(e) => e.stopPropagation()}>
             <button type="button" className="modal-close" aria-label="Close" onClick={() => setBuilding(false)}>×</button>
-            <div className="wf-serif picker-new-h">New meal</div>
+            {/* No heading of our own: the builder's first line IS the plate's name,
+                editable in place, and a "New meal" title above a name field whose
+                placeholder is also "New meal" just says it twice. */}
             <Suspense fallback={<div className="muted" style={{ padding: 30 }}>Loading…</div>}>
               <MealBuilderBody
                 // A plate built here goes in the library, like a recipe written here

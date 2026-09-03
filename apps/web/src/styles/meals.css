@@ -332,12 +332,22 @@
    put. The builder's own 30px page gutters are pulled back to the card's padding so
    the two don't stack, and the bar is bled to the card's edges, where its dark fill
    reads as the card's foot instead of a floating slab. */
+/* `.modal-overlay` is `display: grid; place-items: center` with no explicit columns,
+   so its implicit column sizes to the item's MAX-CONTENT — and the builder's two
+   columns are wide. The card then centres inside a column wider than the screen,
+   which reads as "centred, but hanging off the right edge". Pin the column to the
+   viewport; this is the same trap the agenda sheet hit. */
+.picker-plate-overlay {
+  grid-template-columns: minmax(0, 1fr);
+}
 .picker-plate-card {
   padding-bottom: 0;
   overflow: hidden;
+  justify-self: center;
 }
 .picker-plate-card .mb-shell {
-  height: min(72vh, 700px);
+  height: auto;
+  max-height: min(72vh, 700px);
 }
 .picker-plate-card .mb-head {
   padding: 0 0 10px;
@@ -349,6 +359,32 @@
 .picker-plate-card .mb-bar {
   margin: 0 -30px;
   border-radius: 0 0 22px 22px;
+}
+/* On a phone the bar wraps to four rows and eats the plate it is describing. Give
+   the card a sheet's height, tighten the bar, and drop the two stats that are a READ
+   rather than a control — the serves stepper, the library toggle and the affirmative
+   are what anybody came here to touch. Hands-on time and groceries are still on the
+   builder screen, where there's room for them. */
+@media (max-width: 700px) {
+  .picker-plate-card {
+    width: min(96vw, 560px);
+  }
+  .picker-plate-card .mb-shell {
+    height: 84vh;
+    max-height: 84vh;
+  }
+  .picker-plate-card .mb-bar {
+    gap: 8px 16px;
+    padding: 11px 30px 13px;
+  }
+  .picker-plate-card .mb-bar-time,
+  .picker-plate-card .mb-bar-grocery {
+    display: none;
+  }
+  .picker-plate-card .mb-bar-actions {
+    flex: 1 1 auto;
+    justify-content: flex-end;
+  }
 }
 
 .picker-new-h {
