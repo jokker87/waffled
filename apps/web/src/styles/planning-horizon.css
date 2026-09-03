@@ -49,6 +49,9 @@
    rather than a guessed 58vh — which was ~91px a row on a laptop and clipped the
    event chips in a busy week. The park bar below is `flex: none`, so it keeps its
    place; only the grid grows. */
+/* `flex: 1` takes the space nothing else claimed; the floor is what stops a long board
+   (or a short viewport) from compressing six week rows into a strip. The board's own
+   `max-height` is the other half of that guarantee. */
 .wph-cal { flex: 1; display: flex; min-height: 420px; }
 .wph-cal > .cal-month { flex: 1; min-width: 0; }
 /* `.cal` is `height: 100%` with `grid-auto-rows: 1fr`, so its six rows are supposed to
@@ -66,6 +69,10 @@
   .wph-cal { flex: none; height: auto; min-height: 0; }
   .wph-cal > .cal-month { grid-template-columns: 1fr; }
   .wph-cal .cal { min-height: 340px; }
+  /* No ceiling here, and one column. `.wph-cal` is `flex: none` at this width so the
+     whole step scrolls as a page and a growing board takes nothing off the month — the
+     cap would only add a nested scroll area under a thumb, which is worse. */
+  .wph-board { grid-template-columns: minmax(0, 1fr); max-height: none; overflow-y: visible; }
 }
 
 /* ── The park bar ───────────────────────────────────────────────────────────── */
@@ -122,15 +129,29 @@
    so it is still here on a second visit. */
 .wph-board-h { flex: none; margin: 14px 0 6px; font-size: 12px; font-weight: 800;
   letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); }
-.wph-board { flex: none; list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.wph-board {
+  flex: none; list-style: none; margin: 0; padding: 0;
+  /* Notes are one short line each, so a row apiece was mostly empty space. `auto-fill`
+     with a floor keeps them full-width on a phone and gives two or three columns on the
+     kiosk, which is the same content in a third of the height. */
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 6px;
+  /* THE CEILING. Without it the board's height comes straight off `.wph-cal` — the only
+     child that flexes — and the month compresses toward its floor as notes are added.
+     Roughly three rows, then it scrolls, so the month keeps its height no matter how
+     much gets parked. */
+  max-height: 168px; overflow-y: auto; overscroll-behavior: contain;
+}
 .wph-parked {
-  display: flex; align-items: center; gap: 10px;
+  display: flex; align-items: flex-start; gap: 10px;
   padding: 9px 12px; border-radius: var(--r-md);
   background: var(--card-2); border: 1px solid var(--hair-2);
 }
-.wph-parked-note { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 600; color: var(--ink); }
+/* Wraps rather than clips: a column is ~240px and a parked note can be a full sentence.
+   `align-items: flex-start` on the row above keeps the tag on the first line. */
+.wph-parked-note { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 600; color: var(--ink); line-height: 1.35; }
 .wph-parked-tag {
-  flex: none; font-size: 11px; font-weight: 800; padding: 3px 9px; border-radius: 999px;
+  flex: none; margin-top: 1px;
+  font-size: 11px; font-weight: 800; padding: 3px 9px; border-radius: 999px;
   background: var(--primary-t); color: var(--primary);
 }
 /* No tag is a whole answer, so it is stated rather than left blank — but quietly. */
