@@ -1,0 +1,124 @@
+/* Weekly Planning · step 3 — Horizon scan (kiosk/planning/steps/HorizonStep.tsx).
+
+   THIS FILE IS DELIBERATELY SHORT, and that is the whole design of the step.
+
+   The month is the SHIPPED month view — `MonthView` + `MonthDayPanel` — so every one of
+   `.cal`, `.cal-dow`, `.cal-grid`, `.cal-cell`, `.cal-cd`, `.ev`, `.ev-tint`, `.ev-meal`,
+   `.ev-more`, `.cal-month`, `.cal-day-panel` and `.ag-row` is already styled in
+   waffled.css / calendar.css, both of which main.tsx loads globally. None of them are
+   redefined here. If a `.cal-*` rule ever appears in this file, a second month grid has
+   grown in the step: delete it, because the premise of the step is that this IS the month
+   the family already knows, and a private copy of the grid drifts from the real one.
+
+   What is genuinely new is one bar and its board. Adding an event is the app's own
+   `EventModal`, so this file styles NO form fields either.
+
+   Every colour is a token, as in planning.css — never a hex, or dark mode breaks.
+
+   VOCABULARY
+     Frame  — .wph
+     Head   — .wph-head .wph-nav .wph-month
+     Month  — .wph-cal            (a height for the shipped grid; nothing else)
+     Bar    — .wph-park .wph-park-pin .wph-park-in .wph-park-hint .wph-park-go
+              .wph-tags .wph-tag (.on)
+     Say    — .wph-note .wph-err
+     Board  — .wph-board-h .wph-board .wph-parked .wph-parked-note .wph-parked-tag (.is-unset)
+*/
+
+/* `.wp-body` is a flex column with `min-height: 0` and its own scroll. */
+.wph { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+
+/* ── The month being scanned ────────────────────────────────────────────────── */
+/* Arrows either side of the month, because the step's question is "anything FURTHER
+   OUT?" and the answer often isn't in the month the planned week happens to fall in.
+   Back is floored at that month: a horizon is what's ahead. */
+.wph-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex: none; }
+.wph-month { font-size: 23px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.15; }
+.wph-nav {
+  flex: none; width: 30px; height: 30px; border-radius: 999px;
+  border: 1px solid var(--hair); background: var(--card); color: var(--ink-2);
+  font: inherit; font-size: 17px; line-height: 1; cursor: pointer;
+}
+.wph-nav:hover:not(:disabled) { border-color: var(--ink-3); color: var(--ink); }
+.wph-nav:disabled { opacity: 0.35; cursor: default; }
+
+/* `.cal-month` is `flex: 1` inside `.cal-screen` on the calendar page; here the body
+   scrolls instead, so the grid gets a definite height to lay its six rows out in
+   rather than collapsing to the height of its text. */
+.wph-cal { flex: none; display: flex; height: 58vh; min-height: 420px; }
+.wph-cal > .cal-month { flex: 1; min-width: 0; }
+@media (max-width: 900px) {
+  /* The day panel's 340px column doesn't fit beside the grid on a phone; the panel
+     drops under it, which is what the phone frame in the mock shows. */
+  .wph-cal { height: auto; min-height: 0; }
+  .wph-cal > .cal-month { grid-template-columns: 1fr; }
+  .wph-cal .cal { min-height: 340px; }
+}
+
+/* ── The park bar ───────────────────────────────────────────────────────────── */
+/* THE ONE THING THE SESSION ADDS. Shaped as step 1's capture bar (`.wp-le-capture`) on
+   purpose — the two write the same kind of row to the same table, so they should not
+   look like two different mechanisms. The pin is what distinguishes it: this is a note
+   being pinned to the week, not an event being scheduled. */
+.wph-park {
+  flex: none; display: flex; align-items: center; gap: 8px; margin-top: 14px;
+  background: var(--card); border: 1px solid var(--hair); border-radius: 999px;
+  padding: 4px 4px 4px 14px;
+}
+.wph-park-pin { flex: none; font-size: 15px; }
+.wph-park-in {
+  flex: 1; min-width: 0; border: 0; background: none; outline: none;
+  font: inherit; font-size: 14px; font-weight: 600; color: var(--ink); padding: 9px 0;
+}
+.wph-park-in::placeholder { color: var(--ink-3); font-weight: 600; }
+/* Until something is typed the bar says what it is, in place of the controls — the
+   tag and the button have nothing to act on yet. */
+.wph-park-hint { flex: none; font-size: 12.5px; font-weight: 650; color: var(--ink-2); padding-right: 12px; }
+.wph-park-go { flex: none; padding: 9px 18px; font-size: 13.5px; }
+.wph-park-go:disabled { opacity: 0.5; cursor: default; }
+
+/* The tag names the step that will LOOK at the note, so these read as destinations
+   rather than as categories. Rendered from the server's list, which is filtered to the
+   steps this household runs. */
+.wph-tags { flex: none; display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+.wph-tag {
+  font: inherit; font-size: 12px; font-weight: 800; letter-spacing: 0.01em;
+  padding: 6px 11px; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--hair); background: var(--card-2); color: var(--ink-2);
+}
+.wph-tag:hover:not(:disabled) { color: var(--ink); border-color: var(--ink-3); }
+.wph-tag.on { background: var(--ink); border-color: var(--ink); color: var(--on-accent); }
+.wph-tag:disabled { cursor: default; opacity: 0.6; }
+
+/* A refused park says so and keeps the sentence: `parkItem` caps a note at 500
+   characters, so this is reachable, and losing what was typed would be the worse half
+   of the failure. Mirrors step 1's `.wp-le-err`. */
+.wph-err {
+  flex: none; margin: 8px 0 0; font-size: 13px; font-weight: 650; color: var(--danger, var(--ink));
+}
+
+/* ── What the two actions are ───────────────────────────────────────────────── */
+/* The mock spells the distinction out under the bar rather than trusting the layout,
+   because "＋ adds an event" and "the bar parks a note" are the one thing about this
+   step a person can get wrong. */
+.wph-note { flex: none; margin: 10px 0 0; font-size: 12.5px; font-weight: 600; color: var(--ink-2); line-height: 1.5; }
+.wph-note b { color: var(--ink); font-weight: 800; }
+
+/* ── The board ──────────────────────────────────────────────────────────────── */
+/* What this session has parked. Read back from the table, not from the session crumb,
+   so it is still here on a second visit. */
+.wph-board-h { flex: none; margin: 14px 0 6px; font-size: 12px; font-weight: 800;
+  letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); }
+.wph-board { flex: none; list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.wph-parked {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 12px; border-radius: var(--r-md);
+  background: var(--card-2); border: 1px solid var(--hair-2);
+}
+.wph-parked-note { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.wph-parked-tag {
+  flex: none; font-size: 11px; font-weight: 800; padding: 3px 9px; border-radius: 999px;
+  background: var(--primary-t); color: var(--primary);
+}
+/* No tag is a whole answer, so it is stated rather than left blank — but quietly. */
+.wph-parked-tag.is-unset { background: transparent; border: 1px dashed var(--hair); color: var(--ink-3); }
