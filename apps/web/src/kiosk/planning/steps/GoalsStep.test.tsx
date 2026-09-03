@@ -162,6 +162,9 @@ const step = {
   key: 'goals', number: 6, title: 'Goals', ask: 'What’s each group’s focus this week?',
   primary: 'Done', act: 'Claim the good', requiresModule: 'goals',
   available: true, status: 'pending' as const, data: {}, decidedAt: null,
+  // The shell renders the parked-note handoff, not the step — see Handoff in
+  // WeeklyPlanning.tsx. A step test mounts `Body` alone, so there is never one here.
+  parked: [],
 }
 
 function Loc() {

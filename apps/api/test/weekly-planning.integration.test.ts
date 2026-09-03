@@ -314,3 +314,78 @@ describe('weekly planning · planning a week other than the default', () => {
     }
   })
 })
+
+describe('planning · a parked note reaches the step it was tagged for', () => {
+  // "I added a bunch to the park it thing, expecting to go over them in the appropriate
+  // step but I never saw them again, where did they go?"
+  //
+  // They went into `planning_parked_items` with a `step_key`, and nothing ever read it.
+  // The column is a DESTINATION — "which step is going to look at this" — written both by
+  // step 1's triage and by step 3's park bar. But only three steps ever read the table:
+  // step 1 (its own board), step 3 (what this session parked) and step 10 (the last
+  // call). Tag a note for Meals, Tasks, Calendar, Goals, Family night or Connection and
+  // that step never mentioned it — so a note tagged in one step vanished until the recap.
+  //
+  // The handoff belongs on the SESSION VIEW rather than in each step: it is the same
+  // banner for all of them, the shell already refetches this read after every write, and
+  // a step's own affordances are what actually act on the note. One implementation, ten
+  // steps, and nothing for the iOS pass to build ten times.
+  it('hands a tagged note to its destination step, and only to that step', async () => {
+    const s = json(await call('POST', '/api/weekly-planning/session', kevin)).session
+    const park = async (note: string, stepKey?: string) =>
+      call('POST', '/api/weekly-planning/loose-ends/parked', kevin, { note, sessionId: s.id, ...(stepKey ? { stepKey } : {}) })
+
+    expect((await park('buy poster board', 'tasks')).statusCode).toBe(200)
+    expect((await park('no meal on friday', 'meals')).statusCode).toBe(200)
+    expect((await park('something vague')).statusCode).toBe(200)
+
+    const steps = json(await call('GET', '/api/weekly-planning', kevin)).steps as { key: string; parked: { id: string; note: string }[] }[]
+    const on = (key: string) => steps.find((x) => x.key === key)!.parked.map((n) => n.note)
+
+    expect(on('tasks')).toEqual(['buy poster board'])
+    expect(on('meals')).toEqual(['no meal on friday'])
+    // An UNTAGGED note is nobody's yet — it is the recap's last call, not every step's
+    // problem. Handing it to all ten would make the banner noise on every screen.
+    expect(on('calendar')).toEqual([])
+    expect(on('goals')).toEqual([])
+    // And step 1 does not get its own notes handed back to it: it already draws the board.
+    expect(on('looseEnds')).toEqual([])
+  })
+
+  it('stops handing a note over once it has been dealt with', async () => {
+    const s = json(await call('POST', '/api/weekly-planning/session', kevin)).session
+    await call('POST', '/api/weekly-planning/loose-ends/parked', kevin, { note: 'call the dentist', sessionId: s.id, stepKey: 'tasks' })
+
+    const before = json(await call('GET', '/api/weekly-planning', kevin)).steps as { key: string; parked: { id: string; note: string }[] }[]
+    const note = before.find((x) => x.key === 'tasks')!.parked.find((n) => n.note === 'call the dentist')!
+    expect(note).toBeTruthy()
+
+    // The resolve route step 1 and step 10 already use — NOT a second mechanism.
+    expect((await call('POST', '/api/weekly-planning/loose-ends/resolve', kevin, {
+      kind: 'parked', id: note.id, action: 'done', sessionId: s.id,
+    })).statusCode).toBe(200)
+
+    const after = json(await call('GET', '/api/weekly-planning', kevin)).steps as { key: string; parked: { note: string }[] }[]
+    expect(after.find((x) => x.key === 'tasks')!.parked.map((n) => n.note)).not.toContain('call the dentist')
+  })
+
+  it('carries a note routed by step 1’s triage, not just one parked with a tag', async () => {
+    // The two producers write the SAME column, which is the whole reason one consumer is
+    // enough. Routing an already-parked note has to arrive the same way.
+    const s = json(await call('POST', '/api/weekly-planning/session', kevin)).session
+    const made = await call('POST', '/api/weekly-planning/loose-ends/parked', kevin, { note: 'fix the gate', sessionId: s.id })
+    const id = json(made).item.id
+
+    const steps0 = json(await call('GET', '/api/weekly-planning', kevin)).steps as { key: string; parked: { note: string }[] }[]
+    expect(steps0.find((x) => x.key === 'tasks')!.parked.map((n) => n.note)).not.toContain('fix the gate')
+
+    expect((await call('POST', '/api/weekly-planning/loose-ends/route', kevin, {
+      // `title` is required: a route records the words it was routed under, so step 1's
+      // own board can show what went where without re-reading the note.
+      sessionId: s.id, kind: 'parked', id, to: 'tasks', title: 'fix the gate',
+    })).statusCode).toBe(200)
+
+    const steps1 = json(await call('GET', '/api/weekly-planning', kevin)).steps as { key: string; parked: { note: string }[] }[]
+    expect(steps1.find((x) => x.key === 'tasks')!.parked.map((n) => n.note)).toContain('fix the gate')
+  })
+})

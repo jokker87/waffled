@@ -176,7 +176,7 @@ function props(over: Partial<StepBodyProps> = {}): StepBodyProps {
     step: {
       key: 'meals', number: 7, title: 'Meals', ask: 'What’s planned, and what’s still open?',
       primary: 'Done', act: 'Run the household', requiresModule: 'meals',
-      available: true, status: 'pending', data: {}, decidedAt: null,
+      available: true, status: 'pending', data: {}, decidedAt: null, parked: [],
     },
     // A fresh session per test: the step's state is keyed by session+week, so a new
     // id is what makes each test a clean mount rather than a shared cache.

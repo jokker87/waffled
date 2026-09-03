@@ -161,6 +161,9 @@ const step = {
   key: 'kids', number: 9, title: 'Kids', ask: 'What’s your week about?',
   primary: 'Done', act: 'Run the household',
   available: true, status: 'pending' as const, data: {}, decidedAt: null,
+  // The shell renders the parked-note handoff, not the step — see Handoff in
+  // WeeklyPlanning.tsx. A step test mounts `Body` alone, so there is never one here.
+  parked: [],
 }
 
 // A fresh session id per render: the step keeps its state in a module-scoped store

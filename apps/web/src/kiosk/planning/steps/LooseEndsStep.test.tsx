@@ -29,6 +29,9 @@ const step = (data: Record<string, unknown> = {}): PlanningStep => ({
   status: 'pending',
   data,
   decidedAt: null,
+  // Step 1 never receives a handoff: it already draws the whole board, so the server
+  // excludes `looseEnds` from `parkedByStep`.
+  parked: [],
 })
 
 const end = (over: Partial<Record<string, unknown>> = {}) => ({

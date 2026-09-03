@@ -3,12 +3,14 @@ import { useNavigate, useParams, useSearchParams } from 'react-router'
 import {
   useWeeklyPlanning,
   weeklyPlanningApi,
+  looseEndsApi,
   availableSteps,
   stepsByAct,
   resolveCurrent,
   nextStepAfter,
   planningDayName,
   addWeeks,
+  type PlanningStep,
 } from '../lib/api'
 import { STEP_MODULES, type PlanningStepModule, type StepBodyProps } from './planning/registry'
 import { StepPlaceholder } from './planning/StepPlaceholder'
@@ -96,6 +98,93 @@ function DiscardBlock({ confirming, setConfirming, busy, onDiscard }: {
       ) : (
         <button type="button" className="wp-sheet-danger-open" onClick={() => setConfirming(true)}>Start this week over</button>
       )}
+    </div>
+  )
+}
+
+/**
+ * A parked note handed to the step it was tagged for.
+ *
+ * THE SHELL OWNS THIS, not the ten steps. `planning_parked_items.step_key` names a
+ * DESTINATION — "which step is going to look at this" — and for a while nothing read it:
+ * only steps 1, 3 and 10 touched the table, so a note tagged for Meals or Tasks was
+ * never seen again until the recap's last call. It was reported exactly that way: "I
+ * added a bunch to the park it thing, expecting to go over them in the appropriate step
+ * but I never saw them again, where did they go?"
+ *
+ * It belongs here because the banner is identical on every step, because this component
+ * already refetches the session view after every write (so a note dealt with anywhere
+ * stops being offered everywhere), and because each step's OWN affordances are what act
+ * on the note — the banner's job is to put it back in front of you at the moment it is
+ * actionable, not to grow a tenth way to add a chore.
+ *
+ * Two answers, both of which the resolve route already understands. "Handled" resolves
+ * the note (you did the thing with the step's own controls). "Drop it" says it was never
+ * really a thing. Leaving it alone is the third answer and writes nothing — the note
+ * stays parked and turns up again in the recap, which is what parking is for.
+ */
+function Handoff({ step, sessionId, busy, onDone }: {
+  step: PlanningStep
+  sessionId: string
+  busy: boolean
+  onDone: () => void
+}) {
+  const [working, setWorking] = useState<string | null>(null)
+  const [hidden, setHidden] = useState<string[]>([])
+
+  const answer = async (id: string, action: 'done' | 'drop') => {
+    if (working) return
+    setWorking(id)
+    try {
+      await looseEndsApi.resolve('parked', id, action, sessionId)
+      // Hidden locally as well as refetched: the refetch is what makes it true, and this
+      // is what makes it feel true before the round trip lands.
+      setHidden((h) => [...h, id])
+      onDone()
+    } catch {
+      // Left on screen rather than half-answered. The next refetch is authoritative.
+    } finally {
+      setWorking(null)
+    }
+  }
+
+  const notes = (step.parked ?? []).filter((n) => !hidden.includes(n.id))
+  if (notes.length === 0) return null
+
+  return (
+    <div className="wp-handoff" data-testid="wp-handoff">
+      <div className="wp-handoff-h">
+        <span aria-hidden>📌</span>
+        {notes.length === 1 ? 'You parked this for right here' : `You parked ${notes.length} things for right here`}
+      </div>
+      <ul className="wp-handoff-list">
+        {notes.map((n) => (
+          <li key={n.id} className="wp-handoff-row" data-testid={`wp-handoff-${n.id}`}>
+            <span className="wp-handoff-note">
+              {n.note}
+              {n.byline && <em>{n.byline}</em>}
+            </span>
+            <span className="wp-handoff-acts">
+              <button
+                type="button"
+                className="btn btn-ghost wp-handoff-act"
+                disabled={busy || working === n.id}
+                onClick={() => void answer(n.id, 'done')}
+              >
+                Handled
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost wp-handoff-act is-drop"
+                disabled={busy || working === n.id}
+                onClick={() => void answer(n.id, 'drop')}
+              >
+                Drop it
+              </button>
+            </span>
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }
@@ -334,6 +423,12 @@ export function WeeklyPlanning() {
       </div>
 
       <div className="wp-body">
+        {/* `?? []` on purpose: a payload missing the field must cost the banner, never
+            the whole session screen. The shell is the one component whose failure has
+            nowhere to fall back to — there is no boundary above it. */}
+        {current && (current.parked ?? []).length > 0 && (
+          <Handoff step={current} sessionId={session.id} busy={busy} onDone={refetch} />
+        )}
         {current && (
           // Keyed on the step so moving on retries rather than inheriting a failure.
           <StepErrorBoundary key={current.key} title={current.title}>

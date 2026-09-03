@@ -36,6 +36,9 @@ const step: PlanningStep = {
   status: 'pending',
   data: {},
   decidedAt: null,
+  // The shell renders the parked-note handoff, not the step — see Handoff in
+  // WeeklyPlanning.tsx. A step test mounts `Body` alone, so there is never one here.
+  parked: [],
 }
 
 const WEEK = '2026-09-06' // a Sunday
@@ -192,10 +195,10 @@ describe('FamilyNightStep', () => {
   it('says "nobody yet" for a part the rotation has no one for', async () => {
     mockApi({
       parts: [
-        { partId: 'activity', label: 'Activity', emoji: '🎲', rotates: true, personId: 'p3', personName: 'Wally', pinned: false },
-        { partId: 'treat', label: 'Treat', emoji: '🍪', rotates: true, personId: 'p4', personName: 'Lottie', pinned: false },
+        { partId: 'activity', label: 'Activity', emoji: '🎲', rotates: true, detail: null, personId: 'p3', personName: 'Wally', pinned: false },
+        { partId: 'treat', label: 'Treat', emoji: '🍪', rotates: true, detail: null, personId: 'p4', personName: 'Lottie', pinned: false },
         // A fixed part (rotates: false) is never auto-filled — but it still takes a pin.
-        { partId: 'checkin', label: 'Check-in', emoji: '💬', rotates: false, personId: null, personName: null, pinned: false },
+        { partId: 'checkin', label: 'Check-in', emoji: '💬', rotates: false, detail: null, personId: null, personName: null, pinned: false },
       ],
     })
     render(<Body {...props()} />)

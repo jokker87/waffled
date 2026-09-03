@@ -15,7 +15,10 @@ const step = (
   number: number,
   title: string,
   act: string,
-  extra: Partial<{ available: boolean; status: string; requiresModule: string }> = {}
+  extra: Partial<{
+    available: boolean; status: string; requiresModule: string
+    parked: { id: string; note: string; byline: string | null }[]
+  }> = {}
 ) => ({
   key, number, title, act,
   ask: `${title}?`,
@@ -24,6 +27,8 @@ const step = (
   status: 'pending',
   data: {},
   decidedAt: null,
+  // Parked notes tagged for THIS step — the handoff the shell renders above the body.
+  parked: [],
   ...extra,
 })
 
@@ -357,5 +362,75 @@ describe('weekly planning · nothing to run', () => {
     mockApi(baseView({ steps: STEPS.map((s) => ({ ...s, available: false })) }))
     draw()
     expect(await screen.findByText(/Every step of the session reads a module that's turned off/)).toBeTruthy()
+  })
+})
+
+describe('the parked-note handoff', () => {
+  // "I added a bunch to the park it thing, expecting to go over them in the appropriate
+  // step but I never saw them again, where did they go?"
+  //
+  // The SHELL renders this, not the ten steps: the banner is identical on all of them,
+  // this component already refetches the session view after every write, and each step's
+  // own affordances are what actually act on the note. One implementation, ten steps.
+  const withNote = () =>
+    STEPS.map((st) =>
+      st.key === 'calendar'
+        ? step('calendar', 2, 'Calendar', 'Frame the week', {
+            parked: [{ id: 'pk1', note: 'book the campsite', byline: 'Kevin · 2 weeks ago' }],
+          })
+        : st
+    )
+
+  it('puts the note back in front of you on the step it was tagged for', async () => {
+    mockApi(baseView({ steps: withNote(), session: session({ currentStep: 'calendar' }) }))
+    draw()
+    const banner = await screen.findByTestId('wp-handoff')
+    expect(banner.textContent).toMatch(/book the campsite/)
+    // Who parked it and when — what makes an old note answerable.
+    expect(banner.textContent).toMatch(/Kevin · 2 weeks ago/)
+  })
+
+  it('is absent on a step nothing was tagged for', async () => {
+    mockApi(baseView({ steps: withNote(), session: session({ currentStep: 'horizon' }) }))
+    draw()
+    // The title and the ask both say it, so wait on the chrome rather than the words.
+    await waitFor(() => expect(screen.getByText(/3 of/)).toBeTruthy())
+    expect(screen.queryByTestId('wp-handoff')).toBeNull()
+  })
+
+  it('answers through the resolve route step 1 and step 10 already use', async () => {
+    mockApi(baseView({ steps: withNote(), session: session({ currentStep: 'calendar' }) }))
+    draw()
+    await screen.findByTestId('wp-handoff')
+    fireEvent.click(screen.getByRole('button', { name: /handled/i }))
+
+    await waitFor(() => {
+      const post = calls.find((c) => c.url.includes('/loose-ends/resolve'))
+      expect(post).toBeTruthy()
+      expect(post!.body).toMatchObject({ kind: 'parked', id: 'pk1', action: 'done' })
+    })
+    // And it goes away without waiting for the refetch to come back.
+    await waitFor(() => expect(screen.queryByTestId('wp-handoff-pk1')).toBeNull())
+  })
+
+  it('drops a note that was never really a thing', async () => {
+    mockApi(baseView({ steps: withNote(), session: session({ currentStep: 'calendar' }) }))
+    draw()
+    await screen.findByTestId('wp-handoff')
+    fireEvent.click(screen.getByRole('button', { name: /drop it/i }))
+
+    await waitFor(() => {
+      const post = calls.find((c) => c.url.includes('/loose-ends/resolve'))
+      expect(post!.body).toMatchObject({ id: 'pk1', action: 'drop' })
+    })
+  })
+
+  it('leaves a note alone when nobody answers it — that writes nothing', async () => {
+    // The third answer, and the one parking exists for: walk past it and the note stays
+    // open, turning up again in the recap's last call.
+    mockApi(baseView({ steps: withNote(), session: session({ currentStep: 'calendar' }) }))
+    draw()
+    await screen.findByTestId('wp-handoff')
+    expect(calls.some((c) => c.url.includes('/loose-ends/resolve'))).toBe(false)
   })
 })

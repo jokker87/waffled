@@ -72,6 +72,48 @@
    `margin: auto` rather than the container forcing centring on real step content. */
 .wp-body { padding: 26px 28px 8px; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
 
+/* ── The parked-note handoff ──────────────────────────────────────────────────── */
+/* "You parked this for right here." Rendered by the SHELL above whichever step body is
+   up, because the banner is identical on all ten and each step's own controls are what
+   act on the note (see Handoff in WeeklyPlanning.tsx).
+
+   `flex: none` — every sibling in `.wp-body` that is not the step body has to be, or it
+   competes with the body for height. Tinted rather than carded: it is a nudge sitting on
+   top of the step, and a second card would read as a second thing to do. */
+.wp-handoff {
+  flex: none;
+  margin-bottom: 18px;
+  padding: 12px 14px;
+  background: var(--primary-t);
+  border: 1px solid color-mix(in srgb, var(--primary) 26%, transparent);
+  border-radius: var(--r-lg);
+}
+.wp-handoff-h {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 12px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--primary);
+}
+.wp-handoff-list { list-style: none; margin: 9px 0 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
+.wp-handoff-row {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 9px 11px;
+  background: var(--card); border: 1px solid var(--hair-2); border-radius: var(--r-md);
+}
+.wp-handoff-note { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 650; color: var(--ink); line-height: 1.4; }
+/* Who parked it and how long ago — the thing that makes an old note answerable ("I wrote
+   that three weeks ago and it still isn't done"). Quiet, on its own line. */
+.wp-handoff-note em { display: block; margin-top: 2px; font-size: 11.5px; font-weight: 600; font-style: normal; color: var(--ink-3); }
+.wp-handoff-acts { flex: none; display: flex; gap: 7px; }
+.wp-handoff-act { padding: 7px 13px; font-size: 12.5px; }
+.wp-handoff-act.is-drop { color: var(--ink-3); }
+
+@media (max-width: 700px) {
+  /* The two answers go full width under the note rather than crushing it into a
+     column the width of a word. */
+  .wp-handoff-acts { width: 100%; }
+  .wp-handoff-act { flex: 1; }
+}
+
 .wp-foot {
   display: flex; align-items: center; gap: 12px;
   padding: 14px 28px; background: var(--card); border-top: 1px solid var(--hair);

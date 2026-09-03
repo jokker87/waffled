@@ -9,6 +9,14 @@ import { useRefetchOn, emit } from './bus'
 
 export type StepStatus = 'pending' | 'done' | 'skipped'
 
+/** A parked note waiting on this step — see `PlanningStep.parked`. */
+export interface PlanningStepHandoff {
+  id: string
+  note: string
+  /** "Kevin · 2 weeks ago", composed server-side so web and iOS say it the same way. */
+  byline: string | null
+}
+
 export interface PlanningStep {
   key: string
   number: number
@@ -23,6 +31,13 @@ export interface PlanningStep {
   status: StepStatus
   data: Record<string, unknown>
   decidedAt: string | null
+  /**
+   * Open parked notes TAGGED FOR THIS STEP — what somebody wrote earlier meaning to deal
+   * with it here. Empty for `looseEnds` (which already draws the whole board) and for
+   * untagged notes (nobody's yet, so they are the recap's last call rather than every
+   * step's banner). Capped server-side: a nudge, not an inbox.
+   */
+  parked: PlanningStepHandoff[]
 }
 
 export interface PlanningSession {

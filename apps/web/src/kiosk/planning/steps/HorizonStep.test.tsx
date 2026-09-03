@@ -39,6 +39,9 @@ const step: PlanningStep = {
   status: 'pending',
   data: {},
   decidedAt: null,
+  // The shell renders the parked-note handoff, not the step — see Handoff in
+  // WeeklyPlanning.tsx. A step test mounts `Body` alone, so there is never one here.
+  parked: [],
 }
 
 const PERSONS = [

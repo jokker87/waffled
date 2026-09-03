@@ -172,6 +172,14 @@ export async function resolveWeekStart(householdId: string, raw: unknown): Promi
 // The session
 // ---------------------------------------------------------------------------
 
+/** A parked note waiting on the step it was tagged for. See `parkedByStep`. */
+export interface StepHandoff {
+  id: string
+  note: string
+  /** Who wrote it and when, composed server-side so web and iOS say it the same way. */
+  byline: string | null
+}
+
 export interface SessionStep extends StepDef {
   number: number // 1-based position in the catalog (what "2 of 10" counts)
   // False ⇒ the step's module is off, or the household turned the step off. The
@@ -180,6 +188,25 @@ export interface SessionStep extends StepDef {
   status: 'pending' | 'done' | 'skipped'
   data: Record<string, unknown>
   decidedAt: string | null
+  /**
+   * Open parked notes TAGGED FOR THIS STEP — the handoff somebody wrote earlier
+   * expecting to deal with it here.
+   *
+   * This exists because they didn't. `planning_parked_items.step_key` names a
+   * DESTINATION ("which step is going to look at this"), written both by step 1's triage
+   * and by step 3's park bar, and for a while nothing read it: only steps 1, 3 and 10
+   * touched the table at all, so a note tagged for Meals or Tasks vanished until the
+   * recap's last call. It was reported exactly that way — "I added a bunch to the park it
+   * thing, expecting to go over them in the appropriate step but I never saw them again,
+   * where did they go?"
+   *
+   * It lives on the SESSION VIEW rather than in each step's own read for three reasons:
+   * the banner is identical on every step, the shell already refetches this after every
+   * write (so a note resolved anywhere disappears everywhere), and each step's existing
+   * affordances are what actually act on the note — there is nothing per-step to build,
+   * here or in the iOS pass.
+   */
+  parked: StepHandoff[]
 }
 
 export interface Session {
@@ -246,7 +273,7 @@ export async function getSessionById(householdId: string, id: string): Promise<S
 // Which steps this household actually runs, in catalog order. A step is available
 // unless its module is off or the household opted out of it.
 export async function resolveSteps(householdId: string, sessionId: string | null): Promise<SessionStep[]> {
-  const [config, settingsRow, decisions] = await Promise.all([
+  const [config, settingsRow, decisions, parked] = await Promise.all([
     getConfig(householdId),
     query<{ settings: unknown }>(`select settings from households where id = $1`, [householdId]).then((r) => r.rows[0]?.settings),
     sessionId
@@ -255,6 +282,7 @@ export async function resolveSteps(householdId: string, sessionId: string | null
           [sessionId]
         ).then((r) => r.rows)
       : Promise.resolve([]),
+    parkedByStep(householdId),
   ])
   const byKey = new Map(decisions.map((d) => [d.step_key, d]))
   return STEPS.map((s, i) => {
@@ -268,8 +296,57 @@ export async function resolveSteps(householdId: string, sessionId: string | null
       status: d ? (d.status as SessionStep['status']) : 'pending',
       data: d?.data ?? {},
       decidedAt: d ? d.decided_at.toISOString() : null,
+      parked: parked.get(s.key) ?? [],
     }
   })
+}
+
+/**
+ * Open parked notes grouped by the step each was tagged for.
+ *
+ * NOT scoped to the session: a note parked three Sundays ago and tagged for Tasks is
+ * still waiting on Tasks, and the whole point of parking is that it survives the session
+ * that wrote it. Resolved and dropped notes fall out on their own, so a note dealt with
+ * anywhere stops being handed over everywhere on the shell's next refetch.
+ *
+ * Two step keys are deliberately excluded:
+ *
+ *  · `looseEnds`, because step 1 already draws the whole board. Handing its own notes
+ *    back to it would double every row.
+ *  · a NULL tag, because an untagged note is nobody's yet — that is precisely the recap's
+ *    "still on the board, last call". Giving it to all ten steps would put the same
+ *    unanswered note on every screen in the session.
+ */
+const HANDOFF_CAP = 6
+
+export async function parkedByStep(householdId: string): Promise<Map<string, StepHandoff[]>> {
+  const { rows } = await query<{ step_key: string; id: string; note: string; by_name: string | null; created_at: Date }>(
+    `select pi.step_key, pi.id, pi.note, p.name as by_name, pi.created_at
+       from planning_parked_items pi
+       left join persons p on p.id = pi.created_by and p.deleted_at is null
+      where pi.household_id = $1
+        and pi.status = 'open'
+        and pi.step_key is not null
+        and pi.step_key <> 'looseEnds'
+      order by pi.created_at`,
+    [householdId]
+  )
+  const out = new Map<string, StepHandoff[]>()
+  for (const r of rows) {
+    const list = out.get(r.step_key) ?? out.set(r.step_key, []).get(r.step_key)!
+    // Capped: this is a nudge at the top of a step, not an inbox. Somebody who parked
+    // thirty notes still has step 1's board and the recap's last call for the rest.
+    if (list.length >= HANDOFF_CAP) continue
+    list.push({ id: r.id, note: r.note, byline: byline(r.by_name, r.created_at) })
+  }
+  return out
+}
+
+/** "Kevin · 2 weeks ago" — or just the age when nobody is on the row. */
+function byline(name: string | null, at: Date): string | null {
+  const days = Math.floor((Date.now() - at.getTime()) / 86400000)
+  const age = days <= 0 ? 'today' : days === 1 ? 'yesterday' : days < 14 ? `${days} days ago` : `${Math.floor(days / 7)} weeks ago`
+  return name ? `${name} · ${age}` : age
 }
 
 export const firstAvailableStep = (steps: SessionStep[]): string | null => steps.find((s) => s.available)?.key ?? null
