@@ -274,6 +274,42 @@ describe('KidsStep · answering', () => {
     expect(calls.filter((c) => c.method === 'PUT')[0].body).toMatchObject({ focus: { text: 'Be kind to Lottie' } })
   })
 
+  // "I added 'Extra Thing' and yet it didnt become anything? and I couldnt click on it?"
+  // Two separate defects behind one sentence, and neither is the save: the answer landed
+  // both times. It did not LOOK like it had, and going back to it threw it away.
+  it('shows a chosen custom answer as CHOSEN, not as the escape hatch', async () => {
+    renderStep()
+    const w = await card('Wally')
+    fireEvent.click(w.getByRole('radio', { name: /Something else/ }))
+    const input = await screen.findByLabelText(/something else/i)
+    fireEvent.change(input, { target: { value: 'Extra Thing' } })
+    fireEvent.submit(input.closest('form')!)
+
+    const chosen = await waitFor(() => w.getByRole('radio', { name: /Extra Thing/ }))
+    expect(chosen.getAttribute('aria-checked')).toBe('true')
+    expect(chosen.className).toContain('on')
+    // `.wpk-opt.more` is declared AFTER `.wpk-opt.on` at equal specificity, so as long as
+    // the answered chip still carries `more` the cascade paints it dashed and grey — the
+    // quietest thing on the card, which is the opposite of what it now is.
+    expect(chosen.className).not.toContain('more')
+  })
+
+  it('reopens a chosen custom answer with what they said, not an empty box', async () => {
+    renderStep()
+    const w = await card('Wally')
+    fireEvent.click(w.getByRole('radio', { name: /Something else/ }))
+    const first = await screen.findByLabelText(/something else/i)
+    fireEvent.change(first, { target: { value: 'Extra Thing' } })
+    fireEvent.submit(first.closest('form')!)
+    await waitFor(() => expect(w.getByRole('radio', { name: /Extra Thing/ })).toBeTruthy())
+
+    // Going back to their own answer is an EDIT. An empty box discards what a nine year
+    // old just dictated and makes the chip look inert — which is how it was reported.
+    fireEvent.click(w.getByRole('radio', { name: /Extra Thing/ }))
+    const again = await screen.findByLabelText(/something else/i)
+    expect((again as HTMLInputElement).value).toBe('Extra Thing')
+  })
+
   it('mirrors what the session already knows onto the step’s crumb', async () => {
     const { setDecisionData } = renderStep()
     await waitFor(() => expect(setDecisionData).toHaveBeenCalled())

@@ -204,29 +204,33 @@ function ForwardOption({ option, checked, disabled, onPick }: {
   )
 }
 
-function TypeIn({ label, placeholder, disabled, onCancel, onSave }: {
+function TypeIn({ label, placeholder, initial, disabled, onCancel, onSave }: {
   label: string
   placeholder: string
+  // What they said last time, when this is reopening their own answer. An empty box here
+  // discards what somebody already dictated and makes the chip above look inert.
+  initial: string
   disabled: boolean
   onCancel: () => void
   onSave: (text: string) => void
 }) {
-  const [text, setText] = useState('')
+  const [text, setText] = useState(initial)
   return (
     <form
       className="wpk-type"
       onSubmit={(e) => { e.preventDefault(); if (text.trim()) onSave(text.trim()) }}
     >
-      <input
-        className="input"
-        aria-label={label}
-        placeholder={placeholder}
-        value={text}
-        autoFocus
-        maxLength={120}
-        disabled={disabled}
-        onChange={(e) => setText(e.target.value)}
-      />
+      <label className="field wpk-type-f">
+        <input
+          aria-label={label}
+          placeholder={placeholder}
+          value={text}
+          autoFocus
+          maxLength={120}
+          disabled={disabled}
+          onChange={(e) => setText(e.target.value)}
+        />
+      </label>
       <button type="submit" className="btn btn-primary" disabled={disabled || !text.trim()}>Save</button>
       <button type="button" className="btn btn-ghost" onClick={onCancel}>Cancel</button>
     </form>
@@ -326,7 +330,7 @@ function Card({ kid, s, p, readBack }: { kid: PlanningKidCard; s: StepState; p: 
                 role="radio"
                 aria-checked={kid.focus?.source === 'custom'}
                 disabled={frozen}
-                className={`wpk-opt more${kid.focus?.source === 'custom' ? ' on' : ''}`}
+                className={`wpk-opt ${kid.focus?.source === 'custom' ? 'on wpk-opt-own' : 'more'}`}
                 onClick={() => set({ typing: { personId: kid.personId, which: 'focus' } })}
               >
                 {kid.focus?.source === 'custom' ? kid.focus.label : '＋ Something else'}
@@ -336,6 +340,7 @@ function Card({ kid, s, p, readBack }: { kid: PlanningKidCard; s: StepState; p: 
               <TypeIn
                 label={`Something else for ${kid.name}`}
                 placeholder="In their own words"
+                initial={kid.focus?.source === 'custom' ? kid.focus.label : ''}
                 disabled={frozen}
                 onCancel={() => set({ typing: null })}
                 onSave={(text) => void answer(p, kid.personId, { focus: { text } })}
@@ -360,7 +365,7 @@ function Card({ kid, s, p, readBack }: { kid: PlanningKidCard; s: StepState; p: 
                 role="radio"
                 aria-checked={kid.forward?.eventId === null && kid.forward != null}
                 disabled={frozen}
-                className={`wpk-fchip more${kid.forward != null && kid.forward.eventId === null ? ' on' : ''}`}
+                className={`wpk-fchip ${kid.forward != null && kid.forward.eventId === null ? 'on wpk-fchip-own' : 'more'}`}
                 onClick={() => set({ typing: { personId: kid.personId, which: 'forward' } })}
               >
                 {kid.forward != null && kid.forward.eventId === null ? kid.forward.label : '＋ Add something'}
@@ -370,6 +375,7 @@ function Card({ kid, s, p, readBack }: { kid: PlanningKidCard; s: StepState; p: 
               <TypeIn
                 label={`Something else for ${kid.name} to look forward to`}
                 placeholder="Something on their week"
+                initial={kid.forward != null && kid.forward.eventId === null ? kid.forward.label : ''}
                 disabled={frozen}
                 onCancel={() => set({ typing: null })}
                 onSave={(text) => void answer(p, kid.personId, { forward: { text } })}

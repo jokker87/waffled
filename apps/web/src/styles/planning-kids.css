@@ -14,11 +14,11 @@
      Card    — .wpk-cards .wpk-card (.on) .wpk-h .wpk-face .wpk-id .wpk-nm .wpk-ag
                .wpk-stars .wpk-sec .wpk-lab
      Week    — .wpk-chips .wpk-chip (.late) .wpk-chip-t .wpk-chip-n
-     Focus   — .wpk-opts .wpk-opt (.on .more) .wpk-opt-e .wpk-opt-main .wpk-opt-t
+     Focus   — .wpk-opts .wpk-opt (.on .more .wpk-opt-own) .wpk-opt-e .wpk-opt-main .wpk-opt-t
                .wpk-opt-s .wpk-routed .wpk-opt-num .wpk-num .wpk-den
-     Forward — .wpk-fwd .wpk-fchip (.on .more)
+     Forward — .wpk-fwd .wpk-fchip (.on .more .wpk-fchip-own)
      Said    — .wpk-said .wpk-said-e .wpk-said-b .wpk-big .wpk-cap
-     Typing  — .wpk-type
+     Typing  — .wpk-type .wpk-type-f
 
    The segmented picker below RESTATES .wpg-tabs / .wpg-tab from planning-goals.css
    rather than sharing them: the two are meant to be the same control (v4 describes the
@@ -120,6 +120,11 @@
    the whole design is that a kid recognises their week rather than invents it. */
 .wpk-opt.more { background: transparent; border-style: dashed; color: var(--ink-3); font-weight: 700; justify-content: center; }
 
+/* Their own words, chosen. It is an ANSWER now, so it takes `.on`'s border and tint
+   rather than `.more`'s dashed grey — but it still has no emoji and no number, so it
+   keeps the escape hatch's centring instead of leaving two empty columns. */
+.wpk-opt.wpk-opt-own { justify-content: center; font-weight: 700; }
+
 .wpk-opt-e { flex: none; font-size: 26px; line-height: 1; }
 .wpk-opt-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 /* Sized for the reader, who is nine. */
@@ -146,6 +151,7 @@
 .wpk-fchip:disabled { opacity: 0.55; cursor: default; }
 .wpk-fchip.on { border-color: var(--primary); background: var(--primary-t); }
 .wpk-fchip.more { background: transparent; border-style: dashed; color: var(--ink-3); }
+.wpk-fchip.wpk-fchip-own { font-weight: 700; }
 .wpk-fchip-n { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ── The read-back ──────────────────────────────────────────────────────────── */
@@ -164,8 +170,13 @@
 .wpk-cap { margin-top: 5px; font-size: 12.5px; font-weight: 650; color: var(--ink-3); }
 
 /* ── The escape hatch's form ────────────────────────────────────────────────── */
+/* `.field` is the app's own text control (kiosk.css) — the box, the focus ring and the
+   type size all come from there. This used to be `className="input"`, which is not a
+   class this app defines, so it rendered as a bare browser input with the browser's own
+   blue focus ring sitting next to the app's controls. */
 .wpk-type { display: flex; gap: 8px; align-items: center; }
-.wpk-type input { flex: 1; min-width: 0; }
+.wpk-type-f { flex: 1; min-width: 0; padding: 0; }
+.wpk-type-f input { width: 100%; }
 
 /* ── Phone: one kid at a time ───────────────────────────────────────────────── */
 @media (max-width: 760px) {
