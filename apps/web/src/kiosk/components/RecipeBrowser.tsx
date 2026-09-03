@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useState } from 'react'
+import { Suspense, lazy, useEffect, useRef, useState } from 'react'
 import { RecipeModal } from './RecipeModal'
 import { MealCard } from './MealCard'
 import { mealBuilderApi, type Meal, type Recipe } from '../../lib/api'
@@ -120,6 +120,20 @@ export function RecipeBrowser({
   // caller's closure, and navigating away would abandon it (and, in Weekly
   // Planning, the session behind it).
   const [building, setBuilding] = useState(false)
+  // The id of the plate this modal brought into existence, if it got that far. The
+  // builder creates lazily — on the first dish, not on opening — so a plate only
+  // exists once somebody has actually put something on it, and `onIdChange` is
+  // exactly the moment that happens. Held so cancelling can take it back out.
+  const abandonedPlate = useRef<string | null>(null)
+  const closeBuilder = () => {
+    const id = abandonedPlate.current
+    abandonedPlate.current = null
+    setBuilding(false)
+    // Cancel means cancel — the same contract "＋ New recipe" already keeps. Without
+    // this, every half-built plate stays in the library as a saved, empty "New meal".
+    // Best-effort: a failed cleanup must not block closing the modal.
+    if (id) void mealBuilderApi.remove(id).catch(() => {})
+  }
   const query = q.trim().toLowerCase()
   // Free-text search across title + metadata, then the meal-type filter chip.
   const matchesQuery = (r: Recipe) =>
@@ -270,7 +284,7 @@ export function RecipeBrowser({
       {building && onPickMeal && (
         <div className="modal-overlay picker-plate-overlay">
           <div className="modal-card picker-new-card picker-plate-card" onClick={(e) => e.stopPropagation()}>
-            <button type="button" className="modal-close" aria-label="Close" onClick={() => setBuilding(false)}>×</button>
+            <button type="button" className="modal-close" aria-label="Close" onClick={closeBuilder}>×</button>
             {/* No heading of our own: the builder's first line IS the plate's name,
                 editable in place, and a "New meal" title above a name field whose
                 placeholder is also "New meal" just says it twice. */}
@@ -279,7 +293,12 @@ export function RecipeBrowser({
                 // A plate built here goes in the library, like a recipe written here
                 // does — and being saved is what makes scheduling copy it.
                 startSaved
+                onIdChange={(id) => {
+                  abandonedPlate.current = id
+                }}
                 onUse={(meal) => {
+                  // Chosen, so it is no longer abandoned — it's theirs to keep.
+                  abandonedPlate.current = null
                   setBuilding(false)
                   onPickMeal(meal)
                 }}

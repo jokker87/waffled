@@ -84,6 +84,7 @@ function mockApi() {
       }
     }
     if (u.includes('/api/meals') && method === 'GET') return { ok: true, json: async () => ({ meals: [] }) }
+    if (/\/api\/meals\/[^/?]+$/.test(u) && method === 'DELETE') return { ok: true, status: 204, json: async () => ({}) }
     return { ok: false, status: 404, json: async () => ({}) }
   }) as unknown as typeof fetch
 }
@@ -166,7 +167,42 @@ describe('RecipeBrowser — building a plate without leaving the slot', () => {
     expect(screen.queryByRole('button', { name: /Add plate to list/i })).toBeNull()
   })
 
-  it('leaves the picker untouched when the plate is abandoned', async () => {
+  // The plate is created LAZILY, on the first dish — so a half-built one is a real,
+  // saved row in the library by the time somebody changes their mind. Closing has to
+  // take it back out, or every abandoned "＋ New meal" leaves a permanent plate called
+  // "New meal" sitting in the library with nothing in it. Cancel means cancel, the
+  // same as it does for the recipe half.
+  it('takes a half-built plate back out of the library when cancelled', async () => {
+    const onPickMeal = vi.fn()
+    renderBrowser({ onPick: () => {}, onPickMeal })
+    fireEvent.click(screen.getByRole('button', { name: /New meal/i }))
+    await screen.findByLabelText('Meal name')
+    fireEvent.click(await screen.findByRole('button', { name: 'Add Chicken Parmesan' }))
+    await waitFor(() => expect(sent.some((s) => s.method === 'POST' && /\/api\/meals$/.test(s.url))).toBe(true))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+    await waitFor(() =>
+      expect(sent.some((s) => s.method === 'DELETE' && /\/api\/meals\/m-new$/.test(s.url))).toBe(true),
+    )
+    expect(onPickMeal).not.toHaveBeenCalled()
+  })
+
+  // The plate somebody actually USED is theirs to keep, obviously.
+  it('keeps the plate that was chosen', async () => {
+    const onPickMeal = vi.fn()
+    renderBrowser({ onPick: () => {}, onPickMeal })
+    fireEvent.click(screen.getByRole('button', { name: /New meal/i }))
+    await screen.findByLabelText('Meal name')
+    fireEvent.click(await screen.findByRole('button', { name: 'Add Chicken Parmesan' }))
+    await waitFor(() =>
+      expect((screen.getByRole('button', { name: /Use this plate/i }) as HTMLButtonElement).disabled).toBe(false),
+    )
+    fireEvent.click(screen.getByRole('button', { name: /Use this plate/i }))
+    await waitFor(() => expect(onPickMeal).toHaveBeenCalledTimes(1))
+    expect(sent.some((s) => s.method === 'DELETE')).toBe(false)
+  })
+
+  it('leaves the picker untouched when the plate is abandoned before anything is written', async () => {
     const onPickMeal = vi.fn()
     renderBrowser({ onPick: () => {}, onPickMeal })
     fireEvent.click(screen.getByRole('button', { name: /New meal/i }))

@@ -75,7 +75,11 @@ so it is written down here rather than discovered during the parity pass:
   rows aren't tappable (there is nowhere to open them to), and supplying `onUse` takes Schedule
   and Add-plate-to-list off the bar, because inside a picker the destination is already decided
   by the slot. New plates are created `isSaved: true` — the library is the symmetric reading of
-  "＋ New meal", and being saved is also what makes scheduling copy the plate.
+  "＋ New meal", and being saved is also what makes scheduling copy the plate. **Cancel
+  must delete the plate**: the builder creates lazily on the first *dish*, so by the time
+  anybody changes their mind a real, saved, empty "New meal" is already in the library —
+  the picker holds the id `onIdChange` reports and removes it on close. Verified against
+  the live library, not a mock, because a mock cannot show you a leak.
 
 ## Schema (0099)
 

@@ -6,7 +6,7 @@
 // This slice is the shared contract every Meal Builder surface codes against — the
 // builder screen, the meal detail, the unified library and the grocery board.
 import { useCallback, useEffect, useState } from 'react'
-import { apiGet, apiSend } from './client'
+import { apiDelete, apiGet, apiSend } from './client'
 import { tap, useRefetchOn } from './bus'
 import type { MealCook } from './meals'
 
@@ -107,6 +107,11 @@ export const mealBuilderApi = {
   },
 
   get: (id: string) => apiGet<{ meal: Meal }>(`/api/meals/${id}`).then((r) => r.meal),
+
+  // Soft-delete a plate. Used to take back a half-built one somebody cancelled out
+  // of: the plate is created lazily on the first dish, so "I changed my mind" would
+  // otherwise leave a saved, empty plate in the library.
+  remove: (id: string) => apiDelete(`/api/meals/${id}`).then(tap('meals')),
 
   update: (id: string, patch: MealWriteInput) =>
     apiSend<{ meal: Meal }>('PATCH', `/api/meals/${id}`, patch).then(tap('meals')).then((r) => r.meal),
