@@ -5,7 +5,6 @@
 // everyone / some of us / one person / unassigned.
 import { useMemo, useSyncExternalStore, type CSSProperties } from 'react'
 import { personsApi, HOUSEHOLD_CHANGED, type Household, type Person } from './api/persons'
-import type { AgendaEvent } from './api/events'
 
 /** The grey used across every view for events with no assignee. */
 export const UNASSIGNED_COLOR = '#6B6B70'
@@ -14,7 +13,12 @@ export const DEFAULT_FAMILY_COLOR = '#F97316'
 
 const HEX = /^#[0-9a-fA-F]{6}$/
 
-type ColorableEvent = Pick<AgendaEvent, 'personId' | 'personColor' | 'participants'>
+export interface ColorableEvent {
+  personId: string | null
+  personColor: string | null
+  /** Only the ids are read, so a caller holding ids alone can use the same resolver. */
+  participants?: { id: string }[] | null
+}
 
 /** The household's whole-family event color (settings.display.familyColorHex). */
 export function familyColorHex(household: Household | null | undefined): string {

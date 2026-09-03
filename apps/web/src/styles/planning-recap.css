@@ -15,7 +15,8 @@
 
    VOCABULARY
      Frame  — .wpr .wpr-note
-     Week   — .wpr-week .wpr-day .wpr-d .wpr-line (.mut) .wpr-more
+     Week   — .wpr-week .wpr-day .wpr-d .wpr-line (.mut, or .ev .ev-tint from
+              waffled.css for an event) .wpr-more
      Cards  — .wpr-cols .wpr-side .wpr-card .wpr-h
      Rows   — .wpr-row .wpr-src .wpr-t .wpr-n (.is-none .is-skipped .is-parked)
               .wpr-acts .wpr-act (.is-drop)
@@ -54,6 +55,14 @@
   font-size: 12px; font-weight: 650; color: var(--ink); line-height: 1.35;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+/* An event takes the calendar's OWN chip — `.ev` + `.ev-tint` from waffled.css, painted
+   through `evVars()` — so the week reads back in the colours the family already knows
+   from the month and week views. Only the geometry is retuned for a column this narrow;
+   the wash, the ink and the theme handling all come from the shared rule, which is the
+   point (a colour rule of our own here would drift from the calendar it describes). */
+.wpr-line.ev { padding: 3px 7px; font-size: 11.5px; font-weight: 650; border-radius: 6px; }
+/* A dinner is not an event and keeps its plain weight, so the tinted chips are the only
+   coloured things in the column and read as the calendar's. */
 .wpr-line.mut { font-weight: 600; color: var(--ink-2); }
 .wpr-more { font-size: 11px; font-weight: 700; color: var(--ink-3); }
 

@@ -72,8 +72,14 @@ export interface NightEvent {
   title: string
   startsAt: string
   allDay: boolean
+  // The colour INPUTS, not a colour. Whether an event paints in the household's family
+  // colour or its owner's is `eventColor`'s decision, and that lives on the client next
+  // to the calendar it has to match — resolving it here would give the recap's week strip
+  // and the month view two rules that could drift.
+  personId: string | null
   personName: string | null
   personColor: string | null
+  participantIds: string[]
 }
 
 // The dish on a night, already resolved for display: a recipe-backed slot reads its
@@ -264,8 +270,10 @@ export async function mealsStepView(tenant: Tenant, weekStart: string, hintChore
       title: e.title,
       startsAt: new Date(e.starts_at).toISOString(),
       allDay: !!e.all_day,
+      personId: e.person_id ?? null,
       personName: e.person_name ?? null,
       personColor: e.person_color ?? null,
+      participantIds: (e.participants ?? []).map((pp) => pp.id),
     })
   }
   // All-day first, then by clock — the reading order of a day, matching todayEvents.

@@ -17,7 +17,20 @@ export interface PlanningRecapDay {
   /** The dinner planned for that night. Null with the meals module off, too. */
   meal: string | null
   cook: string | null
-  events: { id: string; title: string; when: string; personName: string | null }[]
+  /**
+   * The colour INPUTS, not a colour: the strip tints each event through the app's own
+   * `useEventColor()`, the same resolver the month and week views use, so the week read
+   * back looks like the calendar it describes rather than like a second palette.
+   */
+  events: {
+    id: string
+    title: string
+    when: string
+    personId: string | null
+    personName: string | null
+    personColor: string | null
+    participantIds: string[]
+  }[]
   /** Events the column is holding back, so a busy day says "+2 more" instead of growing. */
   more: number
 }

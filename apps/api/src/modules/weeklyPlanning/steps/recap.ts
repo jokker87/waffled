@@ -89,7 +89,19 @@ export interface RecapDay {
   // a household that doesn't plan meals gets a week of events, not a row of blanks.
   meal: string | null
   cook: string | null
-  events: { id: string; title: string; when: string; personName: string | null }[]
+  // `personId` + `participantIds` + `personColor` are the inputs the CLIENT's own
+  // `eventColor` needs, so the week strip is tinted by the same rule as the month view
+  // (family colour when the event covers the household, the owner's colour otherwise).
+  // The colour itself is deliberately not resolved here — see NightEvent.
+  events: {
+    id: string
+    title: string
+    when: string
+    personId: string | null
+    personName: string | null
+    personColor: string | null
+    participantIds: string[]
+  }[]
   // Events beyond DAY_CAP, so the column can say "+2 more" without growing.
   more: number
 }
@@ -346,7 +358,10 @@ export async function getRecap(tenant: Tenant, weekStart: string, session: Sessi
       id: e.id,
       title: e.title,
       when: whenLabel(e.startsAt, e.allDay, tz),
+      personId: e.personId,
       personName: e.personName,
+      personColor: e.personColor,
+      participantIds: e.participantIds,
     })),
     more: Math.max(0, n.events.length - DAY_CAP),
   }))

@@ -193,6 +193,25 @@ describe('planning · recap · the week, read back', () => {
     expect(titles(await recap(), 1)).toEqual([])
   })
 
+  // Retrofitted alongside the web change that needed it (the web test came first): a
+  // contract guard, because iOS parity will paint the same strip from this payload.
+  //
+  // The colour INPUTS travel, never a resolved colour. Whether an event paints in the
+  // household's family colour or its owner's is the client's `eventColor` decision, and
+  // it lives next to the calendar it has to match — resolving it here would give the
+  // recap strip and the month view two rules free to drift apart.
+  it('carries what a client needs to colour an event the way the calendar does', async () => {
+    const r = await recap()
+    const dance = r.days[2].events.find((e) => e.title === 'Dance')!
+    expect(dance.personId).toBe(lottieId)
+    expect(Array.isArray(dance.participantIds)).toBe(true)
+    // Present, and null when the person has no colour of their own — which is a real
+    // answer the client turns into the unassigned grey, not a missing field.
+    expect(dance).toHaveProperty('personColor')
+    // No resolved colour on the wire — that is the whole point.
+    expect(dance).not.toHaveProperty('colorHex')
+  })
+
   // A genuinely busy day must not push the column past its neighbours — the strip caps
   // and reports the remainder rather than growing.
   it('caps a busy day and says how many it is holding back', async () => {

@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import { looseEndsApi, planningRecapApi, planningRecapDecision, type PlanningRecapView } from '../../../lib/api'
+// The app's own event-colour resolver. The week strip has to agree with the calendar it
+// is describing, so it uses the same one the month and week views do rather than a rule
+// of its own.
+import { evVars, useEventColor } from '../../../lib/event-color'
 import type { PlanningStepModule, StepBodyProps } from '../registry'
 import '../../../styles/planning-recap.css'
 
@@ -66,6 +70,10 @@ function useRecap(sessionId: string) {
 function Body({ sessionId, setDecisionData, busy }: StepBodyProps) {
   const { view, loading } = useRecap(sessionId)
   const [search] = useSearchParams()
+  // Family colour when an event covers the household, the owner's colour otherwise, grey
+  // when nobody owns it — resolved here rather than server-side so the strip cannot drift
+  // from the calendar.
+  const colorOf = useEventColor()
   // Notes the family walked past on purpose. Local on purpose too: "keep it parked" is
   // the answer that writes NOTHING — the note stays open and turns up in next Sunday's
   // step 1, which is the whole point of a last call rather than an inbox.
@@ -115,7 +123,20 @@ function Body({ sessionId, setDecisionData, busy }: StepBodyProps) {
               <div className="wpr-d">{name}<span>{num}</span></div>
               {meal && <div className="wpr-line">{meal}</div>}
               {d.events.map((e) => (
-                <div key={e.id} className="wpr-line mut" title={e.when}>{e.title}</div>
+                <div
+                  key={e.id}
+                  className="wpr-line ev ev-tint"
+                  // `?? []` on purpose: this is the last screen of the session, and a
+                  // payload missing one array should cost a tint, not the whole recap.
+                  style={evVars(colorOf({
+                    personId: e.personId ?? null,
+                    personColor: e.personColor ?? null,
+                    participants: (e.participantIds ?? []).map((id) => ({ id })),
+                  }))}
+                  title={e.when}
+                >
+                  {e.title}
+                </div>
               ))}
               {d.more > 0 && <div className="wpr-more">+{d.more} more</div>}
             </div>

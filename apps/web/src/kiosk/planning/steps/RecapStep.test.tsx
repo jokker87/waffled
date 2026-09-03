@@ -53,7 +53,7 @@ const VIEW = {
   days: [
     day(0, { meal: 'Lentil soup', cook: 'Lottie', events: [{ id: 'fn', title: 'Family night', when: 'Sunday 5:00 PM', personName: null }] }),
     day(1, { meal: 'Crockpot chili', cook: 'Kevin' }),
-    day(2, { events: [{ id: 'd', title: 'Dance', when: 'Tuesday 4:00 PM', personName: 'Lottie' }] }),
+    day(2, { events: [{ id: 'd', title: 'Dance', when: 'Tuesday 4:00 PM', personName: 'Lottie', personId: 'p4', personColor: '#7C3AED', participantIds: ['p4'] }] }),
     day(3),
     day(4),
     // A genuinely busy Friday: four shown, two held back.
@@ -126,6 +126,24 @@ describe('recap · the week, one last time', () => {
     expect(within(sun).getByText(/Family night/)).toBeTruthy()
     // Seven, and no more: the strip is the week, not a scrolling agenda.
     expect(screen.getAllByTestId(/^wpr-day-/)).toHaveLength(7)
+  })
+
+  // "we should re-use our calendar date type look from earlier where we have the events
+  // by color." The strip drew every event as plain grey text, so the week read back in a
+  // palette the family has never seen anywhere else in the app.
+  //
+  // The colour is resolved by the SAME `useEventColor()` the month and week views use —
+  // family colour when the event covers the household, the owner's colour otherwise,
+  // grey when nobody owns it. Duplicating that rule server-side would drift from the
+  // calendar, which is the one thing the strip must agree with.
+  it('paints each event in the colour the calendar would give it', async () => {
+    mockApi()
+    renderStep()
+    const tue = await dayCell('2026-09-08')
+    const chip = within(tue).getByText('Dance')
+    expect(chip.className).toContain('ev-tint')
+    // `evVars` is what every other event chip in the app is painted through.
+    expect(chip.getAttribute('style') ?? '').toMatch(/--ev/)
   })
 
   // The wave-2 lesson: a column that grows past its box paints over what is under it.
