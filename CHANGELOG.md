@@ -15,6 +15,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The recipe picker can build a whole meal, not just write a new recipe.** Anywhere you
+  pick a dish for a night — the meal planner, and Weekly Planning's Meals step — there's now
+  a **＋ New meal** button beside ＋ New recipe. It opens the real Meal Builder over the
+  picker, so you can name a plate, add a main and its sides, set servings and assign a cook
+  per dish, then put the finished plate straight on the night you were filling. The plate is
+  saved to your library on the way past, so it's there to pick again next month. Previously a
+  plate could only be built on the Meal Builder screen, which meant abandoning the night you
+  were planning to go and make one.
+
 - **A new Weekly Planning module (opt-in) that walks the family through deciding the week
   ahead.** Turn it on in Settings → Modules and a **Planning** page appears: pick a day and
   time for the session, choose which of its ten steps your family actually runs, and start

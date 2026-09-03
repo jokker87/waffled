@@ -17,9 +17,57 @@ const NEW_NAME = 'New meal'
 
 type Toast = { text: string; link?: { to: string; label: string } }
 
+// The Meal Builder SCREEN: the body below, wired to the router. Everything that
+// knows about URLs lives here, which is what lets the body be embedded somewhere
+// with no URL of its own — the recipe picker builds a plate with it. Same split
+// as RecipeEditor / RecipeEditorBody, for the same reason.
 export function MealBuilder() {
   const { id: routeId } = useParams()
   const navigate = useNavigate()
+  return (
+    <MealBuilderBody
+      mealId={routeId ?? null}
+      onIdChange={(mealId) => navigate(`/meals/build/${mealId}`, { replace: true })}
+      onOpenDish={(recipeId) => navigate(`/meals/recipe/${recipeId}`)}
+      onCook={(mealId) => navigate(`/meals/meal/${mealId}/cook`)}
+      onBack={() => navigate('/meals')}
+    />
+  )
+}
+
+// The builder itself, router-free.
+//
+// Every optional callback here is a RENDER CONTRACT, not a passive hook: each one
+// controls whether its affordance exists at all, because each is a place to GO and
+// an embedded builder has nowhere to send you. Supply `onUse` and this becomes a
+// plate builder that answers to whatever opened it — the two "now what?" actions
+// (Schedule, Add plate to list) come off the bar, since the destination is already
+// decided by the slot that opened the picker.
+export function MealBuilderBody({
+  mealId: initialId,
+  startSaved,
+  onIdChange,
+  onOpenDish,
+  onCook,
+  onBack,
+  onUse,
+  useLabel,
+}: {
+  mealId?: string | null
+  // Create the plate straight into the library. The screen starts a scratch plate
+  // (the bar's toggle saves it); a plate built from the recipe picker is the
+  // picker's answer to "＋ New meal", which means the library — and `is_saved` is
+  // also what makes scheduling COPY it, so editing the night later can't rewrite
+  // the plate.
+  startSaved?: boolean
+  onIdChange?: (mealId: string) => void
+  onOpenDish?: (recipeId: string) => void
+  onCook?: (mealId: string) => void
+  onBack?: () => void
+  onUse?: (meal: Meal) => void
+  useLabel?: string
+}) {
+  const routeId = initialId
 
   // `/meals/build` starts with no id: the plate is created lazily on the first
   // dish add or the first rename, then the URL is swapped for /meals/build/:id so
@@ -45,7 +93,7 @@ export function MealBuilder() {
   // clear “New meal” first; the lazy create falls back to NEW_NAME.
   const [name, setName] = useState('')
   const [servings, setServings] = useState(4)
-  const [isSaved, setIsSaved] = useState(false)
+  const [isSaved, setIsSaved] = useState(startSaved ?? false)
   // Adopt a newly-loaded plate's own values DURING render rather than in an effect.
   // As an effect this landed a paint late: the bar rendered the placeholder 4 first
   // and only then snapped to the plate's real number. That window is not just
@@ -87,7 +135,7 @@ export function MealBuilder() {
     if (idRef.current) return idRef.current
     if (!createRef.current) {
       createRef.current = mealBuilderApi
-        .create({ name: nameRef.current.trim() || NEW_NAME, servings: servingsRef.current })
+        .create({ name: nameRef.current.trim() || NEW_NAME, servings: servingsRef.current, isSaved: startSaved ?? false })
         .then((m) => {
           idRef.current = m.id
           return m.id
@@ -125,7 +173,8 @@ export function MealBuilder() {
         if (idStateRef.current !== mealId) {
           idStateRef.current = mealId
           setId(mealId)
-          navigate(`/meals/build/${mealId}`, { replace: true })
+          // The screen swaps its URL here; an embedded builder has none to swap.
+          onIdChange?.(mealId)
         }
       } catch {
         // Deliberately NOT gated on `seq`: a write that failed still failed, and
@@ -137,7 +186,7 @@ export function MealBuilder() {
         if (seq === seqRef.current) setBusy(false)
       }
     },
-    [ensureId, navigate, set],
+    [ensureId, onIdChange, set, startSaved],
   )
 
   // ── name ──────────────────────────────────────────────────────────────────
@@ -239,9 +288,11 @@ export function MealBuilder() {
   return (
     <div className="mb-shell">
       <header className="mb-head">
-        <button type="button" className="pill mb-back" onClick={() => navigate('/meals')}>
-          ‹ Meals
-        </button>
+        {onBack && (
+          <button type="button" className="pill mb-back" onClick={onBack}>
+            ‹ Meals
+          </button>
+        )}
         <div className="mb-head-b">
           <input
             className="mb-name"
@@ -262,7 +313,7 @@ export function MealBuilder() {
           dishes={dishes}
           persons={persons}
           addingRole={addingRole}
-          onOpenDish={(recipeId) => navigate(`/meals/recipe/${recipeId}`)}
+          onOpenDish={onOpenDish}
           onRemoveDish={removeDish}
           onAssignCook={assignCook}
           onPickRole={(role) => setAddingRole(role)}
@@ -294,11 +345,15 @@ export function MealBuilder() {
         busy={busy}
         onServings={changeServings}
         onToggleSaved={toggleSaved}
-        onAddToList={addToList}
-        onSchedule={() => setScheduling(true)}
+        // Inside a picker the destination is already decided, so the two actions
+        // that would take you somewhere else come off the bar entirely.
+        onAddToList={onUse ? undefined : addToList}
+        onSchedule={onUse ? undefined : () => setScheduling(true)}
         // A plate only has a cook route once it exists server-side; the bar hides
         // the button on an empty plate, which is the same condition.
-        onCook={() => meal && navigate(`/meals/meal/${meal.id}/cook`)}
+        onCook={onCook && meal ? () => onCook(meal.id) : undefined}
+        onUse={onUse ? () => meal && onUse(meal) : undefined}
+        useLabel={useLabel}
       />
 
       {scheduling && meal ? (

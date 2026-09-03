@@ -69,7 +69,10 @@ function DishRow({
 }: {
   dish: MealDish
   persons: Person[]
-  onOpen: () => void
+  // Absent when there is nowhere to open a dish TO — the plate builder embedded in
+  // the recipe picker has no route to send you to, and a row that looks tappable and
+  // does nothing is worse than one that doesn't invite the tap.
+  onOpen?: () => void
   onRemove: () => void
   onAssignCook: (personId: string | null) => void
   onDragDish: (e: React.DragEvent) => void
@@ -83,19 +86,23 @@ function DishRow({
           interactive content may not nest inside a button. The class already
           resets border/background/padding, so this renders identically. */}
       <div
-        role="button"
-        tabIndex={0}
-        // Named explicitly, else the accessible name is the row's whole text —
-        // which swallows the nested to-buy control and makes both unaddressable.
-        aria-label={`Open ${title}`}
+        {...(onOpen
+          ? {
+              role: 'button',
+              tabIndex: 0,
+              // Named explicitly, else the accessible name is the row's whole text —
+              // which swallows the nested to-buy control and makes both unaddressable.
+              'aria-label': `Open ${title}`,
+              onClick: onOpen,
+              onKeyDown: (e: React.KeyboardEvent) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  onOpen()
+                }
+              },
+            }
+          : {})}
         className="mb-dish-open"
-        onClick={onOpen}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault()
-            onOpen()
-          }
-        }}
       >
         <span className="mb-thumb">{dish.emoji ?? '🍽️'}</span>
         <span className="mb-dish-b">
@@ -167,7 +174,7 @@ export function MealBuilderPlate({
   dishes: MealDish[]
   persons: Person[]
   addingRole: PlateRole | null
-  onOpenDish: (recipeId: string) => void
+  onOpenDish?: (recipeId: string) => void
   onRemoveDish: (recipeId: string) => void
   onAssignCook: (recipeId: string, personId: string | null) => void
   onPickRole: (role: PlateRole) => void
@@ -228,7 +235,7 @@ export function MealBuilderPlate({
                 key={d.recipeId}
                 dish={d}
                 persons={persons}
-                onOpen={() => onOpenDish(d.recipeId)}
+                onOpen={onOpenDish ? () => onOpenDish(d.recipeId) : undefined}
                 onRemove={() => onRemoveDish(d.recipeId)}
                 onAssignCook={(personId) => onAssignCook(d.recipeId, personId)}
                 onDragDish={(e) => {

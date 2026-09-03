@@ -10,6 +10,12 @@ const RecipeEditorBody = lazy(() =>
   import('../RecipeEditor').then((m) => ({ default: m.RecipeEditorBody }))
 )
 
+// The Meal Builder's own body, so "＋ New meal" builds a plate with the real plate
+// editor rather than a second, lesser one. Lazy for the same reason as above.
+const MealBuilderBody = lazy(() =>
+  import('../MealBuilder').then((m) => ({ default: m.MealBuilderBody }))
+)
+
 // Shared meal-type vocabulary + the category→gradient mapping, used by the meal
 // planner grid and the recipe browser.
 export const MEALS = ['breakfast', 'lunch', 'dinner', 'snack'] as const
@@ -109,6 +115,11 @@ export function RecipeBrowser({
   // caller's onPick closure, so the new recipe is handed straight back through it —
   // the picker never navigates, and a draft plan behind it survives untouched.
   const [creating, setCreating] = useState(false)
+  // Building a PLATE from inside the picker. Same idea as `creating`, and the same
+  // reason it isn't a trip to the Meal Builder screen: the slot lives in the
+  // caller's closure, and navigating away would abandon it (and, in Weekly
+  // Planning, the session behind it).
+  const [building, setBuilding] = useState(false)
   const query = q.trim().toLowerCase()
   // Free-text search across title + metadata, then the meal-type filter chip.
   const matchesQuery = (r: Recipe) =>
@@ -136,6 +147,13 @@ export function RecipeBrowser({
         {!browse && (
           <button type="button" className="btn btn-primary picker-new" onClick={() => setCreating(true)}>
             ＋ New recipe
+          </button>
+        )}
+        {/* Gated exactly as the plate CARDS are: a caller with nowhere to schedule a
+            plate to doesn't advertise plates, so it must not offer to build one. */}
+        {onPickMeal && (
+          <button type="button" className="btn btn-ghost picker-new" onClick={() => setBuilding(true)}>
+            ＋ New meal
           </button>
         )}
       </div>
@@ -247,6 +265,27 @@ export function RecipeBrowser({
           onSelect={onPick ? () => onPick(preview) : undefined}
           selectLabel={onPick ? selectLabel ?? 'Select' : undefined}
         />
+      )}
+
+      {building && onPickMeal && (
+        <div className="modal-overlay">
+          <div className="modal-card picker-new-card picker-plate-card" onClick={(e) => e.stopPropagation()}>
+            <button type="button" className="modal-close" aria-label="Close" onClick={() => setBuilding(false)}>×</button>
+            <div className="wf-serif picker-new-h">New meal</div>
+            <Suspense fallback={<div className="muted" style={{ padding: 30 }}>Loading…</div>}>
+              <MealBuilderBody
+                // A plate built here goes in the library, like a recipe written here
+                // does — and being saved is what makes scheduling copy it.
+                startSaved
+                onUse={(meal) => {
+                  setBuilding(false)
+                  onPickMeal(meal)
+                }}
+                useLabel={selectLabel ?? 'Use this plate'}
+              />
+            </Suspense>
+          </div>
+        </div>
       )}
 
       {creating && onPick && (

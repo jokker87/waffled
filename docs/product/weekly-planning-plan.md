@@ -67,7 +67,15 @@ so it is written down here rather than discovered during the parity pass:
   omitted day is indistinguishable from "move it to now"; and the day is **not floored at
   today when editing**, because a carried-over task is dated in the past and is the likeliest
   thing anyone opens here.
-- **The recipe picker can write a new plate, not just a new recipe** — see the Meals step.
+- **The recipe picker can build a plate, not just write a recipe.** `RecipeBrowser` grew a
+  **＋ New meal** button beside ＋ New recipe, gated on `onPickMeal` exactly as the plate cards
+  are. It hosts `MealBuilderBody` — the Meal Builder screen split into a routing wrapper plus a
+  router-free body, the same split `RecipeEditor` / `RecipeEditorBody` already uses, and for the
+  same reason. The body's optional callbacks are render contracts: no `onOpenDish` means dish
+  rows aren't tappable (there is nowhere to open them to), and supplying `onUse` takes Schedule
+  and Add-plate-to-list off the bar, because inside a picker the destination is already decided
+  by the slot. New plates are created `isSaved: true` — the library is the symmetric reading of
+  "＋ New meal", and being saved is also what makes scheduling copy the plate.
 
 ## Schema (0099)
 

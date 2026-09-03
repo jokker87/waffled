@@ -324,6 +324,33 @@
   max-height: 90vh;
   overflow-y: auto;
 }
+/* The Meal Builder's own body, hosted over the picker. The builder is a full SCREEN:
+   it sizes itself to its container (`.mb-shell { height: 100% }`), scrolls its two
+   columns, and pins its stat bar to the bottom edge. Dropped into a card whose height
+   is its content, that collapses — so the card hands it a real height and lets the
+   body do the scrolling, rather than the card scrolling a bar that is supposed to stay
+   put. The builder's own 30px page gutters are pulled back to the card's padding so
+   the two don't stack, and the bar is bled to the card's edges, where its dark fill
+   reads as the card's foot instead of a floating slab. */
+.picker-plate-card {
+  padding-bottom: 0;
+  overflow: hidden;
+}
+.picker-plate-card .mb-shell {
+  height: min(72vh, 700px);
+}
+.picker-plate-card .mb-head {
+  padding: 0 0 10px;
+}
+.picker-plate-card .mb-body {
+  padding: 0 0 14px;
+  overflow-y: auto;
+}
+.picker-plate-card .mb-bar {
+  margin: 0 -30px;
+  border-radius: 0 0 22px 22px;
+}
+
 .picker-new-h {
   font-size: 20px;
   font-weight: 600;

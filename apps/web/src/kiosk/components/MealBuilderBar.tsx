@@ -26,6 +26,8 @@ export function MealBuilderBar({
   onAddToList,
   onSchedule,
   onCook,
+  onUse,
+  useLabel,
 }: {
   name: string
   servings: number
@@ -36,10 +38,20 @@ export function MealBuilderBar({
   busy: boolean
   onServings: (n: number) => void
   onToggleSaved: () => void
-  onAddToList: () => void
-  onSchedule: () => void
+  // The three actions are PRESENCE-GATED: each button exists only if it has somewhere
+  // to go. The builder screen passes all three; the plate builder embedded in the
+  // recipe picker passes none of them and an `onUse` instead — inside a picker the
+  // "now what?" is already answered by the slot that opened it, so a second
+  // destination could only take you somewhere you didn't ask to go.
+  onAddToList?: () => void
+  onSchedule?: () => void
   // Cook the whole plate — tabbed across its dishes with one shared timer dock.
-  onCook: () => void
+  onCook?: () => void
+  // "This plate is the answer" — hands the finished plate back to whatever opened
+  // the builder. Its label names the destination, which the caller knows and this
+  // bar doesn't.
+  onUse?: () => void
+  useLabel?: string
 }) {
   return (
     <footer className="mb-bar">
@@ -89,17 +101,26 @@ export function MealBuilderBar({
       <div className="mb-bar-actions">
         {/* Cooking is what you do with a plate TONIGHT; scheduling and shopping are
             what you do with it later. Hidden on an empty plate — nothing to cook. */}
-        {!empty && (
+        {onCook && !empty && (
           <button type="button" className="btn btn-ghost" disabled={busy} onClick={onCook}>
             <span aria-hidden>👨‍🍳</span> Cook this meal
           </button>
         )}
-        <button type="button" className="btn btn-ghost" disabled={empty || busy} onClick={onAddToList}>
-          Add plate to list
-        </button>
-        <button type="button" className="btn btn-primary" disabled={empty || busy} onClick={onSchedule}>
-          Schedule meal
-        </button>
+        {onAddToList && (
+          <button type="button" className="btn btn-ghost" disabled={empty || busy} onClick={onAddToList}>
+            Add plate to list
+          </button>
+        )}
+        {onSchedule && (
+          <button type="button" className="btn btn-primary" disabled={empty || busy} onClick={onSchedule}>
+            Schedule meal
+          </button>
+        )}
+        {onUse && (
+          <button type="button" className="btn btn-primary" disabled={empty || busy} onClick={onUse}>
+            {useLabel ?? 'Use this plate'}
+          </button>
+        )}
       </div>
     </footer>
   )
