@@ -1,0 +1,243 @@
+/* Weekly Planning · step 4 — Family night (FamilyNightStep.tsx).
+
+   Three rows and a theme line. The step's whole job is to be READ and left alone, so
+   this stylesheet stays small on purpose: one card, three rows, a face strip, and the
+   bar that appears when the week is called off. Anything the app already has — .field
+   for the theme input, .btn .btn-ghost for the two buttons — is used as-is rather than
+   restyled here.
+
+   Every colour is a token, so dark mode comes for free. Never hardcode a hex here. The
+   one inline colour in the TSX is a person's own colorHex, tinted (…22), which is the
+   same thing the Tasks step's faces do.
+
+   VOCABULARY
+     .wpfn                  the step body
+     .wpfn-card             the gathering; .skipped dims it without hiding it
+     .wpfn-h .wpfn-t .wpfn-rec .wpfn-when   who/what, how often, and this week's when
+     .wpfn-theme            the free-text theme line (the app's .field, on its side)
+     .wpfn-row              one part: emoji, label + suggestion, the faces
+     .wpfn-sug              "suggested · …" / "pinned for this week · …" / "nobody yet"
+     .wpfn-faces .wpfn-face tap a face to pin that part for this week (.on = who's on it)
+     .wpfn-note             the sentence explaining that the three are suggestions
+     .wpfn-skipbar          the week is off: what that did, and the way back
+*/
+
+.wpfn {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 4px 28px 26px;
+  overflow-y: auto;
+  height: 100%;
+}
+
+/* ── The gathering ───────────────────────────────────────────────────────────── */
+
+.wpfn-card {
+  background: var(--card);
+  border-radius: var(--r-lg);
+  box-shadow: var(--sh-2);
+  padding: 18px 20px 8px;
+  transition: opacity .16s ease;
+}
+/* Called off, not deleted: the week stays legible so Undo has something to undo. */
+.wpfn-card.skipped {
+  opacity: 0.5;
+}
+
+.wpfn-h {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.wpfn-t {
+  font-family: var(--serif);
+  font-size: 23px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.wpfn-rec {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--ink-2);
+  background: var(--panel);
+  border-radius: 999px;
+  padding: 3px 11px;
+}
+.wpfn-when {
+  margin-left: auto;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink-2);
+}
+
+/* ── The theme line ──────────────────────────────────────────────────────────── */
+/* The app's .field (kiosk.css) turned on its side: label beside the input rather than
+   above it, because this is one optional sentence and not a form. */
+
+.wpfn-theme.field {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.wpfn-theme.field > span {
+  margin-bottom: 0;
+  flex: none;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  font-size: 11.5px;
+}
+.wpfn-theme.field input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ── A part ──────────────────────────────────────────────────────────────────── */
+
+.wpfn-row {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 11px 2px;
+  border-top: 1px solid var(--hair);
+}
+.wpfn-emoji {
+  font-size: 24px;
+  line-height: 1;
+  flex: none;
+  width: 30px;
+  text-align: center;
+}
+.wpfn-main {
+  flex: 1;
+  min-width: 0;
+}
+.wpfn-label {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.wpfn-sug {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-3);
+  margin-top: 2px;
+}
+/* A pin is the one thing on this screen somebody actually decided — it reads as chosen,
+   not as another grey hint. */
+.wpfn-sug.pinned {
+  color: var(--person-3);
+}
+
+.wpfn-faces {
+  display: flex;
+  gap: 7px;
+  flex: none;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+/* Deliberately the Tasks step's face: same size, same tinted pill, same lift on hover —
+   tapping a face means the same thing on both screens. */
+.wpfn-face {
+  width: 34px;
+  height: 34px;
+  flex: none;
+  border: 1px solid var(--hair-2);
+  border-radius: 999px;
+  display: inline-grid;
+  place-items: center;
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+  transition: transform .12s ease, border-color .12s ease, box-shadow .12s ease;
+}
+.wpfn-face:hover:not(:disabled) {
+  transform: translateY(-2px);
+  border-color: var(--person-3);
+}
+.wpfn-face.on {
+  border-color: var(--person-3);
+  box-shadow: 0 0 0 2px var(--ring);
+}
+.wpfn-face:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+/* ── The sentence under it ───────────────────────────────────────────────────── */
+
+.wpfn-note {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--ink-2);
+  padding: 0 4px;
+}
+.wpfn-note b {
+  color: var(--ink);
+}
+
+/* ── The week is off ─────────────────────────────────────────────────────────── */
+
+.wpfn-skipbar {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  background: var(--panel);
+  border-radius: var(--r-lg);
+  padding: 14px 16px;
+}
+.wpfn-skip-emoji {
+  font-size: 22px;
+  line-height: 1;
+  flex: none;
+}
+.wpfn-skip-main {
+  flex: 1;
+  min-width: 0;
+}
+.wpfn-skip-t {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.wpfn-skip-s {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-2);
+  line-height: 1.45;
+  margin-top: 2px;
+}
+
+.wpfn-err {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--danger);
+  padding: 0 4px;
+}
+
+/* ── Phone ───────────────────────────────────────────────────────────────────── */
+/* The same three rows, each becoming two lines: emoji + label + suggestion, then the
+   faces indented under it. Nothing is dropped — a narrow screen still gets the whole
+   decision. */
+
+@media (max-width: 620px) {
+  .wpfn {
+    padding: 4px 16px 22px;
+  }
+  .wpfn-row {
+    flex-wrap: wrap;
+  }
+  .wpfn-faces {
+    width: 100%;
+    justify-content: flex-start;
+    padding-left: 43px; /* under the label, clear of the emoji gutter */
+  }
+  .wpfn-when {
+    margin-left: 0;
+    width: 100%;
+  }
+}
