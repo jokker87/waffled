@@ -11,9 +11,10 @@
 //      households.settings.familyNight. Next week must come back on rotation.
 //   2. "which is what shifts next week's turn" — the pin materializes the occurrence,
 //      and the occurrence COUNT is the rotation's clock, so next week advances.
-//   3. "without advancing the rotation or touching the recurring calendar event" — the
-//      calendar half holds; the rotation half DOES NOT, and the last describe in this
-//      file pins down that gap so it isn't rediscovered. See the comment there.
+//   3. "without touching the recurring calendar event" — which holds. The design's
+//      draft also said "without advancing the rotation"; that half was settled the other
+//      way as a product call (a skipped week takes its turn), and the last describe in
+//      this file now pins the RULE rather than a gap. See the comment there.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from './helpers/pg'
 import jwt from 'jsonwebtoken'
@@ -321,14 +322,15 @@ describe('planning · familyNight · calling the week off', () => {
   })
 
   // KNOWN GAP, pinned down deliberately. The design's third requirement is "skipping
-  // marks the occurrence skipped WITHOUT ADVANCING THE ROTATION". The shipped module
-  // can't express that: rotationIndex() in modules/familyNight/familyNight.ts counts
-  // every non-deleted occurrence for the household regardless of status, so a called-off
-  // week ticks the clock exactly like a held one. The fix is one predicate
-  // (`and status <> 'skipped'`) in a file this step does not own, so this test states
-  // what the module ACTUALLY does — and will go red the day somebody fixes it, which is
-  // the point.
-  it('…but a skipped week still advances the rotation (see comment: not this step\'s to fix)', async () => {
+  // marks the occurrence skipped WITHOUT ADVANCING THE ROTATION". That half of the
+  // sentence was settled the OTHER WAY as a product call: a skipped week takes its turn.
+  //
+  // The reasoning, so this isn't relitigated as a bug a third time — if a skipped week
+  // cost nothing, the same person would be up again next week, and again the week after,
+  // for as long as the family kept skipping. Nobody did the part; the turn passed. So
+  // this test pins the RULE, and `rotationIndex()` must keep counting every occurrence
+  // regardless of status.
+  it('a skipped week still takes its turn — the intended rule, not a gap', async () => {
     // Asserted as the SPECIFIC shift rather than "something changed": this describe runs
     // after five others that write config and occurrences, and a vague assertion would
     // quietly pass on an unrelated change to any of them.

@@ -27,11 +27,16 @@ import '../../../styles/planning-familyNight.css'
 //   · Skip this week → status 'skipped' on the same occurrence. It calls off the
 //     GATHERING, not the recurring calendar event behind it, which is left alone.
 //
-// KNOWN GAP, so nobody re-derives it from scratch: the module's rotation is a COUNT of
-// occurrences, not a history of who did what, and it doesn't exclude skipped ones. So a
-// week called off here still ticks the rotation forward — the design says it shouldn't,
-// and the fix is one predicate in modules/familyNight/familyNight.ts, which this step
-// does not own. The copy below is careful not to promise otherwise.
+// A SKIPPED WEEK STILL TAKES ITS TURN, and that is the intended rule — settled as a
+// product call after it was raised as a bug. The module's rotation is a COUNT of
+// occurrences and does not exclude skipped ones, so calling a week off moves everybody
+// on a place: nobody did the part, but the turn passed. The alternative — a skipped week
+// costing nothing — means the same person is up again next week and again the week after
+// for as long as the family keeps skipping, which is the worse of the two behaviours.
+//
+// So do NOT "fix" `rotationIndex()` to exclude skipped occurrences. The skip bar below
+// says out loud that the turn moved on, because a rotation that shifts silently is the
+// part that would actually confuse somebody.
 
 interface StepState {
   key: string
@@ -434,8 +439,8 @@ function Body(p: StepBodyProps) {
           <div className="wpfn-skip-main">
             <div className="wpfn-skip-t">Skipped this week</div>
             <div className="wpfn-skip-s">
-              The gathering is marked skipped
-              {b.onCalendar && ', and the recurring calendar event is left alone'}.
+              The gathering is marked skipped{b.onCalendar && ', and the recurring calendar event is left alone'}.
+              Everyone&rsquo;s turn still moves on, so next week is the next person up.
             </div>
           </div>
           <button

@@ -282,16 +282,46 @@ Creating one is a SERVER call (`createOccurrenceEvent`, modelled on the existing
 events LOCALLY first and PowerSync uploads afterwards, so an id handed back by the client
 may not exist server-side yet and the link would 404 on a race nobody could reproduce.
 
+### Where a kid's focus is visible, and why it is a read
+
+The Kids step's answers live in `planning_session_steps.data.kids` and were read by
+exactly two things: the step itself, which shows them back, and the recap. So a child said
+what their one thing was on planning night and never saw it again — asked directly during
+validation ("where would I be able to see that focus outside of the weekly planning?").
+
+It surfaces on **that child's Family profile** (`/person/:id`), which is where "what
+they're working on" already lives beside their goals, streak and stars — rather than
+becoming a fourth place to look. `focusForPerson()` in the Kids step is the read;
+`GET /api/persons/:id/overview` calls it behind a `weeklyPlanning` module gate.
+
+Two things about it worth keeping:
+
+- **It is a READ, never a copy.** The session record stays the single place the answer is
+  stored, exactly as the recap treats its own lines. Nothing to keep in sync, and editing
+  the answer changes both screens at once.
+- **The week is found by CONTAINMENT** (`week_start <= today < week_start + 7`), not by
+  computing a boundary in the query. A session run on Sunday plans the week *ahead*, so by
+  Wednesday the focus somebody is living with belongs to the session whose week contains
+  today — and containment gets that right without needing to know how the household cuts a
+  week (`week_start` is per-household SUNDAY or MONDAY, and a boundary computed here could
+  disagree with the one the session was created under).
+
+The card is presence-gated: module off, no session covering this week, and nobody answered
+all collapse to `null`, because all three mean "nothing to say" to a reader.
+
 ### What wave 2 found, and what is still open
 
 Building a step against a shipped module is also an audit of it. Three findings survived:
 
-- **Skipping a family night advances the rotation.** `rotationIndex()` counts every
-  occurrence regardless of status, so calling a week off costs somebody their turn — which
-  contradicts the design ("marks the occurrence skipped *without advancing the rotation*").
-  The fix is one predicate in `familyNight.ts`, outside the step's seams and visible on the
-  Today card, so it was left as a product call. `weekly-planning-familyNight.integration.test.ts`
-  pins the current behaviour to a specific shift, so it goes red the day someone fixes it.
+- **Skipping a family night advances the rotation — SETTLED, and it stays.** `rotationIndex()`
+  counts every occurrence regardless of status, so calling a week off moves everybody on a
+  place. The design's draft said the opposite ("marks the occurrence skipped *without
+  advancing the rotation*"); raised as a bug, it was settled the other way as a product
+  call. If a skipped week cost nothing, the same person would be up again next week and
+  again the week after, for as long as the family kept skipping — nobody did the part, but
+  the turn passed. The skip bar now says the turn moved on, since a rotation that shifts
+  silently is the confusing part. `weekly-planning-familyNight.integration.test.ts` pins
+  the rule; **do not add `and status <> 'skipped'` to `rotationIndex()`.**
 - **The rotation is positional, not historical** — it never reads `family_night_assignments`,
   so pinning someone who was already next means they can come up twice. The mock's line
   "worked out from who did what last time" was rewritten to "each part taken in turn, in your

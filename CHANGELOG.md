@@ -15,6 +15,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A kid's "one thing" from planning night now shows on their profile.** Whatever they
+  picked at Weekly Planning's Kids step — a goal they're behind on, an overdue chore, or
+  something in their own words — appears on their Family profile as **This week's one
+  thing**, alongside their goals and streak, so they see it during the week rather than
+  only on the night they said it. It's read from the planning session rather than copied,
+  so changing the answer changes both screens at once, and the card is simply absent when
+  there's nothing to show.
+
 - **Family Night can say what each part actually is, and put this week on the calendar.**
   Activity, Treat and Check-in each get their own line to write what it's going to be —
   "charades, kids vs parents", "the good ice cream" — beside the person whose turn it is.

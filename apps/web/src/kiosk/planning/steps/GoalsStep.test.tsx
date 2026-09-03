@@ -232,6 +232,12 @@ describe('GoalsStep · the group card says what the group is', () => {
     renderStep()
     await waitFor(() => expect(screen.getAllByRole('tab')).toHaveLength(3))
     fireEvent.click(tab('Mom & Dad'))
+    // Wait for the tab to actually BE selected before looking at the panel. Clicking and
+    // going straight to `findByText` raced the re-render and failed under parallel load
+    // — the tabs were in the DOM, the panel's content had not caught up, and the 1s
+    // default ran out. Asserting the state change first makes the wait about the thing
+    // that has to happen rather than about how fast the machine is.
+    await waitFor(() => expect(tab('Mom & Dad')).toHaveAttribute('aria-selected', 'true'))
     expect(await screen.findByText('private · just the two of you')).toBeInTheDocument()
     fireEvent.click(tab('Lottie'))
     // The age comes from the member's own birthday; with none on file it's omitted.

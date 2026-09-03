@@ -101,7 +101,14 @@ export interface PlanningFamilyNightBoard {
 // How many gatherings have happened before `date`. The occurrence COUNT is the whole of
 // the rotation's memory — it never reads who actually did what — so the rotation only
 // moves when a week is written down, and a week is only written down when somebody
-// touches it. That is precisely why "tap a face and it's pinned for this week only,
+// touches it.
+//
+// SKIPPED WEEKS COUNT, deliberately: a called-off week takes its turn, so the next
+// person is up next week. Excluding them would mean the same person is up again every
+// week for as long as the family keeps skipping. Raised once as a bug and settled as the
+// intended rule — do not add `and status <> 'skipped'` here.
+//
+// That is precisely why "tap a face and it's pinned for this week only,
 // which is what shifts next week's turn" is a true sentence.
 async function rotationIndex(householdId: string, date: string): Promise<number> {
   const { rows } = await query<{ n: string }>(
