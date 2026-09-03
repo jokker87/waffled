@@ -150,6 +150,8 @@ export interface ShoppingTrip {
 // check rather than a lucky one: scheduling a saved plate COPIES it
 // (POST /api/meals/:id/schedule → copyMeal), so re-picking the same library plate
 // writes a DIFFERENT meal_id and correctly reads as a change.
+// (If scheduling ever becomes copy-on-write — see the roadmap — that last sentence stops
+// holding, but the check itself stays correct: it just loses its second belt.)
 export interface FilledNight {
   date: string
   entryId: string

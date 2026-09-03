@@ -468,6 +468,23 @@ Legend: ✅ done · 🟡 partial / in progress · 🚧 planned · ⛔ dropped (s
   ignores it entirely; re-planning should preserve it. Un-gated (collaborative/attribution,
   like list authorship — no capability needed to volunteer or reassign a cook).
 
+- **Scheduled plates should reference the library plate, not snapshot it (copy-on-write).**
+  Scheduling a saved plate today **copies** it (`POST /api/meals/:id/schedule` →
+  `copyMeal`), so the night points at a private duplicate. Recipe edits still flow through —
+  the copy holds `meal_recipes.recipe_id` references and the grocery rebuild reads
+  ingredients live — but **editing the saved plate itself never reaches nights already
+  scheduled from it**: add a fourth side to "BBQ Sunday" and last Sunday, and next Sunday,
+  keep the three they had. That leaves two mental models for one slot, which is the real
+  problem: a scheduled *recipe* is a reference, a scheduled *plate* is a snapshot. The fix is
+  to schedule by reference and copy only when someone edits **that night** (swap a side,
+  change the cook, adjust servings) — the behavior people expect by default, while still
+  protecting the template from a one-Tuesday tweak. Two costs to accept up front: editing a
+  plate then also changes **past** nights still using it verbatim (and a grocery rebuild on an
+  old week would follow), and the weekly-planning undo receipt's `mealId` check gets weaker,
+  because re-picking the same library plate would no longer write a fresh `meal_id` — it
+  stays correct, just no longer belt-and-braces. Bounding it to future weeks needs a
+  "has this night been touched" flag; one rule is better than two.
+
 - **Apple Health → goals — remaining follow-ons (iPhone).** Tiers 0–2 shipped (see **Done** —
   the full metric set incl. rings/mindful/mood, the **four distance metrics** (walk + run,
   cycling, swimming, wheelchair — fractional, mi/km per device region), **workout-type metrics**
