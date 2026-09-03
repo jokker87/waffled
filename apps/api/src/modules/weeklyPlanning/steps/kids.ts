@@ -241,8 +241,15 @@ async function kidsOf(householdId: string): Promise<KidPerson[]> {
 // their personal-visibility events to whoever happens to be running the session.
 async function weekEvents(householdId: string, weekStart: string, viewerPersonId: string | null) {
   const rows = await rangeEvents(householdId, weekStart, addDays(weekStart, 6), viewerPersonId)
-  return rows.map(presentEvent)
+  return rows.map(presentEvent).filter((e) => !MIRROR_ORIGINS.has(e.origin ?? ''))
 }
+
+// Planning a dinner mirrors it onto the calendar as a real event with the household on
+// it, so without this every kid's week read "Dinner · chicken, Dinner · Spaghetti, …"
+// and their look-forward-to options became the meal plan. Nobody is looking forward to
+// Wednesday's spaghetti, and the Meals step already owns the week's dinners. The same
+// exclusion `goal-calendar.ts` makes when it picks calendar events for a goal.
+const MIRROR_ORIGINS = new Set(['meal_plan', 'meal_prep'])
 
 type PresentedEvent = ReturnType<typeof presentEvent>
 

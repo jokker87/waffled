@@ -415,6 +415,29 @@ describe('planning · kids · the look-forward-to options come from their week',
     // A countdown event is one the family is ALREADY looking forward to.
     expect(l.forwardOptions[0].emoji).toBe('🎉')
   })
+
+  // Planning a dinner MIRRORS it onto the calendar as a real event with everyone on
+  // it (origin 'meal_plan'), so every kid's week filled up with "Dinner · chicken"
+  // and the look-forward-to options became the meal plan. Nobody is looking forward
+  // to Wednesday's spaghetti, and the Meals step already owns the week's dinners.
+  // The same exclusion `goal-calendar.ts` makes when it picks events for a goal.
+  it('leaves the meal plan off a kid’s week and out of what they look forward to', async () => {
+    const dinnerId = json(await call('POST', '/api/events', kevin, {
+      title: 'Dinner · chicken', startsAt: at(2), participantIds: [wallyId],
+    })).event.id
+    // Stamp it the way syncMealEventForEntry stamps its mirror.
+    const db = (await import('../src/platform/db')).query
+    await db("update events set origin = 'meal_plan' where id = $1", [dinnerId])
+
+    const w = await kid('Wally')
+    expect(w.week.map((e) => e.title)).not.toContain('Dinner · chicken')
+    expect(labels(w.forwardOptions)).not.toContain('Dinner · chicken')
+    // The real ones still stand, so this is an exclusion and not an empty read.
+    expect(labels(w.forwardOptions).length).toBeGreaterThan(0)
+
+    // Soft delete, the way the app does — a hard delete trips event_participants' FK.
+    await db('update events set deleted_at = now() where id = $1', [dinnerId])
+  })
 })
 
 describe('planning · kids · answering, and reading it back', () => {
