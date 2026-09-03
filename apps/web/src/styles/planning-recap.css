@@ -70,11 +70,14 @@
 .wpr-card {
   min-width: 0;
   background: var(--card); border: 1px solid var(--hair-2); border-radius: var(--r-lg);
-  padding: 4px 16px 8px;
+  /* 4px, not 16px: the header and the rows carry the remaining 12px themselves so a
+     hovered row can paint a fill that is wider than its own text. Text still sits 16px
+     from the card's edge. */
+  padding: 4px 4px 8px;
 }
 .wpr-h {
   display: flex; align-items: baseline; gap: 8px;
-  padding: 12px 0 8px; border-bottom: 1px solid var(--hair-2);
+  padding: 12px 12px 8px; border-bottom: 1px solid var(--hair-2);
   font-size: 13px; font-weight: 750; letter-spacing: -0.01em; color: var(--ink);
 }
 .wpr-h span { font-size: 12px; font-weight: 650; color: var(--ink-3); }
@@ -88,12 +91,12 @@
 .wpr-row {
   display: grid; grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: baseline; gap: 10px;
-  padding: 11px 0; border-bottom: 1px solid var(--hair-2);
+  padding: 11px 12px; border-bottom: 1px solid var(--hair-2);
   color: inherit; text-decoration: none;
 }
 .wpr-row:last-child { border-bottom: 0; }
 a.wpr-row { cursor: pointer; }
-a.wpr-row:hover { background: var(--panel); border-radius: var(--r-sm); }
+a.wpr-row:hover { background: var(--panel); border-radius: var(--r-md); }
 
 /* The module the decision lives in. It is the whole argument of the card, so it reads
    as a label rather than as a whisper. */

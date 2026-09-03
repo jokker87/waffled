@@ -447,10 +447,15 @@ describe('Horizon scan · the park bar', () => {
   it('says out loud that the ＋ and the bar are two different things', async () => {
     mockApi()
     renderStep()
-    expect(
-      await screen.findByText(/adds a real event to the calendar/i)
-    ).toBeInTheDocument()
-    expect(screen.getByText(/parks a note that isn’t an event yet/i)).toBeInTheDocument()
+    // Asserting the DISTINCTION, not the sentence: the first wording ("＋ on a day adds a
+    // real event · the bar above parks a note that isn't an event yet") named two
+    // mechanisms and was reported as unreadable. What has to survive a rewrite is that
+    // the screen still tells you one writes a calendar event, the other does not, and
+    // where a parked note comes back.
+    const note = await screen.findByText(/real\s+calendar\s+event/i)
+    expect(note).toBeInTheDocument()
+    expect(note.textContent).toMatch(/stays off the calendar/i)
+    expect(note.textContent).toMatch(/step you tag it for/i)
   })
 })
 

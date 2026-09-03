@@ -282,8 +282,9 @@ function Body({ weekStart, sessionId, setDecisionData, refresh, busy }: StepBody
       )}
 
       <p className="wph-note">
-        <b>Two different things:</b> ＋ on a day <b>adds a real event to the calendar</b> · the bar above{' '}
-        <b>parks a note that isn&rsquo;t an event yet</b>.
+        <b>Know the day it lands?</b> Tap that day on the month above and add it — you get a real
+        calendar event. <b>Only know it&rsquo;s coming?</b> Park it in the bar: it stays off the
+        calendar, and comes back at whichever step you tag it for.
       </p>
 
       {parked.length > 0 && (
