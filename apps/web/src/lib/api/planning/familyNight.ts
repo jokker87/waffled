@@ -32,6 +32,12 @@ export interface PlanningFamilyNightPart {
   // False ⇒ the rotation never auto-fills this part (a fixed host, say). It still takes
   // a pin: "nobody suggested" is not "nobody allowed".
   rotates: boolean
+  /**
+   * What this part IS this week ("the good ice cream", "charades") — a different question
+   * from whose turn it is. Null = nobody has said. Writing one does NOT pin the person:
+   * the rotation's suggestion stands until somebody names a face.
+   */
+  detail: string | null
   personId: string | null
   personName: string | null
   // True ⇒ somebody chose this, for this week, and it is written on the occurrence.
@@ -52,6 +58,14 @@ export interface PlanningFamilyNightBoard {
   // There is a recurring calendar event behind this. Only then may the step promise
   // that calling one week off leaves it alone.
   onCalendar: boolean
+  /**
+   * THIS week's own calendar event, if the gathering has adopted one — separate from
+   * `onCalendar`'s standing series. A household can have the series and no answer for
+   * this week, or "it's the movie night already on Friday" and no series at all.
+   */
+  eventId: string | null
+  eventTitle: string | null
+  eventWhen: string | null
   members: PlanningFamilyNightMember[]
   parts: PlanningFamilyNightPart[]
 }
@@ -81,6 +95,28 @@ export const planningFamilyNightApi = {
   // undoable, and "planned" is the module's own word for a night that is still on.
   setStatus: (date: string, status: 'planned' | 'skipped') =>
     alsoPlanning(familyNightApi.saveOccurrence({ date, status })),
+
+  // What a part IS. Sent WITHOUT `personId`, on purpose: the server reads presence, so
+  // including it would turn "I named the treat" into "…and nobody has it". '' clears,
+  // for the same reason the theme line clears with '' — a null means "leave it alone".
+  setDetail: (date: string, partId: string, detail: string) =>
+    alsoPlanning(familyNightApi.saveOccurrence({ date, assignments: [{ partId, detail }] })),
+
+  // Point this week's gathering at an event that already exists (or `null` to unlink,
+  // which leaves the event on the calendar). There is no create-an-event call here: the
+  // step opens the app's own EventModal and adopts what it writes, so there stays one
+  // way to make an event.
+  linkEvent: (date: string, eventId: string | null) =>
+    alsoPlanning(familyNightApi.saveOccurrence({ date, eventId })),
+
+  // "Add this week to the calendar": ONE call that creates the event for the gathering's
+  // date and links it, server-side. Not a create-then-adopt round trip — the web app
+  // writes events locally first (PowerSync uploads afterwards), so an id from here may
+  // not exist server-side yet and the link would 404 on an unreproducible race. Returns
+  // the existing link untouched if the week already has one, so a double tap can't leave
+  // a stray event on the calendar.
+  addEvent: (date: string) =>
+    alsoPlanning(familyNightApi.saveOccurrence({ date, createEvent: true })),
 }
 
 // The crumb this step hands the session record: what it DECIDED, not a copy of the

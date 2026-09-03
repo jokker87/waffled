@@ -70,7 +70,14 @@ const addDays = (iso: string, n: number): string =>
 const at = (day: string, time: string) => `${day}T${time}:00-05:00`
 
 interface Group { key: string; label: string; headline: string; detail: string; count: number; stepKey: string | null }
-interface Day { date: string; meal: string | null; cook: string | null; events: { title: string }[]; more: number }
+// The event carries the COLOUR INPUTS, never a resolved colour: `eventColor` is the
+// client's decision and lives next to the calendar the strip has to match.
+interface DayEvent {
+  id: string; title: string; when: string
+  personId: string | null; personName: string | null; personColor: string | null
+  participantIds: string[]
+}
+interface Day { date: string; meal: string | null; cook: string | null; events: DayEvent[]; more: number }
 interface LastCall { id: string; note: string; detail: string | null }
 interface LeftAlone { key: string; label: string; detail: string; badge: string; stepKey: string | null }
 interface Recap {

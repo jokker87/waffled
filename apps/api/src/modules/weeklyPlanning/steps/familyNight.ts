@@ -14,7 +14,9 @@
 //
 // A pin is therefore scoped to an occurrence (a date), never to households.settings —
 // which is exactly what makes "pinned for this week only" true rather than aspirational.
+import { DateTime } from 'luxon'
 import { query } from '../../../platform/db'
+import { householdTz } from '../../chores/chores.service'
 import {
   getConfig,
   listMembers,
@@ -37,6 +39,13 @@ export interface PlanningFamilyNightPart {
   // False ⇒ the rotation never auto-fills this part (a fixed host, say). It still takes
   // a pin — "nobody suggested" is not "nobody allowed".
   rotates: boolean
+  /**
+   * What this part IS this week ("the good ice cream", "charades") — the answer to a
+   * different question from `personId`, which is whose turn it is. Null = nobody has
+   * said. Writing one does NOT pin the person: the rotation's suggestion stands until
+   * somebody actually names a face.
+   */
+  detail: string | null
   personId: string | null
   personName: string | null
   // True ⇒ somebody chose this, for this week, and it is stored on the occurrence.
@@ -63,6 +72,17 @@ export interface PlanningFamilyNightBoard {
   // promise, truthfully, that calling one week off leaves that event alone — a promise
   // that would be a lie in a household that never put it on the calendar.
   onCalendar: boolean
+  /**
+   * THIS week's own calendar event, if the gathering has adopted one. Distinct from
+   * `onCalendar`, which reports the STANDING recurring series set in Settings: a
+   * household can have the series and no answer for this week, or an answer for this
+   * week ("it's the movie night already on Friday") and no series at all.
+   */
+  eventId: string | null
+  /** The adopted event's title, so the step can name it without a second fetch. */
+  eventTitle: string | null
+  /** Its start, household-local ("Friday 7:00 PM"), composed here for web and iOS alike. */
+  eventWhen: string | null
   members: PlanningFamilyNightMember[]
   parts: PlanningFamilyNightPart[]
 }
@@ -116,6 +136,7 @@ interface OccRow {
   id: string
   theme: string | null
   status: string
+  event_id: string | null
 }
 
 const STATUSES = new Set(['planned', 'done', 'skipped'])
@@ -130,20 +151,36 @@ export async function getFamilyNightBoard(householdId: string, weekStart: string
   const [idx, occ] = await Promise.all([
     rotationIndex(householdId, date),
     query<OccRow>(
-      `select id, theme, status from family_night_occurrences
+      `select id, theme, status, event_id from family_night_occurrences
         where household_id = $1 and date = $2 and deleted_at is null`,
       [householdId, date]
     ).then((r) => r.rows[0] ?? null),
   ])
 
-  const stored = new Map<string, string | null>()
+  // `person_set`, not "a row exists": a row written to hold only a DETAIL makes no claim
+  // about whose turn it is, so the rotation's suggestion has to survive it. Mirrors
+  // `resolveAssignments` in the module — see the header note about keeping the two in
+  // step.
+  const stored = new Map<string, { personId: string | null; personSet: boolean; detail: string | null }>()
   if (occ) {
-    const { rows } = await query<{ part_id: string; person_id: string | null }>(
-      `select part_id, person_id from family_night_assignments where occurrence_id = $1`,
+    const { rows } = await query<{ part_id: string; person_id: string | null; person_set: boolean; detail: string | null }>(
+      `select part_id, person_id, person_set, detail from family_night_assignments where occurrence_id = $1`,
       [occ.id]
     )
-    for (const r of rows) stored.set(r.part_id, r.person_id)
+    for (const r of rows) stored.set(r.part_id, { personId: r.person_id, personSet: r.person_set, detail: r.detail })
   }
+
+  // The adopted event, named so the step can say WHICH event this week points at without
+  // a second round trip. Read through the events module's own presenter rather than a
+  // bare select, so a recurring master and a one-off read the same way.
+  const linked = occ?.event_id
+    ? await query<{ title: string; starts_at: Date; all_day: boolean }>(
+        `select title, starts_at, all_day from events
+          where household_id = $1 and id = $2 and deleted_at is null`,
+        [householdId, occ.event_id]
+      ).then((r) => r.rows[0] ?? null)
+    : null
+  const tz = await householdTz(householdId)
 
   const suggested = suggest(config, members, idx)
   const nameOf = (id: string | null) => (id ? members.find((m) => m.id === id)?.name ?? null : null)
@@ -159,15 +196,26 @@ export async function getFamilyNightBoard(householdId: string, weekStart: string
     theme: occ?.theme ? occ.theme : null,
     status: (occ && STATUSES.has(occ.status) ? occ.status : 'planned') as PlanningFamilyNightBoard['status'],
     onCalendar: !!config.eventId,
+    // Null when the event was deleted since: `on delete set null` means the link goes
+    // with it, so the step reports "not on the calendar" rather than a dangling id.
+    eventId: linked ? occ!.event_id : null,
+    eventTitle: linked?.title ?? null,
+    eventWhen: linked
+      ? DateTime.fromJSDate(new Date(linked.starts_at), { zone: tz }).toFormat(
+          linked.all_day ? 'cccc' : 'cccc h:mm a'
+        )
+      : null,
     members: members.map((m) => ({ id: m.id, name: m.name, avatarEmoji: m.emoji, colorHex: m.color })),
     parts: config.parts.map((part) => {
-      const pinned = stored.has(part.id)
-      const personId = pinned ? stored.get(part.id)! : suggested.get(part.id) ?? null
+      const row = stored.get(part.id) ?? null
+      const pinned = !!row?.personSet
+      const personId = pinned ? row!.personId : suggested.get(part.id) ?? null
       return {
         partId: part.id,
         label: part.label,
         emoji: part.emoji,
         rotates: part.rotates,
+        detail: row?.detail ?? null,
         personId,
         personName: nameOf(personId),
         pinned,

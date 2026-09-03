@@ -1,11 +1,13 @@
 // Family Night — HTTP routes (/api/family-night). Logic in familyNight.ts.
 import createAPI, { type Request, type Response } from 'lambda-api'
 import { moduleRoutes } from '../../platform/route-guards'
+import { query } from '../../platform/db'
 import {
   getView,
   getConfig,
   setConfig,
   upsertOccurrence,
+  createOccurrenceEvent,
   scheduleEvent,
   unscheduleEvent,
   type FamilyNightConfig,
@@ -17,6 +19,8 @@ type Api = ReturnType<typeof createAPI>
 
 // Every route here is gated by the optional `familyNight` module (403 when off).
 const { tenantRoute, adminRoute } = moduleRoutes('familyNight')
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export function registerFamilyNightRoutes(api: Api): void {
   // The card/settings read: config + members + the upcoming gathering with
@@ -51,20 +55,57 @@ export function registerFamilyNightRoutes(api: Api): void {
 
   // Materialize / update the gathering for a date and persist assignments.
   api.post('/api/family-night/occurrence', tenantRoute(async (tenant, req: Request, res: Response) => {
-    const body = (req.body ?? {}) as Partial<UpsertOccurrenceInput>
+    const body = (req.body ?? {}) as Partial<UpsertOccurrenceInput> & { createEvent?: unknown }
     if (!body.date) return res.status(400).json({ error: 'BadRequest', message: 'date is required' })
+    // PRESENCE IS THE MESSAGE, so each field is copied only when the caller sent it.
+    // `{ partId, personId: a.personId ?? null }` — which is what this did — turns "I only
+    // named the treat" into "…and nobody has it", un-assigning whoever did. `personId`
+    // and `detail` answer different questions and are carried independently.
     const assignments = Array.isArray(body.assignments)
       ? body.assignments
           .filter((a) => a && typeof a.partId === 'string')
-          .map((a) => ({ partId: a.partId, personId: a.personId ?? null }))
+          .map((a) => ({
+            partId: a.partId,
+            ...('personId' in a ? { personId: a.personId ?? null } : {}),
+            ...('detail' in a ? { detail: typeof a.detail === 'string' ? a.detail : null } : {}),
+          }))
       : undefined
+
+    // The event this week's gathering points at. Checked against the household before it
+    // is stored: the column is a real FK, so a bad id would 500 rather than 400, and an
+    // id from ANOTHER household would otherwise link across the tenant boundary.
+    let eventId: string | null | undefined
+    if ('eventId' in body) {
+      if (body.eventId === null) eventId = null
+      else if (typeof body.eventId !== 'string' || !UUID_RE.test(body.eventId)) {
+        return res.status(400).json({ error: 'BadRequest', message: 'eventId must be an event id or null' })
+      } else {
+        const { rows } = await query<{ id: string }>(
+          `select id from events where household_id = $1 and id = $2 and deleted_at is null`,
+          [tenant.householdId, body.eventId]
+        )
+        if (!rows[0]) return res.status(404).json({ error: 'NotFound', message: 'no such event' })
+        eventId = rows[0].id
+      }
+    }
+
     const result = await upsertOccurrence(tenant, {
       date: body.date,
       theme: body.theme,
       notes: body.notes,
       status: body.status,
+      ...(eventId !== undefined ? { eventId } : {}),
       assignments,
     })
+
+    // "Add this week to the calendar" — creates a one-off event for the date and links
+    // it, server-side (see createOccurrenceEvent for why it cannot be a client round
+    // trip). Runs AFTER the upsert so a theme sent in the same call names the event.
+    // Ignored when the caller also named an event explicitly: they already said which.
+    if (body.createEvent === true && eventId === undefined) {
+      const made = await createOccurrenceEvent(tenant, body.date)
+      return { ...result, eventId: made.eventId }
+    }
     return result
   }))
 

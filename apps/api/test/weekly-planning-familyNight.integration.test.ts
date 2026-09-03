@@ -53,11 +53,18 @@ const json = (r: { body: string }) => JSON.parse(r.body)
 
 interface BoardPart {
   partId: string; label: string; emoji: string; rotates: boolean
+  // What the part IS this week, independent of whose turn it is.
+  detail: string | null
   personId: string | null; personName: string | null; pinned: boolean
 }
 interface Board {
   weekStart: string; date: string; dayOfWeek: number; time: string
-  occurrenceId: string | null; theme: string | null; status: string; onCalendar: boolean
+  occurrenceId: string | null; theme: string | null; status: string
+  // `onCalendar` is the STANDING recurring series (settings.familyNight.eventId);
+  // `eventId` is the event THIS week's gathering points at. A household can have one
+  // without the other.
+  onCalendar: boolean
+  eventId: string | null; eventTitle: string | null; eventWhen: string | null
   members: { id: string; name: string; avatarEmoji: string | null; colorHex: string | null }[]
   parts: BoardPart[]
 }
@@ -330,5 +337,136 @@ describe('planning · familyNight · calling the week off', () => {
     await call('POST', '/api/family-night/occurrence', kevin, { date: w2.date, status: 'skipped' })
     // Two now — the called-off week counted, and everybody moved on a place.
     expect(whoOn(await board(W3))).toEqual(['Wally', 'Lottie', 'Kevin'])
+  })
+})
+
+describe('planning · familyNight · a part can say what it actually is', () => {
+  // "for the activity or treat or check-in, I think we need to be able to add fields to
+  // that so that I can write out what the activity is or what the treat's going to be."
+  //
+  // The tables recorded only WHO had a part. `occurrences.notes` is one note for the
+  // whole gathering, so three parts sharing it means three answers in one field with no
+  // way to render each beside the person who has it — hence `assignments.detail`.
+  it('keeps a detail per part, beside the person, and can blank one without blanking the others', async () => {
+    const w0 = await board(W0)
+    const kelly = people.find((p) => p.name === 'Kelly')!
+    await call('POST', '/api/family-night/occurrence', kevin, {
+      date: w0.date,
+      assignments: [
+        { partId: 'activity', personId: kelly.id, detail: 'Charades, kids vs parents' },
+        { partId: 'treat', detail: 'The good ice cream' },
+      ],
+    })
+
+    const b = await board(W0)
+    const byId = Object.fromEntries(b.parts.map((x) => [x.partId, x])) as Record<string, BoardPart>
+    expect(byId.activity).toMatchObject({ personName: 'Kelly', detail: 'Charades, kids vs parents' })
+    // A detail with NO person: "the treat is the good ice cream, whoever's turn it is."
+    // The rotation still names somebody, and the part is not pinned by a detail alone.
+    expect(byId.treat.detail).toBe('The good ice cream')
+    expect(byId.checkin.detail).toBeNull()
+
+    // Blanking one leaves the other alone (the same empty-string-clears rule the theme
+    // line uses, since a null means "leave it").
+    await call('POST', '/api/family-night/occurrence', kevin, {
+      date: w0.date,
+      assignments: [{ partId: 'treat', detail: '' }],
+    })
+    const after = await board(W0)
+    const afterById = Object.fromEntries(after.parts.map((x) => [x.partId, x])) as Record<string, BoardPart>
+    expect(afterById.treat.detail).toBeNull()
+    expect(afterById.activity.detail).toBe('Charades, kids vs parents')
+  })
+
+  it('does not treat a detail as a pin', async () => {
+    // Writing what the check-in IS says nothing about whose turn it is, so the rotation's
+    // suggestion has to stand.
+    const w0 = await board(W0)
+    await call('POST', '/api/family-night/occurrence', kevin, {
+      date: w0.date,
+      assignments: [{ partId: 'checkin', detail: 'How was school, actually' }],
+    })
+    const b = await board(W0)
+    const checkin = b.parts.find((x) => x.partId === 'checkin')!
+    expect(checkin.detail).toBe('How was school, actually')
+    expect(checkin.pinned).toBe(false)
+    expect(checkin.personName).toBeTruthy()
+  })
+})
+
+describe('planning · familyNight · this week on the calendar', () => {
+  // "since we're planning it, I'd love to be able to have it create a calendar event
+  // and/or link to a calendar event that's already on the calendar."
+  //
+  // `settings.familyNight.eventId` could not answer this: it is ONE field for all weeks,
+  // set in Settings by an admin, and `scheduleEvent()` always creates a fresh recurring
+  // series rather than adopting an event that already exists. "This week it's the movie
+  // night already on Friday" needs a link on the dated gathering — the same reasoning
+  // that already puts a pinned person there.
+  //
+  // Note there is no new event-CREATION path: an event is created through the app's own
+  // event endpoint (the step uses EventModal, as every other step does) and then adopted
+  // here by id. One way to make an event.
+  it('adopts an event that is already on the calendar for this week only', async () => {
+    const w0 = await board(W0)
+    const made = await call('POST', '/api/events', kevin, {
+      title: '🍿 Movie night',
+      startsAt: `${w0.date}T19:00:00`,
+    })
+    expect(made.statusCode).toBe(201)
+    const eventId = json(made).event.id
+
+    expect((await call('POST', '/api/family-night/occurrence', kevin, {
+      date: w0.date,
+      eventId,
+    })).statusCode).toBe(200)
+
+    const b = await board(W0)
+    expect(b.eventId).toBe(eventId)
+    expect(b.eventTitle).toBe('🍿 Movie night')
+
+    // THIS WEEK ONLY: next week has no event of its own, and the standing config link is
+    // untouched either way.
+    expect((await board(W1)).eventId).toBeNull()
+    const { config } = json(await call('GET', '/api/family-night/config', kevin))
+    expect(config.eventId).not.toBe(eventId)
+  })
+
+  it('creates a one-off event for this week and links it in one call', async () => {
+    // Server-side, deliberately, and modelled on `scheduleEvent()` which already creates
+    // the recurring series this way. A create-then-adopt round trip from the client
+    // cannot be made safe: the web app writes events LOCALLY first (PowerSync uploads
+    // afterwards), so the id it would hand back may not exist server-side yet and the
+    // link would 404 on a race nobody could reproduce.
+    const w1 = await board(W1)
+    expect(w1.eventId).toBeNull()
+    await call('POST', '/api/family-night/occurrence', kevin, { date: w1.date, theme: 'Board games' })
+
+    const made = await call('POST', '/api/family-night/occurrence', kevin, { date: w1.date, createEvent: true })
+    expect(made.statusCode).toBe(200)
+
+    const b = await board(W1)
+    expect(b.eventId).toBeTruthy()
+    // Named from the theme when there is one, so the calendar says what the night is.
+    expect(b.eventTitle).toContain('Board games')
+    // On the gathering's own day, not today.
+    expect((await call('GET', `/api/events/${b.eventId}`, kevin)).statusCode).toBe(200)
+    expect(b.eventWhen).toBeTruthy()
+
+    // Idempotent-ish: asking again while one is linked must not spawn a second event.
+    await call('POST', '/api/family-night/occurrence', kevin, { date: w1.date, createEvent: true })
+    expect((await board(W1)).eventId).toBe(b.eventId)
+  })
+
+  it('unlinks the week without deleting the event', async () => {
+    const w0 = await board(W0)
+    const eventId = (await board(W0)).eventId!
+    expect(eventId).toBeTruthy()
+
+    await call('POST', '/api/family-night/occurrence', kevin, { date: w0.date, eventId: null })
+    expect((await board(W0)).eventId).toBeNull()
+    // The event is still on the calendar — unlinking says "this isn't family night", not
+    // "delete Friday".
+    expect((await call('GET', `/api/events/${eventId}`, kevin)).statusCode).toBe(200)
   })
 })

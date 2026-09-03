@@ -55,7 +55,25 @@ export interface OccurrenceInput {
   theme?: string | null
   notes?: string | null
   status?: 'planned' | 'done' | 'skipped'
-  assignments?: { partId: string; personId: string | null }[]
+  /**
+   * The event THIS dated gathering points at (`null` unlinks and leaves the event on the
+   * calendar; absent leaves the link alone). Distinct from `config.eventId`, the standing
+   * recurring series.
+   */
+  eventId?: string | null
+  /**
+   * "Put this week on the calendar" — the server creates a one-off event for `date` and
+   * links it, in the same call. Ignored when `eventId` is also sent (the caller already
+   * said which event), and a no-op when the week is already linked.
+   */
+  createEvent?: boolean
+  /**
+   * PRESENCE IS THE MESSAGE — the server writes only the keys it was sent. `personId`
+   * and `detail` answer different questions ("whose turn" vs "what is it"), so sending
+   * one leaves the other alone. Both optional for exactly that reason: passing
+   * `personId: null` alongside a detail would un-assign whoever had the part.
+   */
+  assignments?: { partId: string; personId?: string | null; detail?: string | null }[]
 }
 
 export const familyNightApi = {

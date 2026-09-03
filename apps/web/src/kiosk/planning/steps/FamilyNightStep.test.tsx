@@ -50,11 +50,15 @@ const MEMBERS = [
 
 interface Part {
   partId: string; label: string; emoji: string; rotates: boolean
+  detail: string | null
   personId: string | null; personName: string | null; pinned: boolean
 }
 interface Board {
   weekStart: string; date: string; dayOfWeek: number; time: string
-  occurrenceId: string | null; theme: string | null; status: string; onCalendar: boolean
+  occurrenceId: string | null; theme: string | null; status: string
+  // `onCalendar` is the STANDING weekly series; `eventId` is what THIS week points at.
+  onCalendar: boolean
+  eventId: string | null; eventTitle: string | null; eventWhen: string | null
   members: typeof MEMBERS; parts: Part[]
 }
 
@@ -67,11 +71,14 @@ const BOARD: Board = {
   theme: null,
   status: 'planned',
   onCalendar: true,
+  eventId: null,
+  eventTitle: null,
+  eventWhen: null,
   members: MEMBERS,
   parts: [
-    { partId: 'activity', label: 'Activity', emoji: '🎲', rotates: true, personId: 'p3', personName: 'Wally', pinned: false },
-    { partId: 'treat', label: 'Treat', emoji: '🍪', rotates: true, personId: 'p4', personName: 'Lottie', pinned: false },
-    { partId: 'checkin', label: 'Check-in', emoji: '💬', rotates: true, personId: 'p2', personName: 'Kelly', pinned: false },
+    { partId: 'activity', label: 'Activity', emoji: '🎲', rotates: true, detail: null, personId: 'p3', personName: 'Wally', pinned: false },
+    { partId: 'treat', label: 'Treat', emoji: '🍪', rotates: true, detail: null, personId: 'p4', personName: 'Lottie', pinned: false },
+    { partId: 'checkin', label: 'Check-in', emoji: '💬', rotates: true, detail: null, personId: 'p2', personName: 'Kelly', pinned: false },
   ],
 }
 
@@ -93,18 +100,51 @@ function mockApi(over: Partial<Board> = {}) {
     // server actually behaves: a partial assignment list writes only the parts named,
     // a null theme means "leave it alone" (only '' clears), and a status is a status.
     if (u.includes('/api/family-night/occurrence') && method === 'POST') {
-      const b = (body ?? {}) as { date?: string; theme?: string | null; status?: string; assignments?: { partId: string; personId: string | null }[] }
+      const b = (body ?? {}) as {
+        date?: string; theme?: string | null; status?: string
+        eventId?: string | null; createEvent?: boolean
+        assignments?: { partId: string; personId?: string | null; detail?: string | null }[]
+      }
       state.occurrenceId = state.occurrenceId ?? 'occ1'
       if (typeof b.theme === 'string') state.theme = b.theme || null
       if (b.status) state.status = b.status
+      // PRESENCE, exactly as the server reads it: a key that wasn't sent isn't written.
+      // The mock has to model this or the tests can't catch the bug it exists to prevent
+      // — a detail-only write that silently un-assigns whoever had the part.
+      if ('eventId' in b) {
+        state.eventId = b.eventId ?? null
+        state.eventTitle = b.eventId ? '🍿 Movie night' : null
+        state.eventWhen = b.eventId ? 'Friday 7:00 PM' : null
+      } else if (b.createEvent === true && !state.eventId) {
+        state.eventId = 'ev-made'
+        state.eventTitle = state.theme ? `🏡 ${state.theme}` : '🏡 Family Night'
+        state.eventWhen = 'Wednesday 5:00 PM'
+      }
       for (const a of b.assignments ?? []) {
         const part = state.parts.find((p) => p.partId === a.partId)
         if (!part) continue
-        part.personId = a.personId
-        part.personName = MEMBERS.find((m) => m.id === a.personId)?.name ?? null
-        part.pinned = true
+        if ('personId' in a) {
+          part.personId = a.personId ?? null
+          part.personName = MEMBERS.find((m) => m.id === a.personId)?.name ?? null
+          part.pinned = true
+        }
+        if ('detail' in a) part.detail = a.detail?.trim() ? a.detail.trim() : null
       }
       return { ok: true, json: async () => ({ id: state.occurrenceId }) }
+    }
+    // Only reached once somebody opens the picker — the step itself must not touch an
+    // event endpoint, which the skip test asserts.
+    if (u.includes('/api/events')) {
+      return {
+        ok: true,
+        json: async () => ({
+          events: [
+            { id: 'ev-movie', title: '🍿 Movie night', startsAt: `${DATE}T19:00:00Z`, endsAt: null, allDay: false, origin: 'manual', personId: null, personColor: null, participants: [] },
+            // A meal mirror, which must NOT be offered as a family night.
+            { id: 'ev-dinner', title: 'Spaghetti', startsAt: `${DATE}T18:00:00Z`, endsAt: null, allDay: false, origin: 'meal_plan', personId: null, personColor: null, participants: [] },
+          ],
+        }),
+      }
     }
     return { ok: false, status: 404, json: async () => ({}) }
   }) as unknown as typeof fetch
@@ -277,5 +317,106 @@ describe('FamilyNightStep', () => {
     await waitFor(() => expect(screen.getByText(/Activity/)).toBeTruthy())
     expect((face('Activity', 'Lottie') as HTMLButtonElement).disabled).toBe(true)
     expect((screen.getByRole('button', { name: /Skip this week/i }) as HTMLButtonElement).disabled).toBe(true)
+  })
+})
+
+describe('FamilyNightStep · what each part actually is', () => {
+  // "for the activity or treat or check-in, I think we need to be able to add fields to
+  // that so that I can write out what the activity is or what the treat's going to be."
+  it('saves a part’s detail on blur WITHOUT touching who has it', async () => {
+    mockApi()
+    render(<Body {...props()} />)
+    const box = await screen.findByLabelText(/what is the treat/i)
+    fireEvent.change(box, { target: { value: 'The good ice cream' } })
+    fireEvent.blur(box)
+
+    await waitFor(() => expect(wrote('/api/family-night/occurrence')).toHaveLength(1))
+    const body = wrote('/api/family-night/occurrence')[0].body as {
+      assignments: { partId: string; detail: string; personId?: unknown }[]
+    }
+    expect(body.assignments[0]).toEqual({ partId: 'treat', detail: 'The good ice cream' })
+    // THE POINT: no `personId` key at all. The server reads presence, so including it —
+    // even as null — would turn "I named the treat" into "…and nobody has it".
+    expect('personId' in body.assignments[0]).toBe(false)
+  })
+
+  it('leaves the rotation’s suggestion standing after a detail is written', async () => {
+    mockApi()
+    render(<Body {...props()} />)
+    const box = await screen.findByLabelText(/what is the activity/i)
+    fireEvent.change(box, { target: { value: 'Charades' } })
+    fireEvent.blur(box)
+
+    await waitFor(() => expect(wrote('/api/family-night/occurrence')).toHaveLength(1))
+    // Still suggested, still Wally: naming the activity said nothing about whose turn
+    // it is, so nothing about the row above may change.
+    const row = await screen.findByTestId('wpfn-row-Activity')
+    await waitFor(() => expect(row.textContent).toMatch(/suggested/i))
+    expect(row.textContent).toMatch(/Wally/)
+  })
+
+  it('does not write while the value is unchanged', async () => {
+    mockApi({ parts: [{ ...BOARD.parts[0], detail: 'Charades' }, BOARD.parts[1], BOARD.parts[2]] })
+    render(<Body {...props()} />)
+    const box = await screen.findByLabelText(/what is the activity/i)
+    expect((box as HTMLInputElement).value).toBe('Charades')
+    fireEvent.blur(box)
+    expect(wrote('/api/family-night/occurrence')).toHaveLength(0)
+  })
+})
+
+describe('FamilyNightStep · this week on the calendar', () => {
+  // "I'd love to be able to have it create a calendar event and/or link to a calendar
+  // event that's already on the calendar."
+  it('adds this week to the calendar in one call, without an event form', async () => {
+    mockApi()
+    render(<Body {...props()} />)
+    fireEvent.click(await screen.findByRole('button', { name: /add to calendar/i }))
+
+    await waitFor(() => expect(wrote('/api/family-night/occurrence')).toHaveLength(1))
+    expect(wrote('/api/family-night/occurrence')[0].body).toEqual({ date: DATE, createEvent: true })
+    // The event is created SERVER-side and linked in the same call. A create-then-adopt
+    // round trip can't be made safe here: the web app writes events locally first, so an
+    // id from the client may not exist server-side yet.
+    await waitFor(() => expect(screen.getByTestId('wpfn-cal').textContent).toMatch(/on the calendar for this week/i))
+  })
+
+  it('points the week at an event it already has, and skips meal mirrors', async () => {
+    mockApi()
+    render(<Body {...props()} />)
+    fireEvent.click(await screen.findByRole('button', { name: /link an event/i }))
+
+    const list = await screen.findByLabelText(/events on this week/i)
+    expect(list.textContent).toMatch(/Movie night/)
+    // A planned dinner is not a family night, and offering one would put a meal where an
+    // evening should be.
+    expect(list.textContent).not.toMatch(/Spaghetti/)
+
+    fireEvent.click(screen.getByRole('button', { name: /Movie night/ }))
+    await waitFor(() => expect(wrote('/api/family-night/occurrence')).toHaveLength(1))
+    expect(wrote('/api/family-night/occurrence')[0].body).toEqual({ date: DATE, eventId: 'ev-movie' })
+  })
+
+  it('unlinks without deleting the event', async () => {
+    mockApi({ eventId: 'ev-movie', eventTitle: '🍿 Movie night', eventWhen: 'Friday 7:00 PM' })
+    render(<Body {...props()} />)
+    fireEvent.click(await screen.findByRole('button', { name: /unlink/i }))
+
+    await waitFor(() => expect(wrote('/api/family-night/occurrence')).toHaveLength(1))
+    expect(wrote('/api/family-night/occurrence')[0].body).toEqual({ date: DATE, eventId: null })
+    // No DELETE anywhere near the calendar: "this isn't family night" must not delete
+    // Friday.
+    expect(calls.some((c) => c.method === 'DELETE')).toBe(false)
+  })
+
+  it('keeps the standing weekly series and this week’s event apart', async () => {
+    // `onCalendar` true, `eventId` null — the household has the recurring event but has
+    // not said anything about THIS week. Reading the two as one thing is the only way to
+    // get this screen wrong.
+    mockApi({ onCalendar: true, eventId: null })
+    render(<Body {...props()} />)
+    const cal = await screen.findByTestId('wpfn-cal')
+    expect(cal.textContent).toMatch(/not on the calendar this week/i)
+    expect(cal.textContent).toMatch(/standing weekly event still stands/i)
   })
 })
