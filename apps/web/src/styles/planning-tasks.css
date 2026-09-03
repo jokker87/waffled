@@ -15,8 +15,8 @@
      .wpt-add-tile          the strip's own "Add a task" (nobody prefilled)
      .wpt-card .wpt-sub .wpt-chip   a chore: title, where it came from, when it lands
      .wpt-open              the title block, which opens the app's chore editor
-     .wpt-chip-set          that chip when the day can be changed (a one-off's)
-     .wpt-day-input         the day picker the chip opens
+     .wpt-chip-set          that chip when the day can be changed (a one-off's);
+                            it opens the same chore editor the title does
      .wpt-cols .wpt-col     one column per member
      .wpt-count             "N this week", in the column header
      .wpt-carries           the fairness read in each column's footer
@@ -121,15 +121,6 @@
 .wpt-chip-set.is-unset { border: 1px dashed var(--hair); }
 .wpt-chip-set:hover:not(:disabled) { color: var(--person-3); border-color: var(--person-3); }
 .wpt-chip-set:disabled { cursor: default; opacity: 0.6; }
-
-.wpt-day-input {
-  margin-top: 7px;
-  width: 100%;
-  font: inherit; font-size: 12.5px; font-family: var(--sans);
-  color: var(--ink); background: var(--card);
-  border: 1px solid var(--hair); border-radius: var(--r-sm);
-  padding: 5px 7px;
-}
 
 /* ── The columns ────────────────────────────────────────────────────────────── */
 .wpt-cols {

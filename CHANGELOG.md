@@ -48,9 +48,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     when you ask it to, marks what it filled so you can undo it, and lets you hand the shopping
     trip to somebody — which becomes a real chore on the Tasks board.
   - **Tasks** lays the week out per person, with everything nobody has taken in a strip across the
-    top; tap a face to hand it over, or leave it up for grabs, which is also a real answer. Each
-    column says what that person already carries, so fairness is visible without anyone keeping
-    score.
+    top; tap a face to hand it over, drag it to a column, or leave it up for grabs, which is also
+    a real answer. Tap a task's name — or the day beside it — to open the chore editor and fix a
+    typo, change the stars or move it to another day, without leaving the session. Each column
+    says what that person already carries, so fairness is visible without anyone keeping score.
 - **A privacy policy and terms of service on waffled.app.** Two new pages —
   [waffled.app/privacy](https://waffled.app/privacy) and
   [waffled.app/terms](https://waffled.app/terms) — spelling out what a self-hosted install
@@ -60,6 +61,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   both before it will verify the OAuth consent screen's branding.
 
 ### Changed
+
+- **A one-off chore can be moved to another day from the chore editor.** Opening a one-off on
+  the Chores screen (or in Weekly Planning's Tasks step) now shows the day it lands on, and
+  changing it moves the task — previously the day could only be chosen when the chore was
+  created, so a task that needed to slip a day had to be deleted and re-added. Recurring chores
+  are unchanged: their days come from the repeat schedule, which is the only thing that can
+  honestly set them.
 
 ### Fixed
 

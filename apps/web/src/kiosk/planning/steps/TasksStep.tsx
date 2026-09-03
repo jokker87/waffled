@@ -109,9 +109,6 @@ function ChoreCard({
   people,
   canAssign,
   frozen,
-  picking,
-  onPickDay,
-  onSetDay,
   onGive,
   onEdit,
   onDragStart,
@@ -122,9 +119,6 @@ function ChoreCard({
   people: PlanningTasksPerson[]
   canAssign: boolean
   frozen: boolean
-  picking: boolean
-  onPickDay: () => void
-  onSetDay: (dueOn: string) => void
   onGive: (personId: string | null) => void
   // Absent when this viewer can't save an edit anyway (see canAssign).
   onEdit?: () => void
@@ -164,14 +158,13 @@ function ChoreCard({
           </>
         )}
         <div className="wpt-chip-row">
-          {settable ? (
+          {settable && onEdit ? (
             <button
               type="button"
               className={`wpt-chip wpt-chip-set ${unset ? 'is-unset' : ''}`}
               aria-label={`Set the day for ${chore.title}`}
-              aria-expanded={picking}
               disabled={frozen}
-              onClick={onPickDay}
+              onClick={onEdit}
             >
               {chipText}
             </button>
@@ -179,16 +172,6 @@ function ChoreCard({
             <span className={`wpt-chip ${unset ? 'is-unset' : ''}`}>{chipText}</span>
           )}
         </div>
-        {settable && picking && (
-          <input
-            type="date"
-            className="wpt-day-input"
-            aria-label={`Day for ${chore.title}`}
-            defaultValue={chore.dueOn ?? ''}
-            disabled={frozen}
-            onChange={(e) => onSetDay(e.target.value)}
-          />
-        )}
         {chore.rewardAmount > 0 && (
           <div className="star">
             {symbol(chore.rewardCurrency)} {chore.rewardAmount}
@@ -253,8 +236,6 @@ function Body({ weekStart, setDecisionData, refresh, busy }: StepBodyProps) {
   // Whose column's "+ Add for …" is open. `''` is the strip's own "Add a task" (nobody
   // prefilled); null is closed.
   const [adding, setAdding] = useState<string | null>(null)
-  // Which card's day picker is open (chore id), if any.
-  const [pickingDay, setPickingDay] = useState<string | null>(null)
   // The card whose chore is open in the EDITOR, with the column it sits in (a chore's
   // "Who" isn't on the card payload — the column it's in is that fact).
   const [editing, setEditing] = useState<{ chore: PlanningTasksChore; owner: string | null } | null>(null)
@@ -308,23 +289,6 @@ function Body({ weekStart, setDecisionData, refresh, busy }: StepBodyProps) {
     },
     [saving, busy, load, refresh]
   )
-
-  // Set (or move) a one-off's day. Same endpoint, one more field — the chores module
-  // moves the day's instance with it.
-  async function setDay(chore: PlanningTasksChore, dueOn: string) {
-    if (!dueOn || saving || busy) return
-    setSaving(chore.id)
-    try {
-      await planningTasksApi.setDay(chore, dueOn)
-      setPickingDay(null)
-      load()
-      refresh()
-    } catch {
-      /* the day didn't move; the chip still reads what the server last told us */
-    } finally {
-      setSaving(null)
-    }
-  }
 
   // ── Drag-and-drop, the kiosk Chores board's mechanism ──────────────────────────
   // Pointer events (not HTML5 draggable) so a mouse and the kiosk touchscreen behave
@@ -396,14 +360,12 @@ function Body({ weekStart, setDecisionData, refresh, busy }: StepBodyProps) {
     people: board.people,
     canAssign,
     frozen,
-    picking: pickingDay === chore.id,
-    onPickDay: () => setPickingDay(pickingDay === chore.id ? null : chore.id),
-    onSetDay: (dueOn: string) => setDay(chore, dueOn),
     onGive: (personId: string | null) => give(chore, personId),
     // Editing a chore is PATCH /api/chores/:id, which the chores module gates on
     // chore.manage — the same rule the kiosk board applies when it decides whether a
     // card opens the editor. No looser rule here: a modal that 403s on Save is worse
-    // than no modal.
+    // than no modal. BOTH the title and the day chip open this: one card, one editor,
+    // so a title change and a day change can't race each other on the same chore.
     onEdit: canAssign ? () => setEditing({ chore, owner }) : undefined,
     onDragStart: (e: React.PointerEvent) => startDrag(e, chore, owner),
     symbol,
@@ -501,8 +463,8 @@ function Body({ weekStart, setDecisionData, refresh, busy }: StepBodyProps) {
           typo, the wrong stars or "actually this repeats weekly" is fixed here instead
           of sending someone to the Chores screen mid-session.
 
-          The day is deliberately NOT in it — ChoreModal only offers "On" on create, and
-          the chip beside the title is the faster answer anyway.
+          The day IS in it: ChoreModal offers "On" for a one-off on edit as well as on
+          create, and the chip beside the title is the second door into this same modal.
 
           DELETE IS OFF (canDelete={false}). The step asks who does what, not which
           chores should exist: removing one here would reach far outside the week being
@@ -520,6 +482,9 @@ function Body({ weekStart, setDecisionData, refresh, busy }: StepBodyProps) {
             rewardAmount: editing.chore.rewardAmount,
             rewardCurrency: editing.chore.rewardCurrency,
             rrule: editing.chore.rrule,
+            // The day the editor opens on, so tapping the chip lands on the day the
+            // card was showing. Omitting it would silently move the chore to today.
+            dueOn: editing.chore.dueOn,
             dueTime: editing.chore.dueTime,
             requiresApproval: editing.chore.requiresApproval,
             requiresPhoto: editing.chore.requiresPhoto,

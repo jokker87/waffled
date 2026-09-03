@@ -9,6 +9,11 @@ export interface ChoreDraft {
   rewardAmount: number | null
   rewardCurrency?: string | null
   rrule?: string | null
+  // The day a one-off lands on. Required so a caller that forgets it fails to
+  // compile rather than silently moving the chore to today — `initialForm`'s
+  // fallback makes omission indistinguishable from "move it to now". null for a
+  // recurring chore, whose days come from its rrule.
+  dueOn: string | null
   dueTime?: string | null
   requiresApproval?: boolean
   requiresPhoto?: boolean
@@ -66,11 +71,11 @@ function initialForm(
     rewardCurrency: chore?.rewardCurrency ?? '',
     freq: sched.freq,
     days: sched.days,
-    // One-off (freq === 'once') only: which day the single task lands on. New
-    // one-offs default to today unless the surface opening the modal knows a better
-    // day — Weekly Planning passes the week it is planning, so a task added there
-    // doesn't quietly land on today. Editing can't move an already-materialized one.
-    dueOn: defaultDueOn || localToday(),
+    // One-off (freq === 'once') only: which day the single task lands on. An
+    // existing one-off opens on its OWN day; a new one defaults to today unless the
+    // surface opening the modal knows a better day — Weekly Planning passes the week
+    // it is planning, so a task added there doesn't quietly land on today.
+    dueOn: chore?.dueOn || defaultDueOn || localToday(),
     // Optional time-of-day the chore is due (HH:MM). Applies to one-offs and each
     // recurring occurrence; empty = no specific time.
     dueTime: (chore?.dueTime ?? '').slice(0, 5),
@@ -146,10 +151,12 @@ export function ChoreModal({
       requiresPhoto: form.requiresPhoto,
     }
     try {
-      if (editing) await api.updateChore(chore!.id, payload)
-      // On create, a one-off also carries its due date (where its single instance
-      // lands). Editing can't move an already-materialized one-off's date.
-      else await api.createChore(form.freq === 'once' ? { ...payload, dueOn: form.dueOn } : payload)
+      // A one-off carries its day either way — on create it's where the single
+      // instance lands, on edit it MOVES that instance. A recurring chore sends
+      // none: its days are the rrule's, and the server ignores dueOn for one.
+      const withDay = form.freq === 'once' ? { ...payload, dueOn: form.dueOn } : payload
+      if (editing) await api.updateChore(chore!.id, withDay)
+      else await api.createChore(withDay)
       onSaved()
       onClose()
     } catch {
@@ -216,13 +223,24 @@ export function ChoreModal({
                 ))}
               </div>
             )}
-            {/* One-off: pick the day (today by default). Only on create — an
-                existing one-off's instance is already on the calendar. It also
-                carries forward until done unless rollover is turned off. */}
-            {form.freq === 'once' && !editing && (
+            {/* One-off: which day it lands on — on create AND on edit. Moving an
+                existing one-off's day is a PATCH the server already honors (it lands
+                on the pending instance), and this modal is now the only way in: the
+                surfaces that used to offer an inline date picker send people here.
+
+                `min` is create-only. A chore carried over from last week is dated in
+                the PAST and is the likeliest thing anybody opens here — Save lives
+                inside a <form>, so flooring the input at today would let the browser
+                refuse the submit and make Save look dead on exactly those cards. */}
+            {form.freq === 'once' && (
               <label className="field" style={{ marginTop: 8 }}>
                 <span>On</span>
-                <input type="date" min={localToday()} value={form.dueOn} onChange={(e) => set('dueOn', e.target.value || localToday())} />
+                <input
+                  type="date"
+                  {...(editing ? {} : { min: localToday() })}
+                  value={form.dueOn}
+                  onChange={(e) => set('dueOn', e.target.value || localToday())}
+                />
               </label>
             )}
           </div>

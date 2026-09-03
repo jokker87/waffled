@@ -376,20 +376,37 @@ describe('TasksStep', () => {
     })
   })
 
-  // "I assigned it and had nowhere to say when." The day chip is the picker.
-  it('sets the day on a one-off right on its card', async () => {
+  // "I assigned it and had nowhere to say when." The day chip is the way in — but it
+  // opens the SAME editor the title opens, rather than a second inline date picker.
+  // One card had two edit surfaces that could disagree; now it has one.
+  it('the day chip opens the chore editor, and the day saves from there', async () => {
     mockApi()
     render(<Body {...props()} />)
     await waitFor(() => expect(screen.getByText(/Fold the towels/)).toBeTruthy())
 
     fireEvent.click(screen.getByRole('button', { name: 'Set the day for Fold the towels' }))
-    fireEvent.change(await screen.findByLabelText('Day for Fold the towels'), { target: { value: '2026-09-09' } })
+    await waitFor(() => expect(screen.getByText('Edit chore')).toBeTruthy())
+
+    // The editor opens on this chore's own day and moves it from there.
+    fireEvent.change(screen.getByLabelText('On'), { target: { value: '2026-09-09' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
     // dueOn on the chore itself — the chores module moves the day's instance with it.
     await waitFor(() => expect(wrote('PATCH', '/api/chores/c2')).toHaveLength(1))
-    expect(wrote('PATCH', '/api/chores/c2')[0].body).toEqual({ dueOn: '2026-09-09' })
+    expect(wrote('PATCH', '/api/chores/c2')[0].body).toMatchObject({ dueOn: '2026-09-09' })
     // And the chip now names the day, because the board was re-read.
     await waitFor(() => expect(within(strip()).getByText('Wed')).toBeTruthy())
+  })
+
+  // The inline picker is GONE, not hidden: two ways to edit one card is how a title
+  // change and a day change end up racing each other on the same chore.
+  it('has no inline date picker left on the card', async () => {
+    mockApi()
+    render(<Body {...props()} />)
+    await waitFor(() => expect(screen.getByText(/Fold the towels/)).toBeTruthy())
+    fireEvent.click(screen.getByRole('button', { name: 'Set the day for Fold the towels' }))
+    await waitFor(() => expect(screen.getByText('Edit chore')).toBeTruthy())
+    expect(screen.queryByLabelText('Day for Fold the towels')).toBeNull()
   })
 
   it('leaves a recurring chore’s days to the chore editor', async () => {

@@ -88,5 +88,4 @@ export const planningTasksApi = {
   // chores module moves the day's instance with it (and leaves a day somebody already
   // finished alone). Recurring chores ignore it — their days come from the rrule, which
   // belongs to the chore editor, not to a chip on a board.
-  setDay: (chore: PlanningTasksChore, dueOn: string) => choresApi.updateChore(chore.id, { dueOn }),
 }

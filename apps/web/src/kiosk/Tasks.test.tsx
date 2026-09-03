@@ -83,6 +83,20 @@ describe('Tasks screen', () => {
     expect(screen.queryByText(/overdue/)).not.toBeInTheDocument()
   })
 
+  // The Chores screen gained the same thing Weekly Planning did: a one-off's day is
+  // editable, not just settable at birth. The prefill is the part worth pinning — a
+  // draft that forgets `dueOn` opens on TODAY and silently moves the chore on save.
+  it('opens the editor on a one-off’s own day, not today', async () => {
+    const future = new Date(Date.now() + 3 * 86_400_000).toISOString().slice(0, 10)
+    mockInstances([
+      { id: '5', choreTitle: 'Return library books', emoji: '📚', personId: 'p1', personName: 'Wally', status: 'pending', rewardAmount: 2, dueOn: future, rrule: null } as unknown as Inst,
+    ])
+    renderTasks(<Tasks />)
+    fireEvent.click(await screen.findByText(/Return library books/))
+    await waitFor(() => expect(screen.getByText('Edit chore')).toBeTruthy())
+    expect((screen.getByLabelText('On') as HTMLInputElement).value).toBe(future)
+  })
+
   it('always shows Up-for-grabs and every person — even with no chores', async () => {
     // Wally has a chore; Lottie and Kevin have none. All three (+ Up for grabs) should appear.
     mockInstances(

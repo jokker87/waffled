@@ -54,6 +54,21 @@ per step (repo convention: a batch is one PR). The session is **single-driver**:
 runs it on one device. `planning_sessions.driver_person_id` is the seam for adding
 multi-device presence later without rewriting the schema; nothing realtime ships now.
 
+### Changes outside the step seams that iOS parity must mirror
+
+A step is allowed to want something from a component it doesn't own. When that happens the
+change lands in the shared component, not in a copy — and it has to be carried to iOS too,
+so it is written down here rather than discovered during the parity pass:
+
+- **`ChoreModal` offers a one-off's day on edit, not just on create** (and the Tasks step's
+  inline date picker is gone — the day chip opens that same editor). `PATCH /api/chores/:id`
+  already moved the pending instance; the modal simply sends it. Two things not to lose in
+  translation: `ChoreDraft.dueOn` is **required**, because the form falls back to today and an
+  omitted day is indistinguishable from "move it to now"; and the day is **not floored at
+  today when editing**, because a carried-over task is dated in the past and is the likeliest
+  thing anyone opens here.
+- **The recipe picker can write a new plate, not just a new recipe** — see the Meals step.
+
 ## Schema (0099)
 
 - `planning_sessions` — one row per household per planned week (`unique (household_id,
