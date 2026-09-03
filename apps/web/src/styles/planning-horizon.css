@@ -45,12 +45,25 @@
 /* `.cal-month` is `flex: 1` inside `.cal-screen` on the calendar page; here the body
    scrolls instead, so the grid gets a definite height to lay its six rows out in
    rather than collapsing to the height of its text. */
-.wph-cal { flex: none; display: flex; height: 58vh; min-height: 420px; }
+/* `.wp-body` is a flex column, so the month takes the height that is actually there
+   rather than a guessed 58vh — which was ~91px a row on a laptop and clipped the
+   event chips in a busy week. The park bar below is `flex: none`, so it keeps its
+   place; only the grid grows. */
+.wph-cal { flex: 1; display: flex; min-height: 420px; }
 .wph-cal > .cal-month { flex: 1; min-width: 0; }
+/* `.cal` is `height: 100%` with `grid-auto-rows: 1fr`, so its six rows are supposed to
+   compress into whatever height it's given. They didn't: `.cal` is a GRID ITEM of
+   `.cal-month`, and a grid item's default `min-height: auto` refuses to shrink below
+   its content — so the month laid out at its natural 790px inside a 580px box and
+   painted straight over the park bar underneath it. The calendar page never shows this
+   because its own ancestors already zero the min-size out. Scoped here rather than
+   fixed on the shared `.cal`, which is not broken where it lives. */
+.wph-cal .cal,
+.wph-cal .cal-grid { min-height: 0; }
 @media (max-width: 900px) {
   /* The day panel's 340px column doesn't fit beside the grid on a phone; the panel
      drops under it, which is what the phone frame in the mock shows. */
-  .wph-cal { height: auto; min-height: 0; }
+  .wph-cal { flex: none; height: auto; min-height: 0; }
   .wph-cal > .cal-month { grid-template-columns: 1fr; }
   .wph-cal .cal { min-height: 340px; }
 }
