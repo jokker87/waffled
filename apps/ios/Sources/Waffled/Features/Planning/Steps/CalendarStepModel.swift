@@ -144,16 +144,13 @@ enum PlanningWeekDays {
 @Observable
 final class PlanningCalendarModel {
 
-    /// What step 1 sent HERE — routed loose ends whose destination is this step.
-    ///
-    /// Handed down through `PlanningStepProps.routes` rather than read off this step's own
-    /// `data`: `looseEnds.ts` persists the array on the **looseEnds** step's row, because
-    /// that is the step whose decision it is, and a body only ever sees its own step. The
-    /// shell holds every step, so the shell is the one place that can pass it across.
-    private(set) var routes: [WaffledAPI.LooseEndRoute] = []
-    /// Routes this sitting has already turned into an event — `"kind:id"`. The offer goes
-    /// away once it has been taken, so nobody makes the same event twice.
-    private(set) var made: Set<String> = []
+    // WHAT STEP 1 ROUTED HERE IS NOT THIS MODEL'S BUSINESS ANY MORE. It used to hold the
+    // routes addressed to this step and the ones it had turned into events, so the body
+    // could draw them in a section at the bottom of the screen — under the week, below the
+    // fold, and a long way from the shell's box at the top where a parked note tagged for
+    // this step already appeared. One box holds both now (`PlanningHandoffBanner`), and it
+    // keeps that little bit of state itself because it is the thing drawing the rows.
+
     /// How many things this session put on the week. ONLY EVER A COUNT: the recap reads
     /// through to the calendar itself, so copying an event's title onto the session record
     /// would give the two something to disagree about.
@@ -169,28 +166,10 @@ final class PlanningCalendarModel {
     /// because the affirmative REPLACES `data`.)
     var decisionData: [String: JSONValue] { ["added": .int(added)] }
 
-    /// The routes addressed to this step, from the shell.
-    func seedRoutes(_ all: [WaffledAPI.LooseEndRoute]) {
-        let mine = PlanningRouteSeed.addressed(to: "calendar", in: all)
-        guard routes != mine else { return }
-        routes = mine
-        revision &+= 1
-    }
-
-    /// A real calendar event was created from this step.
+    /// A real calendar event was created from this step — however it was opened: the
+    /// header's button, a day's `＋`, or the "sent here" box's verb.
     func recordEventAdded() {
         added += 1
         revision &+= 1
-    }
-
-    /// …and, when it came from a routed loose end, that offer is taken.
-    func recordRouteMade(kind: String, id: String) {
-        made.insert("\(kind):\(id)")
-        revision &+= 1
-    }
-
-    /// Still worth offering — a route nobody has made an event for yet.
-    var openRoutes: [WaffledAPI.LooseEndRoute] {
-        routes.filter { !made.contains("\($0.kind):\($0.id)") }
     }
 }

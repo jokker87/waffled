@@ -61,7 +61,17 @@ struct PlanningStepProps {
     /// nothing — it is not its data. The shell has the whole `steps` array, so it is the
     /// only place that can pass this across.
     ///
-    /// A destination step should filter to `to == <its own key>`. Empty is the normal case.
+    /// NOT read by any step body — the SHELL hands this to `PlanningHandoffBanner`, which
+    /// filters it (`PlanningRouteSeed.sentHere`) and shows routed items in the same top box
+    /// as parked notes. It stays on the props because that is how it reaches the shell's
+    /// banner for the step on screen; a step body wanting it would be a design mistake.
+    ///
+    /// It used to be filtered per-step and drawn in each body's own trailing section, which
+    /// is exactly the bug that moved it: "wouldnt these be in the top 'parked things' box?
+    /// why are they hidden at the bottom?" Worse, a routed PARKED note arrived through both
+    /// doors at once — `routeLooseEnd` sets `planning_parked_items.step_key` too — so the
+    /// bottom section was a duplicate of the top box, not merely a stray. Empty is the
+    /// normal case.
     ///
     /// NOTE FOR PARITY: the web does not surface these on the destination step at all —
     /// routing is a record of triage there, and only step 1 reads it back. iOS showing

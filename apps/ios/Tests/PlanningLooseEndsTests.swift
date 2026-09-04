@@ -539,3 +539,142 @@ private func model(_ feed: LooseEndsFeed) -> PlanningLooseEndsModel {
         #expect(m.trail.map(\.title) == ["d", "c", "b"])
     }
 }
+
+// MARK: - What arrives at the destination step
+
+/// WHAT THE BOX AT THE TOP OF A DESTINATION STEP HOLDS.
+///
+/// Two different mechanisms put work in front of a later step, and for a while they landed
+/// in two different places: a PARKED NOTE came down through `step.parked` and was drawn by
+/// the shell's banner at the TOP, while a ROUTED LOOSE END came down through step 1's own
+/// `data.routes` and was drawn by the step body itself, in a section at the BOTTOM. It was
+/// reported exactly that way — "wouldn't these be in the top 'parked things' box? why are
+/// they hidden at the bottom?"
+///
+/// They share one box now, and this is the rule for what goes in its routed half.
+@Suite struct PlanningSentHereTests {
+
+    private let parkedId = "33333333-3333-4333-8333-333333333333"
+
+    @Test func onlyTheRoutesAddressedToThisStep() {
+        let routes = [
+            route(kind: "chore", id: "c1", title: "Bins", to: "calendar"),
+            route(kind: "list", id: "l1", title: "Pack the tent", to: "calendar"),
+            route(kind: "goal", id: "g1", title: "Run a 5k", to: "goals"),
+        ]
+
+        #expect(
+            PlanningRouteSeed.sentHere(to: "calendar", in: routes, parked: nil, settled: []).map(\.id)
+                == ["c1", "l1"])
+        #expect(
+            PlanningRouteSeed.sentHere(to: "goals", in: routes, parked: nil, settled: []).map(\.id)
+                == ["g1"])
+        #expect(PlanningRouteSeed.sentHere(to: "meals", in: routes, parked: nil, settled: []).isEmpty)
+    }
+
+    /// THE DOUBLE-SHOW THIS PREVENTS. Routing a PARKED note also sets its
+    /// `planning_parked_items.step_key` (`routeLooseEnd` in `looseEnds.ts` — "the other half
+    /// of what that column is for"), so the very same note comes back on the destination
+    /// step through BOTH doors: as a `parked` handoff and as a `parked`-kind route. The
+    /// handoff is the richer of the two — it can be handled or dropped — so the route row
+    /// for it is suppressed.
+    @Test func aParkedNoteRoutedHereIsNotOfferedTwice() {
+        let routes = [
+            route(kind: "parked", id: parkedId, title: "Ask about the school trip", to: "calendar"),
+            route(kind: "chore", id: "c1", title: "Bins", to: "calendar"),
+        ]
+        let parked = [WaffledAPI.PlanningStepHandoff(
+            id: parkedId, note: "Ask about the school trip", byline: "Kevin · today")]
+
+        #expect(
+            PlanningRouteSeed.sentHere(to: "calendar", in: routes, parked: parked, settled: []).map(\.id)
+                == ["c1"])
+    }
+
+    /// …but the note has to actually BE in the box. `parkedByStep` caps the handoff list at
+    /// six, and a note that fell off that cap (or had its tag cleared) is not on screen —
+    /// dropping its route row too would lose it entirely, which is the bug this whole box
+    /// exists to fix.
+    @Test func aParkedRouteWithNoNoteOnScreenIsStillOffered() {
+        let routes = [
+            route(kind: "parked", id: parkedId, title: "Ask about the school trip", to: "calendar"),
+        ]
+        let someoneElse = [WaffledAPI.PlanningStepHandoff(id: "other", note: "Buy stamps", byline: nil)]
+
+        #expect(
+            PlanningRouteSeed.sentHere(to: "calendar", in: routes, parked: nil, settled: []).map(\.id)
+                == [parkedId])
+        #expect(
+            PlanningRouteSeed.sentHere(to: "calendar", in: routes, parked: someoneElse, settled: []).map(\.id)
+                == [parkedId])
+    }
+
+    /// The Kids step's own read already merges what step 1 sent it into its board
+    /// (`kids.ts` marks those options `routed` and sorts them first), so the shared box
+    /// stays out of its way rather than printing the same chore twice on one screen.
+    /// `looseEnds` is the same argument from the other end: step 1 draws the whole board
+    /// and its own undo trail. (The server refuses that route anyway — belt and braces.)
+    @Test func stepsThatDrawTheirOwnRoutedRowsAreLeftAlone() {
+        let routes = [
+            route(kind: "chore", id: "c1", title: "Bins", to: "kids"),
+            route(kind: "chore", id: "c2", title: "Homework", to: "looseEnds"),
+        ]
+
+        #expect(PlanningRouteSeed.sentHere(to: "kids", in: routes, parked: nil, settled: []).isEmpty)
+        #expect(PlanningRouteSeed.sentHere(to: "looseEnds", in: routes, parked: nil, settled: []).isEmpty)
+    }
+
+    /// The offer goes away once it has been taken, so nobody makes the same event twice.
+    /// Keyed `kind:id` rather than by title, because two loose ends can read the same.
+    @Test func aRouteAlreadyActedOnStopsBeingOffered() {
+        let routes = [
+            route(kind: "chore", id: "c1", title: "Bins", to: "calendar"),
+            route(kind: "list", id: "l1", title: "Pack the tent", to: "calendar"),
+        ]
+
+        #expect(PlanningRouteSeed.key(routes[0]) == "chore:c1")
+        #expect(
+            PlanningRouteSeed.sentHere(
+                to: "calendar", in: routes, parked: nil,
+                settled: [PlanningRouteSeed.key(routes[0])]).map(\.id)
+                == ["l1"])
+    }
+
+    /// Nothing routed here is the NORMAL case, and it has to leave the box empty rather
+    /// than draw a heading over nothing.
+    @Test func nothingRoutedHereIsTheNormalCase() {
+        #expect(PlanningRouteSeed.sentHere(to: "calendar", in: [], parked: nil, settled: []).isEmpty)
+        #expect(
+            PlanningRouteSeed.sentHere(
+                to: "calendar",
+                in: [route(kind: "chore", id: "c1", title: "Bins", to: "tasks")],
+                parked: nil, settled: []).isEmpty)
+    }
+
+    /// A row written by an older build can be missing `title`/`source` — the server's own
+    /// guard on this column checks only `kind`/`id`/`to` — and one unreadable row must cost
+    /// that row and nothing else. Absent, null and "not an array" all just mean step 1
+    /// hasn't routed anything.
+    @Test func theRoutesAreDecodedTolerantly() {
+        let decoded = PlanningRouteSeed.decode(.array([
+            .object([
+                "kind": .string("chore"), "id": .string("c1"), "title": .string("Bins"),
+                "source": .string("notDone"), "to": .string("calendar"),
+            ]),
+            .object(["kind": .string("parked"), "id": .string("p1"), "to": .string("calendar")]),
+            .string("nonsense"),
+        ]))
+
+        #expect(decoded.map(\.id) == ["c1", "p1"])
+        #expect(decoded.last?.title == "")
+        #expect(decoded.last?.source == "parked")
+
+        #expect(PlanningRouteSeed.decode(nil).isEmpty)
+        #expect(PlanningRouteSeed.decode(.null).isEmpty)
+        #expect(PlanningRouteSeed.decode(.object(["routes": .string("not an array")])).isEmpty)
+    }
+
+    private func route(kind: String, id: String, title: String, to: String) -> WaffledAPI.LooseEndRoute {
+        WaffledAPI.LooseEndRoute(kind: kind, id: id, title: title, source: "notDone", to: to)
+    }
+}

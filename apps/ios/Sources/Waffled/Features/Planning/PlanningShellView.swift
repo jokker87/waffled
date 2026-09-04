@@ -229,6 +229,12 @@ struct PlanningShellView: View {
                         let props = stepProps(step, sessionId: sessionId, weekStart: week)
                         PlanningHandoffBanner(
                             step: step,
+                            // Everything that was SENT to this step now arrives in the
+                            // one box at the top — parked notes and routed loose ends
+                            // both. They used to come through two doors that opened in
+                            // two places: "wouldnt these be in the top 'parked things'
+                            // box? why are they hidden at the bottom?"
+                            routes: props.routes,
                             busy: model.busy,
                             // A verb belongs to the step that lent it: a banner still
                             // offering "Make an event" two steps later would open the
@@ -236,7 +242,10 @@ struct PlanningShellView: View {
                             verb: handoffVerbStepKey == step.key ? handoffVerb : nil,
                             resolve: { id, action in await model.resolveParked(id: id, action: action) })
                             // Per-note "hidden" state is local to the banner; a step
-                            // change has to start it empty.
+                            // change has to start it empty. It is ALSO what remembers
+                            // which routed rows have been acted on this sitting, so the
+                            // lifetime has to stay exactly this: a same-step refetch
+                            // keeps it, a step change clears it.
                             .id(step.key)
                         // Keyed on the step so moving on gives the next body a clean
                         // slate rather than inheriting the last one's @State.

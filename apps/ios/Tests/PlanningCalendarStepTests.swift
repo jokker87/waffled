@@ -91,7 +91,14 @@ import Testing
                 == "Nothing on the week yet · every day is still open")
     }
 
-    // MARK: - The crumb and the routed loose ends
+    // MARK: - The crumb
+    //
+    // WHAT STEP 1 ROUTED HERE IS NO LONGER THIS STEP'S STATE. It used to be — the model
+    // held the routes addressed to `calendar` and the ones it had turned into events, so
+    // the body could draw them in a section at the BOTTOM of the screen, while a parked
+    // note tagged for the same step appeared in the shell's box at the top. One box holds
+    // both now, and the rule for what goes in it is asserted against
+    // `PlanningRouteSeed.sentHere` in `PlanningSentHereTests` (PlanningLooseEndsTests.swift).
 
     @Test func addingAnEventIsOnlyEverACount() {
         let model = PlanningCalendarModel()
@@ -105,73 +112,16 @@ import Testing
         #expect(model.decisionData == ["added": .int(2)])
     }
 
-    @Test func routesAreFilteredToThisStepAndDecodedTolerantly() {
-        // The decode is `PlanningRouteSeed`'s now — one implementation, because two step
-        // models had grown their own copy and the tolerance rule only stays true in one
-        // place. The step still owns the FILTER.
-        let decoded = PlanningRouteSeed.decode(.array([
-            route(kind: "chore", id: "c1", title: "Bins", to: "calendar"),
-            route(kind: "goal", id: "g1", title: "Run a 5k", to: "goals"),
-            // A row written by something older: the server's own guard on this column
-            // checks only kind/id/to, so `title`/`source` can be missing — and a strict
-            // decode would throw away every route the family had triaged over one row.
-            .object(["kind": .string("parked"), "id": .string("p1"), "to": .string("calendar")]),
-        ]))
-        #expect(decoded.count == 3)
-
+    /// THE CRUMB REPLACES THE STEP'S DATA when the step is answered — and it stays a pure
+    /// count because everything else this step touches lives in the module that owns it:
+    /// the events are the real calendar's, and what step 1 routed here is persisted on step
+    /// 1's row. (A step whose OWN row carries a mid-step write — Goals, Kids, Connection —
+    /// must mirror it back, or the affirmative wipes it.)
+    @Test func theCrumbStaysACountBecauseNothingElseLivesOnThisStepsRow() {
         let model = PlanningCalendarModel()
-        model.seedRoutes(decoded)
-
-        #expect(model.routes.map(\.id) == ["c1", "p1"])
-        #expect(model.routes.last?.title == "")
-        #expect(model.routes.last?.source == "parked")
-    }
-
-    /// THE CRUMB REPLACES THE STEP'S DATA when the step is answered — but the routes are
-    /// persisted on step 1's row, not this one, so answering this step cannot erase them
-    /// and the crumb stays a pure count. (A step whose OWN row carries a mid-step write —
-    /// Goals, Kids, Connection — must mirror it back, or the affirmative wipes it.)
-    @Test func theCrumbStaysACountBecauseTheRoutesAreNotOnThisStepsRow() {
-        let model = PlanningCalendarModel()
-        model.seedRoutes(PlanningRouteSeed.decode(
-            .array([route(kind: "chore", id: "c1", title: "Bins", to: "calendar")])))
         model.recordEventAdded()
 
         #expect(model.decisionData == ["added": .int(1)])
-    }
-
-    @Test func absentOrMalformedRoutesJustMeanNothingWasRouted() {
-        // Absent, null and "not an array" all mean the same thing — step 1 hasn't routed
-        // anything — and none of them may throw.
-        #expect(PlanningRouteSeed.decode(nil).isEmpty)
-        #expect(PlanningRouteSeed.decode(.null).isEmpty)
-        #expect(PlanningRouteSeed.decode(.object(["links": .string("not an array")])).isEmpty)
-
-        let model = PlanningCalendarModel()
-        model.seedRoutes([])
-        #expect(model.routes.isEmpty)
         #expect(model.decisionData["routes"] == nil)
-    }
-
-    @Test func aRouteTurnedIntoAnEventStopsBeingOffered() {
-        let model = PlanningCalendarModel()
-        model.seedRoutes(PlanningRouteSeed.decode(.array([
-            route(kind: "chore", id: "c1", title: "Bins", to: "calendar"),
-            route(kind: "list", id: "l1", title: "Pack the tent", to: "calendar"),
-        ])))
-        #expect(model.openRoutes.count == 2)
-
-        model.recordRouteMade(kind: "chore", id: "c1")
-
-        #expect(model.openRoutes.map(\.id) == ["l1"])
-        // The full list is untouched — it is what step 1 decided, not our bookkeeping.
-        #expect(model.routes.count == 2)
-    }
-
-    private func route(kind: String, id: String, title: String, to: String) -> JSONValue {
-        .object([
-            "kind": .string(kind), "id": .string(id), "title": .string(title),
-            "source": .string("notDone"), "to": .string(to),
-        ])
     }
 }

@@ -58,14 +58,13 @@ struct CalendarStepView: View {
         VStack(alignment: .leading, spacing: 14) {
             header(total: total, openDays: openDays)
             week(days)
-            routes
             notes
         }
         .onAppear {
-            // The step's own persisted decisions, read BEFORE anything is pushed back:
-            // the crumb replaces the row's data when the step is answered.
-            model.seedRoutes(props.routes)
-            // A step WITH a composer lends the shell's parked-note banner its own verb.
+            // A step WITH a composer lends the shell's "sent here" box its own verb —
+            // which is what answers BOTH halves of that box: a parked note tagged for this
+            // step, and a loose end step 1 routed here. Neither is drawn by this body; see
+            // `PlanningHandoffBanner`.
             props.lendVerb(PlanningHandoffVerb(label: "Make an event") { text, done in
                 openComposer(dayKey: headerDay, prefillTitle: text, done: done)
             })
@@ -227,40 +226,18 @@ struct CalendarStepView: View {
     }
 
     // MARK: - What step 1 sent here
-
-    /// Loose ends routed to this step, offered as events rather than as a to-do list —
-    /// this step's only verb is "put it on the week".
-    ///
-    /// Handed down via `PlanningStepProps.routes` — the array lives on step 1's own row,
-    /// so only the shell can pass it across. See `PlanningCalendarModel.routes`.
-    /// (The web does not surface these on the destination step; this is iOS ahead, and a
-    /// away from working, and nothing about the affordance changes when it lands.
-    @ViewBuilder private var routes: some View {
-        if !model.openRoutes.isEmpty {
-            VStack(alignment: .leading, spacing: 8) {
-                SectionLabel(text: "Sent here from loose ends")
-                ForEach(model.openRoutes, id: \.id) { route in
-                    HStack(spacing: 10) {
-                        Text(route.title)
-                            .font(.system(size: 13.5, weight: .semibold)).foregroundStyle(WF.ink)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Spacer(minLength: 6)
-                        Button("Make an event") {
-                            openComposer(
-                                dayKey: props.weekStart, prefillTitle: route.title, route: route)
-                        }
-                        .font(.system(size: 12.5, weight: .bold))
-                        .foregroundStyle(props.busy ? WF.ink3 : WF.primary)
-                        .buttonStyle(.plain)
-                        .disabled(props.busy)
-                    }
-                    .padding(11)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .wfField(fill: WF.panel)
-                }
-            }
-        }
-    }
+    //
+    // NOT DRAWN BY THIS BODY, on purpose, and it used to be. A loose end routed to this
+    // step had its own trailing section under the week ("SENT HERE FROM LOOSE ENDS"),
+    // while a parked note tagged for this step came down in the shell's box at the TOP —
+    // two mechanisms for "somebody sent this here", landing at opposite ends of one
+    // screen. It was reported exactly that way: "wouldn't these be in the top 'parked
+    // things' box? why are they hidden at the bottom?"
+    //
+    // Both now live in `PlanningHandoffBanner`, above this body, and the verb lent on
+    // `onAppear` is what opens this step's composer for either of them. For a parked note
+    // routed HERE that is also the end of a double-show: routing a note sets its
+    // `step_key`, so the same note arrived through both doors and was drawn twice.
 
     private var notes: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -293,11 +270,10 @@ struct CalendarStepView: View {
     private func openComposer(
         dayKey: String,
         prefillTitle: String? = nil,
-        route: WaffledAPI.LooseEndRoute? = nil,
         done: ((Bool) -> Void)? = nil
     ) {
         composerSaved = false
-        pending = PendingCalendarComposer(route: route, done: done)
+        pending = PendingCalendarComposer(done: done)
         composer = PlanningCalendarComposer(
             day: DateFmt.date(dayKey, "yyyy-MM-dd", tz) ?? Date(), prefillTitle: prefillTitle)
     }
@@ -306,16 +282,14 @@ struct CalendarStepView: View {
     private func onSaved() {
         composerSaved = true
         model.recordEventAdded()
-        if let route = pending?.route {
-            model.recordRouteMade(kind: route.kind, id: route.id)
-        }
         // The shell's counter and its agenda sheet should agree with what just happened.
         props.refresh()
     }
 
-    /// A CANCELLED COMPOSER MUST REPORT `false`. Settling a parked note on a cancel would
-    /// throw away the only record that the thing still needs doing, on the strength of
-    /// somebody having opened a box and closed it again.
+    /// A CANCELLED COMPOSER MUST REPORT `false`. Settling a parked note — or taking a
+    /// routed loose end off the box — on a cancel would throw away the only record that
+    /// the thing still needs doing, on the strength of somebody having opened a box and
+    /// closed it again.
     private func composerDismissed() {
         let p = pending
         pending = nil
@@ -333,8 +307,7 @@ private struct PlanningCalendarComposer: Identifiable {
 
 /// What must survive the sheet's item being cleared on dismissal.
 private struct PendingCalendarComposer {
-    /// The routed loose end this composer was opened for, if any.
-    let route: WaffledAPI.LooseEndRoute?
-    /// The parked-note handoff's completion, if the banner opened it.
+    /// The "sent here" box's completion, if the box opened this composer — for a parked
+    /// note or for a routed loose end. `nil` when the step's own `＋` did.
     let done: ((Bool) -> Void)?
 }
