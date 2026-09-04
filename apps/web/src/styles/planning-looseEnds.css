@@ -169,6 +169,12 @@
   flex: none; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
   padding-top: 4px; font-size: 12.5px; font-weight: 600; color: var(--ink-3);
 }
+/* The one sentence that makes the arrows readable. Takes the whole row so the items
+   line up under it rather than beside it, and reads as a caption, not as an item. */
+.wp-le-trail-h {
+  flex-basis: 100%; font-size: 11px; font-weight: 800; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--ink-3); opacity: 0.85;
+}
 .wp-le-trail-i { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 .wp-le-trail-i b { font-weight: 750; color: var(--ink-2); }
 .wp-le-trail-i.last b { color: var(--ink); }

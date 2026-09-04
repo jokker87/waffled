@@ -187,6 +187,10 @@ describe('loose ends · routing, which is the step', () => {
     const trail = await screen.findByText('Take the bins out')
     expect(trail).toBeInTheDocument()
     expect(screen.getByText(/→ Tasks/)).toBeInTheDocument()
+    // …and it says what the arrow MEANS. "I clicked 'put it on the calendar' and the
+    // item moved at the bottom to the -> calendar, what does that mean?" — a title, an
+    // arrow and a step name is a receipt only if you already know the mechanism.
+    expect(screen.getByTestId('wp-le-trail-h')).toHaveTextContent(/come up at that step/i)
 
     fireEvent.click(screen.getByRole('button', { name: 'Undo' }))
     await waitFor(() => expect(routeCalls()).toHaveLength(2))

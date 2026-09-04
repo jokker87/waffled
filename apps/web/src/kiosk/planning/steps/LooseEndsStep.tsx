@@ -458,6 +458,15 @@ function Body({ step, sessionId, weekStart, setDecisionData, busy }: StepBodyPro
       {/* The trail: what you just routed, and a way back out of the last one. */}
       {trail.length > 0 && (
         <div className="wp-le-trail">
+          {/* WHAT THE ARROW MEANS, said once. "I clicked 'put it on the calendar' and
+              the item moved at the bottom to the -> calendar, what does that mean?" —
+              a title, an arrow and a step name is a receipt only to somebody who
+              already knows the mechanism. Routing does not DO the thing; it hands the
+              item to the step that will, and every destination is still ahead of this
+              one tonight. That is the sentence that was missing. */}
+          <span className="wp-le-trail-h" data-testid="wp-le-trail-h">
+            Sent ahead — they&rsquo;ll come up at that step later tonight
+          </span>
           {trail.map((r, i) => (
             <span key={routeKey(r)} className={`wp-le-trail-i${i === 0 ? ' last' : ''}`}>
               <b>{r.title}</b> → {stepName(r.to)}
