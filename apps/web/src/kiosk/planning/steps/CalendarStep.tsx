@@ -4,6 +4,7 @@ import { evVars, useEventColor } from '../../../lib/event-color'
 import { EventModal } from '../../components/EventModal'
 import { DOW, DOW_FULL, MONTHS_SHORT, addDays, localDate, ymd } from '../../components/cal-utils'
 import type { PlanningStepModule, StepBodyProps } from '../registry'
+import { useHandoffAction } from '../handoff'
 import '../../../styles/planning-calendar.css'
 
 // Step 2 · Calendar — the week is the whole screen, and it is the REAL calendar.
@@ -163,6 +164,17 @@ function Body({ weekStart, setDecisionData, refresh, busy }: StepBodyProps) {
   // The recap reads through to the calendar itself, so copying event data onto the
   // session record would give the two something to disagree about.
   const [added, setAdded] = useState(0)
+  // A parked note being turned INTO an event: its words seed the title, so the note is
+  // not retyped. Null whenever the modal was opened the ordinary way.
+  const [fromNote, setFromNote] = useState<string | null>(null)
+
+  // The verb this step lends the shell's parked-note banner. "Make an event" opens the
+  // same modal the `＋` opens — there is no second composer here, which is the whole
+  // point of lending a verb rather than growing one.
+  const finishHandoff = useHandoffAction('Make an event', (note) => {
+    setFromNote(note)
+    setAddOn(headerDay)
+  })
 
   const todayKey = ymd(new Date())
   const headerDay = days.some((d) => d.key === todayKey) ? todayKey : days[0].key
@@ -172,9 +184,17 @@ function Body({ weekStart, setDecisionData, refresh, busy }: StepBodyProps) {
     const n = added + 1
     setAdded(n)
     setDecisionData({ added: n })
+    // Something was really created, so a note that opened this modal is settled.
+    if (fromNote !== null) { setFromNote(null); finishHandoff(true) }
     // The rows and the shell's counter should both agree with what just happened.
     refetch()
     refresh()
+  }
+
+  function onCloseModal() {
+    setAddOn(null)
+    // Closed without saving: the note stays on the banner, still needing doing.
+    if (fromNote !== null) { setFromNote(null); finishHandoff(false) }
   }
 
   return (
@@ -246,7 +266,14 @@ function Body({ weekStart, setDecisionData, refresh, busy }: StepBodyProps) {
       {/* The app's own event modal — NOT a second event form. It carries the date it was
           opened on, and owns the time, the duration, repeats, the location and who it's
           for, plus the local-first write. */}
-      {addOn && <EventModal date={addOn} onClose={() => setAddOn(null)} onSaved={onSaved} />}
+      {addOn && (
+        <EventModal
+          date={addOn}
+          {...(fromNote !== null ? { prefill: { title: fromNote } } : {})}
+          onClose={onCloseModal}
+          onSaved={onSaved}
+        />
+      )}
     </div>
   )
 }

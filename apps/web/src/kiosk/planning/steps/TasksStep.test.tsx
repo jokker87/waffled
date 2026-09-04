@@ -2,6 +2,7 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import mod from './TasksStep'
 import type { PlanningStep } from '../../../lib/api'
 import type { StepBodyProps } from '../registry'
+import { HandoffCtx, type HandoffAction } from '../handoff'
 
 // Step 8 · Tasks — "Who's doing what?"
 //
@@ -168,6 +169,53 @@ const props = (over: Partial<StepBodyProps> = {}): StepBodyProps => ({
 const column = (name: string) => screen.getByTestId(`wpt-col-${name}`)
 const strip = () => screen.getByTestId('wpt-strip')
 const wrote = (method: string, match: string) => calls.filter((c) => c.method === method && c.url.includes(match))
+
+describe('TasksStep · the verb it lends the parked-note banner', () => {
+  // "while handled vs not kind of works, I feel like we should have an action relevant
+  // to the page we are on, like for tasks it should be 'make a task'".
+  //
+  // The banner stays in the shell — it is identical on ten steps, and the shell is what
+  // refetches after a write. What the step lends it is one VERB, and the verb opens the
+  // step's OWN composer. That is the part worth pinning: no second way to add a chore,
+  // and the note's words carried across so nobody retypes them.
+  const lend = () => {
+    let action: HandoffAction | null = null
+    const finish = vi.fn()
+    render(
+      <HandoffCtx.Provider value={{ register: (a) => { action = a }, finish }}>
+        <Body {...props()} />
+      </HandoffCtx.Provider>
+    )
+    return { act: () => action as HandoffAction | null, finish }
+  }
+
+  it('lends "Make a task", and it opens THIS step’s own chore composer on the note', async () => {
+    mockApi()
+    const { act } = lend()
+    await waitFor(() => expect(act()).toBeTruthy())
+    expect(act()!.label).toBe('Make a task')
+
+    act()!.run('book the campsite')
+
+    // The app's own ChoreModal — not a composer grown inside the banner — and the words
+    // that were parked are already in it.
+    const title = await screen.findByPlaceholderText('Feed the dog')
+    expect((title as HTMLInputElement).value).toBe('book the campsite')
+  })
+
+  it('settles the note only when a task was really created', async () => {
+    mockApi()
+    const { act, finish } = lend()
+    await waitFor(() => expect(act()).toBeTruthy())
+    act()!.run('book the campsite')
+    await screen.findByPlaceholderText('Feed the dog')
+
+    // Closed without saving. A banner that ticked the note off here would throw away the
+    // only record that it still needs doing.
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+    await waitFor(() => expect(finish).toHaveBeenCalledWith(false))
+  })
+})
 
 describe('TasksStep', () => {
   it('lays the week out by person: what they carry, when it lands, what they already hold', async () => {

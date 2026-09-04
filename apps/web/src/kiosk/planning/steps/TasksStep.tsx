@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Icon } from '../../icons'
 import { ChoreModal } from '../../components/ChoreModal'
+import { useHandoffAction } from '../handoff'
 import {
   can,
   useCurrencies,
@@ -236,6 +237,17 @@ function Body({ weekStart, setDecisionData, refresh, busy }: StepBodyProps) {
   // Whose column's "+ Add for …" is open. `''` is the strip's own "Add a task" (nobody
   // prefilled); null is closed.
   const [adding, setAdding] = useState<string | null>(null)
+  // A parked note being turned INTO a task: its words seed the title, so nobody retypes
+  // what they already wrote down. Null whenever the modal was opened the ordinary way.
+  const [fromNote, setFromNote] = useState<string | null>(null)
+
+  // The verb this step lends the shell's parked-note banner. "Make a task" opens the
+  // very same `ChoreModal` the strip's own "Add a task" opens — the banner grows no
+  // composer of its own, which is what keeps one way to add a chore in this app.
+  const finishHandoff = useHandoffAction('Make a task', (note) => {
+    setFromNote(note)
+    setAdding('')
+  })
   // The card whose chore is open in the EDITOR, with the column it sits in (a chore's
   // "Who" isn't on the card payload — the column it's in is that fact).
   const [editing, setEditing] = useState<{ chore: PlanningTasksChore; owner: string | null } | null>(null)
@@ -452,10 +464,19 @@ function Body({ weekStart, setDecisionData, refresh, busy }: StepBodyProps) {
           personId={adding || null}
           defaultFreq="once"
           defaultDueOn={board.newTaskDay}
+          {...(fromNote !== null ? { defaultTitle: fromNote } : {})}
           canAssignOthers={canAssign}
           selfPersonId={person?.id ?? null}
-          onClose={() => setAdding(null)}
-          onSaved={savedChore}
+          onClose={() => {
+            setAdding(null)
+            // Closed without saving: the note stays on the banner, still needing doing.
+            if (fromNote !== null) { setFromNote(null); finishHandoff(false) }
+          }}
+          onSaved={() => {
+            // Something was really created, so a note that opened this is settled.
+            if (fromNote !== null) { setFromNote(null); finishHandoff(true) }
+            savedChore()
+          }}
         />
       )}
 

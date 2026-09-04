@@ -15,6 +15,7 @@ import {
 import { STEP_MODULES, type PlanningStepModule, type StepBodyProps } from './planning/registry'
 import { StepPlaceholder } from './planning/StepPlaceholder'
 import { StepErrorBoundary } from './planning/StepErrorBoundary'
+import { HandoffCtx, type HandoffAction } from './planning/handoff'
 import '../styles/planning.css'
 
 // Weekly Planning — the session shell.
@@ -122,12 +123,22 @@ function DiscardBlock({ confirming, setConfirming, busy, onDiscard }: {
  * the note (you did the thing with the step's own controls). "Drop it" says it was never
  * really a thing. Leaving it alone is the third answer and writes nothing — the note
  * stays parked and turns up again in the recap, which is what parking is for.
+ *
+ * …and, when the step lends one, a THIRD answer that actually does the thing: "Make a
+ * task" on Tasks, "Make an event" on Calendar. Reported as "while handled vs not kind
+ * of works, I feel like we should have an action relevant to the page we are on". It
+ * opens the STEP'S own composer (see `./handoff`) rather than growing a composer here,
+ * and the note is settled only if something was really created. A step with no composer
+ * lends nothing and the banner stays as it was — a button promising an action it does
+ * not perform is worse than the plain one.
  */
-function Handoff({ step, sessionId, busy, onDone }: {
+function Handoff({ step, sessionId, busy, onDone, action, onAct }: {
   step: PlanningStep
   sessionId: string
   busy: boolean
   onDone: () => void
+  action: HandoffAction | null
+  onAct: (id: string, note: string) => void
 }) {
   const [working, setWorking] = useState<string | null>(null)
   const [hidden, setHidden] = useState<string[]>([])
@@ -165,13 +176,23 @@ function Handoff({ step, sessionId, busy, onDone }: {
               {n.byline && <em>{n.byline}</em>}
             </span>
             <span className="wp-handoff-acts">
+              {action && (
+                <button
+                  type="button"
+                  className="btn btn-primary wp-handoff-act is-make"
+                  disabled={busy || working === n.id}
+                  onClick={() => onAct(n.id, n.note)}
+                >
+                  {action.label}
+                </button>
+              )}
               <button
                 type="button"
                 className="btn btn-ghost wp-handoff-act"
                 disabled={busy || working === n.id}
                 onClick={() => void answer(n.id, 'done')}
               >
-                Handled
+                {action ? 'Already handled' : 'Handled'}
               </button>
               <button
                 type="button"
@@ -213,6 +234,44 @@ export function WeeklyPlanning() {
   const next = current ? nextStepAfter(steps, current.key) : null
   const session = view?.session ?? null
   const stepMod = useStepModule(current?.key)
+
+  // THE VERB THIS STEP LENDS THE BANNER, if it has one. See `./handoff` — the shell
+  // keeps the banner and the step keeps its composer, so there is still exactly one way
+  // to add a chore in this app.
+  const [handoffAction, setHandoffAction] = useState<HandoffAction | null>(null)
+  const register = useCallback((a: HandoffAction | null) => setHandoffAction(a), [])
+  // The note whose composer is currently open. A ref, not state: nothing renders from
+  // it, and it must survive the re-render the composer opening causes.
+  const acting = useRef<string | null>(null)
+  const sessionId = session?.id ?? null
+
+  const onAct = useCallback(
+    (id: string, note: string) => {
+      acting.current = id
+      handoffAction?.run(note)
+    },
+    [handoffAction]
+  )
+
+  const finish = useCallback(
+    (created: boolean) => {
+      const id = acting.current
+      acting.current = null
+      // A CANCELLED composer settles nothing. Ticking the note off here would throw away
+      // the only record that it still needs doing, on the strength of somebody having
+      // opened a box and closed it again.
+      if (!created || !id || !sessionId) return
+      looseEndsApi
+        .resolve('parked', id, 'done', sessionId)
+        .then(() => refetch())
+        // Left on the banner rather than half-answered; the next refetch is the truth.
+        .catch(() => {})
+    },
+    [sessionId, refetch]
+  )
+
+  const handoffCtx = useMemo(() => ({ register, finish }), [register, finish])
+
 
   // A crumb belongs to the step that set it. Moving on must not carry it onto the next
   // step's answer.
@@ -409,6 +468,7 @@ export function WeeklyPlanning() {
     : null
 
   return (
+    <HandoffCtx.Provider value={handoffCtx}>
     <div className="wp-screen wp-in">
       <div className="wp-head">
         <button type="button" className="wp-stepchip" onClick={() => setSheet(true)} aria-expanded={sheet}>
@@ -427,7 +487,14 @@ export function WeeklyPlanning() {
             the whole session screen. The shell is the one component whose failure has
             nowhere to fall back to — there is no boundary above it. */}
         {current && (current.parked ?? []).length > 0 && (
-          <Handoff step={current} sessionId={session.id} busy={busy} onDone={refetch} />
+          <Handoff
+            step={current}
+            sessionId={session.id}
+            busy={busy}
+            onDone={refetch}
+            action={handoffAction}
+            onAct={onAct}
+          />
         )}
         {current && (
           // Keyed on the step so moving on retries rather than inheriting a failure.
@@ -488,6 +555,7 @@ export function WeeklyPlanning() {
         </div>
       )}
     </div>
+    </HandoffCtx.Provider>
   )
 }
 

@@ -57,14 +57,18 @@ function initialForm(
   canAssignOthers = true,
   selfPersonId?: string | null,
   defaultFreq?: Freq,
-  defaultDueOn?: string
+  defaultDueOn?: string,
+  defaultTitle?: string
 ) {
   const sched = parseRrule(chore?.rrule, !!chore, defaultFreq)
   // Restricted users (no chore.manage) can only target themselves or up-for-grabs;
   // default them to self rather than the full-list default.
   const prefill = chore?.personId ?? personId ?? (canAssignOthers ? '' : selfPersonId ?? '')
   return {
-    title: chore?.title ?? '',
+    // An existing chore's own title wins; otherwise a caller that already knows what
+    // this is about can say so (Weekly Planning turning a parked note into a task),
+    // and failing both it is an empty box.
+    title: chore?.title ?? defaultTitle ?? '',
     emoji: chore?.emoji ?? '',
     personId: prefill,
     rewardAmount: chore?.rewardAmount ?? 1,
@@ -90,6 +94,7 @@ export function ChoreModal({
   personId,
   defaultFreq,
   defaultDueOn,
+  defaultTitle,
   canDelete = true,
   canAssignOthers = true,
   selfPersonId,
@@ -106,6 +111,10 @@ export function ChoreModal({
   // planning a different week passes that week's day, so the task lands where the
   // person is looking. Still editable in the modal, and ignored when editing.
   defaultDueOn?: string
+  // What a NEW chore's title starts as. Weekly Planning passes a parked note's words
+  // when the banner's "Make a task" opened this, so nobody retypes what they already
+  // wrote down. Ignored when editing.
+  defaultTitle?: string
   // Whether editing may also DELETE the chore. Defaults to true (the Chores screen,
   // which is where a chore's existence is managed); a surface with a narrower question
   // than "should this chore exist" — Weekly Planning's Tasks step asks only who does
@@ -120,7 +129,7 @@ export function ChoreModal({
   const editing = !!chore
   const { persons } = usePersons()
   const { currencies, defaultCurrency } = useCurrencies()
-  const [form, setForm] = useState(() => initialForm(chore, personId, canAssignOthers, selfPersonId, defaultFreq, defaultDueOn))
+  const [form, setForm] = useState(() => initialForm(chore, personId, canAssignOthers, selfPersonId, defaultFreq, defaultDueOn, defaultTitle))
   // Restricted users see only themselves; everyone else sees the full member list.
   const pickable = canAssignOthers ? persons : persons.filter((p) => p.id === selfPersonId)
   // A parent doesn't need another parent's OK: hide the approval toggle when the
