@@ -1,0 +1,420 @@
+import Foundation
+import Testing
+@testable import Waffled
+
+// Weekly Planning · step 8 (Tasks).
+//
+// TWO THINGS HERE ARE WORTH MORE THAN THE REST:
+//
+//  1. A reassignment is TWO writes, not one — the chore PATCH plus an assign for EVERY
+//     entry in `pendingInstanceIds`. Miss the second half and the move "doesn't stick",
+//     because the Chores board keeps showing the old name for days already behind us.
+//     And the take-back direction must send an EXPLICIT null: a PATCH with the key left
+//     out means "change nothing", so `if let personId` would make it a silent no-op.
+//  2. The verb this step lends the shell's parked-note banner must report `false` when
+//     the composer is cancelled. Settling the note on a cancel throws away the only
+//     record that the thing still needs doing.
+
+private enum PlanningTasksFailure: Error { case rejected }
+
+// MARK: - The board, VERBATIM off the wire
+//
+// Field-for-field what `getTasksBoard` returns and what
+// `apps/api/test/weekly-planning-tasks.integration.test.ts` asserts against: the fixture
+// household (Kevin the owner, Wally and Lottie), a recurring weekly chore with two open
+// instances, a carried-over one-off, and one task nobody has taken.
+private let boardJSON = Data("""
+{
+  "weekStart": "2026-09-06",
+  "newTaskDay": "2026-09-06",
+  "people": [
+    { "id": "p-kevin", "name": "Kevin", "avatarEmoji": null, "colorHex": null,
+      "memberType": "adult", "isAdmin": true, "recurringChores": 0, "chores": [] },
+    { "id": "p-wally", "name": "Wally", "avatarEmoji": "🐢", "colorHex": "#25A368",
+      "memberType": "kid", "isAdmin": false, "recurringChores": 2, "chores": [
+        { "id": "c-trash", "title": "Take out the trash", "emoji": "🗑️",
+          "rrule": "FREQ=WEEKLY;BYDAY=MO,TH", "cadence": "weekly",
+          "days": ["2026-09-07", "2026-09-10"], "dueOn": null, "dueTime": "07:30",
+          "carriedOver": false, "rewardAmount": 3, "rewardCurrency": "stars",
+          "requiresApproval": true, "requiresPhoto": true,
+          "pendingInstanceIds": ["i-trash-mon", "i-trash-thu"] }
+      ] },
+    { "id": "p-lottie", "name": "Lottie", "avatarEmoji": "🦄", "colorHex": "#7A5AF8",
+      "memberType": "kid", "isAdmin": false, "recurringChores": 1, "chores": [
+        { "id": "c-library", "title": "Return the library books", "emoji": null,
+          "rrule": null, "cadence": "once",
+          "days": [], "dueOn": "2026-09-02", "dueTime": null,
+          "carriedOver": true, "rewardAmount": 0, "rewardCurrency": null,
+          "requiresApproval": false, "requiresPhoto": false,
+          "pendingInstanceIds": ["i-library"] }
+      ] }
+  ],
+  "unassigned": [
+    { "id": "c-sitter", "title": "Book the sitter", "emoji": null,
+      "rrule": null, "cadence": "once",
+      "days": [], "dueOn": null, "dueTime": null,
+      "carriedOver": false, "rewardAmount": 1.5, "rewardCurrency": null,
+      "requiresApproval": false, "requiresPhoto": false,
+      "pendingInstanceIds": [] }
+  ]
+}
+""".utf8)
+
+private func decodedBoard() throws -> WaffledAPI.PlanningTasksBoard {
+    try WaffledAPI.decoder.decode(WaffledAPI.PlanningTasksBoard.self, from: boardJSON)
+}
+
+/// One card, decoded — the fixtures are built the way the app gets them rather than by a
+/// memberwise initializer, so a wire-shape change breaks the test too.
+private func chore(_ json: String) throws -> WaffledAPI.PlanningTasksChore {
+    try WaffledAPI.decoder.decode(WaffledAPI.PlanningTasksChore.self, from: Data(json.utf8))
+}
+
+private func card(id: String = "c-x", cadence: String, days: [String] = [], dueOn: String? = nil,
+                  dueTime: String? = nil, carriedOver: Bool = false) throws -> WaffledAPI.PlanningTasksChore {
+    let daysJSON = days.map { "\"\($0)\"" }.joined(separator: ",")
+    return try chore("""
+    { "id": "\(id)", "title": "A task", "emoji": null, "rrule": null,
+      "cadence": "\(cadence)", "days": [\(daysJSON)],
+      "dueOn": \(dueOn.map { "\"\($0)\"" } ?? "null"),
+      "dueTime": \(dueTime.map { "\"\($0)\"" } ?? "null"),
+      "carriedOver": \(carriedOver), "rewardAmount": 0, "rewardCurrency": null,
+      "requiresApproval": false, "requiresPhoto": false, "pendingInstanceIds": [] }
+    """)
+}
+
+// MARK: - The feed
+
+@MainActor
+private final class TasksBoardFeed {
+    var board: WaffledAPI.PlanningTasksBoard
+    var fetchFails = false
+    var handOutFails = false
+    var saveFails = false
+    var fetchCount = 0
+    var handOuts: [(choreId: String, personId: String?)] = []
+    var saves: [(choreId: String?, body: [String: JSONValue])] = []
+
+    init(_ board: WaffledAPI.PlanningTasksBoard) { self.board = board }
+}
+
+@MainActor
+private func model(_ feed: TasksBoardFeed) -> PlanningTasksModel {
+    PlanningTasksModel(
+        fetchBoard: { _ in
+            feed.fetchCount += 1
+            if feed.fetchFails { throw PlanningTasksFailure.rejected }
+            return feed.board
+        },
+        handOut: { chore, personId in
+            feed.handOuts.append((chore.id, personId))
+            if feed.handOutFails { throw PlanningTasksFailure.rejected }
+        },
+        saveChore: { choreId, body in
+            feed.saves.append((choreId, body))
+            if feed.saveFails { throw PlanningTasksFailure.rejected }
+        })
+}
+
+// MARK: - Tests
+
+@MainActor
+@Suite struct PlanningTasksStepTests {
+
+    // ── The two-write hand-out ──────────────────────────────────────────────────
+
+    @Test func handingATaskOverMovesTheDefinitionAndEveryOpenInstance() throws {
+        let board = try decodedBoard()
+        let trash = try #require(board.people.first { $0.name == "Wally" }?.chores.first)
+        let plan = PlanningTasksHandOut.plan(trash, to: "p-lottie")
+
+        #expect(plan.choreId == "c-trash")
+        #expect(plan.patch == ["personId": .string("p-lottie")])
+        // ALL of them, not just the first. `updateChore` only cascades from today
+        // forward, so the days already behind us have to be moved by hand — and this is
+        // the half that gets forgotten, which is why a reassignment "doesn't stick".
+        #expect(plan.instanceIds == ["i-trash-mon", "i-trash-thu"])
+        #expect(plan.personId == "p-lottie")
+    }
+
+    @Test func takingATaskBackSendsAnExplicitNullRatherThanOmittingTheKey() throws {
+        let board = try decodedBoard()
+        let trash = try #require(board.people.first { $0.name == "Wally" }?.chores.first)
+        let plan = PlanningTasksHandOut.plan(trash, to: nil)
+
+        // PRESENCE AGAIN: a PATCH body with `personId` left out means "change nothing",
+        // so `if let personId` here would make the take-back a silent no-op.
+        #expect(Set(plan.patch.keys) == ["personId"], "the take-back patch sent \(plan.patch.keys.sorted())")
+        #expect(plan.patch["personId"] == JSONValue.null)
+        // Both DIRECTIONS move the open instances, or the Chores board keeps showing a
+        // name this board doesn't.
+        #expect(plan.instanceIds == ["i-trash-mon", "i-trash-thu"])
+        #expect(plan.personId == nil)
+    }
+
+    @Test func aTaskWithNoOpenInstancesIsJustThePatch() throws {
+        let board = try decodedBoard()
+        let sitter = try #require(board.unassigned.first)
+        #expect(PlanningTasksHandOut.plan(sitter, to: "p-kevin").instanceIds.isEmpty)
+    }
+
+    // ── The lent verb ───────────────────────────────────────────────────────────
+
+    @Test func theLentVerbReportsFalseWhenTheComposerIsCancelled() async throws {
+        let feed = TasksBoardFeed(try decodedBoard())
+        let model = model(feed)
+        await model.load(weekStart: "2026-09-06")
+
+        var reported: Bool?
+        model.beginHandoff(note: "book the sitter") { reported = $0 }
+
+        // It opens the strip's own composer — nobody prefilled — seeded with the note.
+        guard case let .add(personId, note)? = model.composer else {
+            Issue.record("the handoff didn't open the add composer")
+            return
+        }
+        #expect(personId == nil)
+        #expect(note == "book the sitter")
+        #expect(reported == nil, "nothing has been decided yet")
+
+        // Closed without saving.
+        let saved = model.composerDismissed()
+
+        #expect(saved == false)
+        // THE POINT: settling the note here would throw away the only record that the
+        // thing still needs doing, on the strength of somebody opening a box and
+        // closing it again.
+        #expect(reported == false)
+        #expect(feed.saves.isEmpty)
+    }
+
+    @Test func theLentVerbReportsTrueOnlyOnceATaskReallyExists() async throws {
+        let feed = TasksBoardFeed(try decodedBoard())
+        let model = model(feed)
+        await model.load(weekStart: "2026-09-06")
+
+        var reported: Bool?
+        model.beginHandoff(note: "book the sitter") { reported = $0 }
+        let error = await model.saveFromComposer(choreId: nil, body: ["title": .string("Book the sitter")])
+        #expect(error == nil)
+        #expect(reported == nil, "the sheet is still up — nothing is settled until it closes")
+
+        let saved = model.composerDismissed()
+
+        #expect(saved)
+        #expect(reported == true)
+        #expect(feed.saves.count == 1)
+        #expect(feed.saves.first?.choreId == nil, "a nil chore id creates rather than edits")
+    }
+
+    @Test func aFailedSaveKeepsTheSheetUpAndLeavesTheNoteUnsettled() async throws {
+        let feed = TasksBoardFeed(try decodedBoard())
+        feed.saveFails = true
+        let model = model(feed)
+        await model.load(weekStart: "2026-09-06")
+
+        var reported: Bool?
+        model.beginHandoff(note: "book the sitter") { reported = $0 }
+        let error = await model.saveFromComposer(choreId: nil, body: [:])
+
+        // A message rather than nil, so the sheet stays open and says why instead of
+        // dismissing on a silent failure.
+        #expect(error != nil)
+        #expect(reported == nil)
+        // …and if the reader then gives up, the note is still unfinished.
+        #expect(model.composerDismissed() == false)
+        #expect(reported == false)
+    }
+
+    @Test func abandoningTheStepWithdrawsAnOpenHandoffRatherThanLeavingItWaiting() async throws {
+        let feed = TasksBoardFeed(try decodedBoard())
+        let model = model(feed)
+        await model.load(weekStart: "2026-09-06")
+
+        var reported: Bool?
+        model.beginHandoff(note: "book the sitter") { reported = $0 }
+        model.abandonHandoff()
+
+        #expect(reported == false)
+    }
+
+    // ── The loading contract ────────────────────────────────────────────────────
+
+    @Test func aFailedReadKeepsTheBoardThatWasAlreadyOnScreen() async throws {
+        let feed = TasksBoardFeed(try decodedBoard())
+        let model = model(feed)
+        await model.load(weekStart: "2026-09-06")
+        feed.fetchFails = true
+
+        await model.load(weekStart: "2026-09-06")
+
+        #expect(model.board?.people.count == 3)
+        #expect(model.loaded)
+    }
+
+    @Test func aFailedHandOutNeitherRefetchesNorTallies() async throws {
+        let feed = TasksBoardFeed(try decodedBoard())
+        feed.handOutFails = true
+        let model = model(feed)
+        await model.load(weekStart: "2026-09-06")
+        let sitter = try #require(model.board?.unassigned.first)
+
+        let ok = await model.give(sitter, to: "p-wally", weekStart: "2026-09-06")
+
+        #expect(!ok)
+        #expect(feed.handOuts.count == 1)
+        #expect(feed.fetchCount == 1)          // the initial load only
+        #expect(model.assigned == 0)           // nothing moved, so nothing is tallied
+        #expect(model.errorMessage != nil)
+    }
+
+    @Test func theTallyUndoesItselfOnATakeBackSoTheRecapCantOverReport() async throws {
+        let feed = TasksBoardFeed(try decodedBoard())
+        let model = model(feed)
+        await model.load(weekStart: "2026-09-06")
+        let sitter = try #require(model.board?.unassigned.first)
+
+        let handedOver = await model.give(sitter, to: "p-wally", weekStart: "2026-09-06")
+        #expect(handedOver)
+        #expect(model.assigned == 1)
+        let takenBack = await model.give(sitter, to: nil, weekStart: "2026-09-06")
+        #expect(takenBack)
+        #expect(model.assigned == 0)
+        // Re-read rather than bookkeeping: a column is the WEEK, and the server owns it.
+        #expect(feed.fetchCount == 3)
+        #expect(feed.handOuts.map(\.personId) == ["p-wally", nil])
+    }
+
+    // ── Decoding ────────────────────────────────────────────────────────────────
+
+    @Test func decodesTheBoardVerbatimOffTheWire() throws {
+        let board = try decodedBoard()
+        #expect(board.weekStart == "2026-09-06")
+        // Server-owned, so "add a task" on a Wednesday while planning next week can't
+        // quietly date it to that Wednesday.
+        #expect(board.newTaskDay == "2026-09-06")
+        #expect(board.people.map(\.name) == ["Kevin", "Wally", "Lottie"])
+        #expect(board.people[0].isAdmin)
+        #expect(board.people[1].recurringChores == 2)
+
+        let trash = try #require(board.people[1].chores.first)
+        #expect(trash.cadence == "weekly")
+        #expect(trash.days == ["2026-09-07", "2026-09-10"])
+        #expect(trash.dueOn == nil)
+        #expect(trash.dueTime == "07:30")
+        #expect(trash.rewardAmount == 3)
+        // Carried so the editor prefills honestly — a missing flag reads as false, which
+        // would switch approval or photo proof off the first time anybody fixed a typo.
+        #expect(trash.requiresApproval)
+        #expect(trash.requiresPhoto)
+        #expect(trash.pendingInstanceIds == ["i-trash-mon", "i-trash-thu"])
+
+        let library = try #require(board.people[2].chores.first)
+        #expect(library.carriedOver)
+        #expect(library.dueOn == "2026-09-02")
+
+        #expect(board.unassigned.map(\.title) == ["Book the sitter"])
+        #expect(board.unassigned[0].rewardAmount == 1.5)
+    }
+
+    // ── The chip, which is every fact the server handed us and no guess ──────────
+
+    @Test func theDayChipNamesWhatTheServerSaidAndNothingElse() throws {
+        let board = try decodedBoard()
+        let trash = try #require(board.people[1].chores.first)
+        #expect(PlanningTasksFormat.dayChip(trash) == "Mon, Thu 7:30am")
+
+        let library = try #require(board.people[2].chores.first)
+        // Carried over wins over the day it was for: it arrives in the week without
+        // belonging to a day in it.
+        #expect(PlanningTasksFormat.dayChip(library) == "Carried over")
+
+        #expect(PlanningTasksFormat.dayChip(try card(cadence: "daily", days: [
+            "2026-09-06", "2026-09-07", "2026-09-08", "2026-09-09",
+            "2026-09-10", "2026-09-11", "2026-09-12",
+        ])) == "Every day")
+        // A one-off dated outside the week still says which day it is for.
+        #expect(PlanningTasksFormat.dayChip(try card(cadence: "once", dueOn: "2026-09-21")) == "Sep 21")
+        #expect(PlanningTasksFormat.dayChip(try card(cadence: "once")) == "No day set")
+        // Midnight is a time, and noon is pm.
+        #expect(PlanningTasksFormat.shortTime("00:00") == "12am")
+        #expect(PlanningTasksFormat.shortTime("12:05") == "12:05pm")
+        #expect(PlanningTasksFormat.shortTime(nil) == "")
+    }
+
+    @Test func onlyAOneOffsDayCanBeSetFromTheBoard() throws {
+        // A recurring chore's days come from its rrule, which belongs to the chore
+        // editor, not to a chip on a board.
+        #expect(PlanningTasksFormat.dayIsSettable(try card(cadence: "once")))
+        #expect(!PlanningTasksFormat.dayIsSettable(try card(cadence: "weekly", days: ["2026-09-07"])))
+        #expect(PlanningTasksFormat.dayIsUnset(try card(cadence: "once")))
+        #expect(!PlanningTasksFormat.dayIsUnset(try card(cadence: "once", carriedOver: true)))
+    }
+
+    @Test func provenanceOnlyClaimsWhatTheChoresModuleCanSay() throws {
+        #expect(PlanningTasksFormat.provenance(try card(cadence: "once")) == "One-off task")
+        #expect(PlanningTasksFormat.provenance(try card(cadence: "weekly")) == "Recurring chore")
+        #expect(PlanningTasksFormat.provenance(try card(cadence: "once", carriedOver: true))
+                == "Left over from before this week")
+    }
+
+    @Test func theFairnessLineIsStatedRatherThanScored() {
+        #expect(PlanningTasksFormat.carriesLabel(0) == "No recurring chores yet")
+        #expect(PlanningTasksFormat.carriesLabel(1) == "Carries 1 recurring chore")
+        #expect(PlanningTasksFormat.carriesLabel(4) == "Carries 4 recurring chores")
+    }
+
+    // ── Bridging into the app's own chore editor ─────────────────────────────────
+
+    @Test func aCardOpensTheAppsChoreEditorWithoutLosingAnySetting() throws {
+        let board = try decodedBoard()
+        let trash = try #require(board.people[1].chores.first)
+        let instance = try #require(trash.asChoreInstance(owner: "p-wally"))
+
+        #expect(instance.choreId == "c-trash")
+        #expect(instance.choreTitle == "Take out the trash")
+        // The column IS the assignee — a chore's "Who" is not on the board payload.
+        #expect(instance.personId == "p-wally")
+        // An INT, because the DTO decodes rewardAmount with `(try? Int.self) ?? 0`:
+        // encoding a double would decode as zero, and Save would then wipe the reward.
+        #expect(instance.rewardAmount == 3)
+        #expect(instance.rewardCurrency == "stars")
+        #expect(instance.rrule == "FREQ=WEEKLY;BYDAY=MO,TH")
+        #expect(instance.dueTime == "07:30")
+        #expect(instance.requiresApproval)
+        #expect(instance.requiresPhoto)
+    }
+
+    @Test func aCardInTheStripBridgesWithNobodyOnItAndKeepsItsDay() throws {
+        let library = try #require(try decodedBoard().people[2].chores.first)
+        let instance = try #require(library.asChoreInstance(owner: nil))
+        #expect(instance.personId == nil)
+        // The day the editor opens on, so tapping the chip lands on the day the card was
+        // showing. Omitting it would silently move the chore to today.
+        #expect(instance.dueOn == "2026-09-02")
+        #expect(instance.rrule == nil)
+        #expect(instance.rewardAmount == 0)
+    }
+
+    @Test func aFractionalRewardSurvivesTheBridgeAsAWholeNumber() throws {
+        let sitter = try #require(try decodedBoard().unassigned.first)
+        let instance = try #require(sitter.asChoreInstance(owner: nil))
+        // 1.5 stars is not a thing any household has, but it must not decode as 0 —
+        // which is what an unrounded double would do.
+        #expect(instance.rewardAmount == 2)
+    }
+
+    // ── The crumb ───────────────────────────────────────────────────────────────
+
+    @Test func theCrumbIsCountsOnly() async throws {
+        let feed = TasksBoardFeed(try decodedBoard())
+        let model = model(feed)
+        await model.load(weekStart: "2026-09-06")
+
+        let crumb = model.crumb
+        #expect(Set(crumb.keys) == ["assigned", "leftUpForGrabs"])
+        #expect(crumb["assigned"] == JSONValue.int(0))
+        #expect(crumb["leftUpForGrabs"] == JSONValue.int(1))
+        // No titles, no ids, no people — the recap reads those through to chores itself.
+    }
+}
