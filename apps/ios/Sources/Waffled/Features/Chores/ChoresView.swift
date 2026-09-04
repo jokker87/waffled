@@ -962,6 +962,16 @@ struct ChoreEditSheet: View {
     /// The household's reward currencies, likewise snapshotted (was `sync.currencies`).
     let currencies: [WaffledAPI.Currency]
     let target: ChoresView.ChoreEditorTarget
+    /// Whether editing may also DELETE the chore. Defaults to true — the Chores screen,
+    /// which is where a chore's existence is managed.
+    ///
+    /// Weekly Planning's Tasks step passes false, and the reason is worth keeping:
+    /// deleting a chore reaches far outside the week being planned, and the Meals step's
+    /// shopping trip is itself a chore on that very board which other steps resolve by
+    /// id. A step whose question is only "who is doing what this week" has no business
+    /// offering to remove the thing from existence. (The web's `ChoreModal` has taken
+    /// `canDelete` for the same reason since the Tasks step shipped.)
+    var canDelete: Bool = true
     /// Persist the chore. Returns nil on success, else a user-facing error message
     /// (so the sheet stays open and shows why, instead of dismissing on a silent fail).
     let onSave: (String?, [String: JSONValue]) async -> String?
@@ -996,10 +1006,11 @@ struct ChoreEditSheet: View {
     /// Ignored when editing — an existing chore's title is its own.
     init(assignableMembers: [SyncedMember], currencies: [WaffledAPI.Currency],
          target: ChoresView.ChoreEditorTarget, initialDate: Date = Date(),
-         prefillTitle: String? = nil,
+         prefillTitle: String? = nil, canDelete: Bool = true,
          onSave: @escaping (String?, [String: JSONValue]) async -> String?, onDelete: @escaping (String) -> Void) {
         self.assignableMembers = assignableMembers; self.currencies = currencies
-        self.target = target; self.onSave = onSave; self.onDelete = onDelete
+        self.target = target; self.canDelete = canDelete
+        self.onSave = onSave; self.onDelete = onDelete
         switch target {
         case let .new(pid):
             editChoreId = nil
@@ -1209,7 +1220,7 @@ struct ChoreEditSheet: View {
                             .padding(.horizontal, 4)
                     }
 
-                    if editing {
+                    if editing && canDelete {
                         Button {
                             if confirmDelete { onDelete(editChoreId!); dismiss() }
                             else { withAnimation { confirmDelete = true } }

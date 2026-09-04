@@ -666,6 +666,16 @@ struct EventEditSheet: View {
     @Environment(SyncManager.self) private var sync
     let event: SyncedEvent?
     let initialDate: Date
+    /// Called once, after a successful write, BEFORE the sheet dismisses.
+    ///
+    /// Exists because "did they save or cancel?" is otherwise unanswerable from outside:
+    /// the sheet only dismissed, so a caller had to infer a save by diffing the events
+    /// mirror across the sheet's lifetime — and a concurrent sync landing in that window
+    /// reads as a save that never happened. Weekly Planning's parked-note handoff turns
+    /// on exactly that distinction: a CANCELLED composer must leave the note on the
+    /// banner, because settling it would throw away the only record that the thing still
+    /// needs doing.
+    var onSaved: (() -> Void)?
 
     /// The id to edit/delete against. A recurring occurrence's row id doesn't exist in
     /// the `events` table — it lives on the master, so we resolve through `seriesId`
@@ -1568,6 +1578,7 @@ struct EventEditSheet: View {
                 saveError = "Couldn’t save this event. Check your connection and try again."
                 return
             }
+            onSaved?()  // before the dismiss, so a caller can act on a real save
             dismiss()   // after the write, so the caller's reload picks up fresh data
         }
     }
