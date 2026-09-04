@@ -288,6 +288,24 @@ struct PlanningShellView: View {
                 // the tab bar; the footer carries the bar's clearance.
                 .padding(.bottom, 12)
             }
+            // HOW THE KEYBOARD GETS DISMISSED IN THIS SESSION, and why no step body in
+            // here declares `.wfKeyboardDoneToolbar`.
+            //
+            // That helper puts a "Done" button in an input accessory view. Measured on an
+            // iPhone 17 Pro it is ~79pt tall — for one button — and it docks directly
+            // above the keyboard, which in this screen means directly on top of a footer
+            // that is ALREADY pinned there. Footer, then a near-empty white band, then the
+            // keys: "why is there so much extra space?"
+            //
+            // The convention's own rule (DesignSystem/FieldStyles) is that the accessory
+            // exists for a keyboard "when it otherwise has none — decimal pads have no
+            // return key". Every field in this session takes text, so every one of them
+            // has a return key; the justification doesn't apply here. Dragging the content
+            // dismisses instead, which costs no height at all.
+            //
+            // Sheets presented FROM a step keep their toolbars: they have no pinned footer
+            // to collide with, and their own scroll views are their own business.
+            .scrollDismissesKeyboard(.interactively)
             sessionFooter
         }
     }
