@@ -40,6 +40,8 @@ struct HorizonStepView: View {
     @FocusState private var noteFocused: Bool
     @State private var composer: HorizonComposer?
     @State private var pending: PendingComposer?
+    /// Set by `EventEditSheet.onSaved`, read on dismiss — see `composerDismissed`.
+    @State private var saved = false
 
     private var tz: TimeZone { sync.householdTz }
     /// Which day starts the week, so the grid is cut the way THIS HOUSEHOLD cuts one — the
@@ -119,7 +121,8 @@ struct HorizonStepView: View {
             // The app's own event sheet — NOT a second event form. `prefillTitle` carries
             // the note somebody already wrote: retyping their own words back at them is
             // what makes an affordance feel pointless.
-            EventEditSheet(event: c.event, initialDate: c.day, prefillTitle: c.prefillTitle)
+            EventEditSheet(event: c.event, initialDate: c.day, prefillTitle: c.prefillTitle,
+                           onSaved: { saved = true })
         }
     }
 
@@ -334,50 +337,37 @@ struct HorizonStepView: View {
         }
     }
 
-    /// Open the shared event sheet, remembering which events already existed so a save can
-    /// be told from a cancel on dismissal (see `composerDismissed`).
+    /// Open the shared event sheet.
     private func openComposer(
         event: SyncedEvent?, day: Date, prefillTitle: String? = nil, done: ((Bool) -> Void)? = nil
     ) {
-        pending = PendingComposer(
-            knownIds: Set(sync.events.map(\.id)), isCreate: event == nil, done: done)
+        saved = false
+        pending = PendingComposer(isCreate: event == nil, done: done)
         composer = HorizonComposer(event: event, day: day, prefillTitle: prefillTitle)
     }
 
     /// Did the composer actually create something?
     ///
-    /// `EventEditSheet` has no completion of its own, so this watches the local mirror for
-    /// an id that was not there when the sheet opened — the write is local-first, so a save
-    /// lands in `sync.events` a beat after the sheet closes while a cancel never does. It is
-    /// the honest answer available today, and the seam's rule is why it matters: A CANCELLED
-    /// COMPOSER MUST REPORT FALSE, or a parked note gets settled on the strength of somebody
-    /// having opened a box and closed it again. The proper fix is an `onSaved:` on
-    /// `EventEditSheet` — a one-line change to a file this port may not touch, so it is in
-    /// the hand-off notes instead.
+    /// `EventEditSheet` reports its own save through `onSaved`, which fires after the write
+    /// and before the dismiss — so this is now a flag rather than a guess.
+    ///
+    /// It used to watch the local mirror for an id that was not there when the sheet
+    /// opened, polling for ~1.5s, because the sheet had no completion. That was the honest
+    /// answer available at the time and it was still wrong in one direction: a sync landing
+    /// in the poll window reads as a save that never happened. The rule it exists to serve
+    /// is why that mattered — A CANCELLED COMPOSER MUST REPORT FALSE, or a parked note gets
+    /// settled on the strength of somebody having opened a box and closed it again.
     private func composerDismissed() {
         guard let p = pending else { return }
         pending = nil
-        guard p.isCreate else {
-            p.done?(false)
-            return
+        let created = saved && p.isCreate
+        saved = false
+        if created {
+            model.recordEventAdded()
+            // The shell's counter and its agenda sheet should agree with what just happened.
+            props.refresh()
         }
-        Task {
-            var created = false
-            for _ in 0..<10 {
-                if sync.events.contains(where: { !p.knownIds.contains($0.id) }) {
-                    created = true
-                    break
-                }
-                try? await Task.sleep(for: .milliseconds(150))
-            }
-            if created {
-                model.recordEventAdded()
-                // The shell's counter and its agenda sheet should agree with what just
-                // happened.
-                props.refresh()
-            }
-            p.done?(created)
-        }
+        p.done?(created)
     }
 
     // MARK: - Small formatting
@@ -420,7 +410,8 @@ private struct HorizonComposer: Identifiable {
 /// What we need remembered ACROSS the sheet's lifetime, so it survives the item being
 /// cleared on dismissal.
 private struct PendingComposer {
-    let knownIds: Set<String>
+    /// Editing reports `false`: this step's banner verb only ever offers to MAKE an event,
+    /// so an edit is not the thing a parked note was waiting for.
     let isCreate: Bool
     let done: ((Bool) -> Void)?
 }

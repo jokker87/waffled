@@ -512,6 +512,10 @@ struct PlanningShellView: View {
             setDecisionData: { model.setDecisionData($0) },
             refresh: { Task { await model.load() } },
             busy: model.busy,
+            // Off the looseEnds step's OWN row — see the note on `PlanningStepProps.routes`.
+            // A step that hasn't run yet simply has no `routes` key, hence `?? []`.
+            routes: PlanningRouteSeed.decode(model.steps.first { $0.key == "looseEnds" }?.data["routes"]),
+            goToStep: { model.show($0) },
             lendVerb: { verb in
                 handoffVerb = verb
                 handoffVerbStepKey = verb == nil ? nil : step.key

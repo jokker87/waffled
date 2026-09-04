@@ -311,6 +311,22 @@ final class PlanningModel {
         await go { _ = try await patchSessionCall(session.id, key, nil) }
     }
 
+    /// SHOW a step without claiming the session moved there.
+    ///
+    /// The difference from `jump(to:)` is the whole point, and it is not cosmetic:
+    /// `jump` is the agenda sheet's gesture and it PATCHes `currentStep`, which is the
+    /// cross-DEVICE resume pointer. The recap's rows are links — on the web they are
+    /// literally `<Link to="/planning/<step>">`, which changes the address and nothing
+    /// else, and the URL-sync effect there leaves a path naming a runnable step alone
+    /// ("a pasted link outranks the pointer").
+    ///
+    /// So following a recap row must not tell the kiosk in the kitchen that the family
+    /// went back to step 4. `askedStep` is this device's view; `currentStep` is the
+    /// session's.
+    func show(_ key: String) {
+        askedStep = key
+    }
+
     /// Reopen a saved session. `status` is the only field sent — `currentStep` is omitted
     /// so the server leaves the pointer exactly where the session ended.
     func reopen() async {

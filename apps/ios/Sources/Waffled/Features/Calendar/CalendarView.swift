@@ -751,9 +751,13 @@ struct EventEditSheet: View {
     /// plus a snapped hour is how the two would disagree.
     init(event: SyncedEvent?, initialDate: Date, prefillGoalId: String? = nil,
          prefillGoalStepId: String? = nil, prefillParticipantIds: [String]? = nil,
-         prefillTitle: String? = nil, prefillStart: Date? = nil) {
+         prefillTitle: String? = nil, prefillStart: Date? = nil,
+         onSaved: (() -> Void)? = nil) {
         self.event = event
         self.initialDate = initialDate
+        // Explicit init, so the memberwise one is suppressed: without this parameter a
+        // caller can only reach `onSaved` by mutating the value after construction.
+        self.onSaved = onSaved
         self.prefillGoalId = prefillGoalId
         self.prefillGoalStepId = prefillGoalStepId
         self.prefillParticipantIds = prefillParticipantIds

@@ -52,6 +52,32 @@ struct PlanningStepProps {
     /// A write is in flight somewhere in the shell — disable your own controls.
     let busy: Bool
 
+    /// WHAT STEP 1 ROUTED, and why it is handed down here rather than read off
+    /// `step.data`.
+    ///
+    /// Routing a loose end at step 1 appends to `data.routes` on the **looseEnds** step's
+    /// own row (`looseEnds.ts`), because that is the step whose decision it is. A body is
+    /// handed only its OWN step, so a destination step reading `step.data["routes"]` finds
+    /// nothing — it is not its data. The shell has the whole `steps` array, so it is the
+    /// only place that can pass this across.
+    ///
+    /// A destination step should filter to `to == <its own key>`. Empty is the normal case.
+    ///
+    /// NOTE FOR PARITY: the web does not surface these on the destination step at all —
+    /// routing is a record of triage there, and only step 1 reads it back. iOS showing
+    /// them is the same fix the parked-note handoff was ("I routed it and never saw it
+    /// again"), so this is iOS briefly AHEAD, recorded as a web follow-up rather than an
+    /// accident.
+    let routes: [WaffledAPI.LooseEndRoute]
+
+    /// Show another step. The recap's rows use it — each names the step whose module owns
+    /// that decision, and following one should land you there.
+    ///
+    /// It does NOT move the session's `currentStep`: that is the cross-device resume
+    /// pointer, and the web's equivalent is a link that changes the address and nothing
+    /// else. Following a recap row must not tell another device the family went back.
+    let goToStep: (String) -> Void
+
     /// Lend the shell's parked-note banner this step's own verb, or `nil` to withdraw it.
     ///
     /// The banner belongs to the shell (it is identical on ten steps, and the shell is
