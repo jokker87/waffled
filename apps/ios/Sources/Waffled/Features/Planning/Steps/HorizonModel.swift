@@ -30,6 +30,12 @@ final class PlanningHorizonModel {
     typealias ParkNote = (
         _ note: String, _ stepKey: String?, _ sessionId: String
     ) async throws -> WaffledAPI.PlanningParkedItem
+    /// Correcting a note already on the board. `stepKey` is DOUBLY optional: absent leaves
+    /// the tag alone, `.some(nil)` is the real answer "No tag" — see
+    /// `updatePlanningParkedNote`.
+    typealias UpdateNote = (
+        _ id: String, _ note: String?, _ stepKey: String??, _ sessionId: String
+    ) async throws -> WaffledAPI.PlanningParkedItem
 
     /// Only the steps still AHEAD of this one — the server filters; we render what it
     /// sends. (A tag naming a step the session has walked past addresses the note to
@@ -77,6 +83,7 @@ final class PlanningHorizonModel {
 
     private let fetchHorizon: FetchHorizon
     private let parkNote: ParkNote
+    private let updateNote: UpdateNote
 
     init(
         fetchHorizon: @escaping FetchHorizon = { sessionId in
@@ -84,10 +91,15 @@ final class PlanningHorizonModel {
         },
         parkNote: @escaping ParkNote = { note, stepKey, sessionId in
             try await WaffledAPI().parkPlanningNote(note: note, stepKey: stepKey, sessionId: sessionId)
+        },
+        updateNote: @escaping UpdateNote = { id, note, stepKey, sessionId in
+            try await WaffledAPI().updatePlanningParkedNote(
+                id: id, note: note, stepKey: stepKey, sessionId: sessionId)
         }
     ) {
         self.fetchHorizon = fetchHorizon
         self.parkNote = parkNote
+        self.updateNote = updateNote
     }
 
     func load(sessionId: String) async {
@@ -126,6 +138,43 @@ final class PlanningHorizonModel {
                     id: item.id, note: item.note, stepKey: item.stepKey,
                     stepLabel: item.stepKey == nil ? nil : label, createdAt: item.createdAt))
             tagChoice = .unset
+            return true
+        } catch {
+            errorMessage = APIErrorText.message(for: error, fallback: LooseEndCopy.writeFailed)
+            return false
+        }
+    }
+
+    /// FIX A NOTE ALREADY ON THE BOARD — its words, its tag, or both.
+    ///
+    /// "Parked in this session — I have no way to edit the item or change the category and
+    /// I should." Send only what moved: both arguments are "nil means leave it alone", and
+    /// `stepKey: .some(nil)` is the real answer "No tag".
+    ///
+    /// The row that comes back is the row the SERVER wrote, so the board shows what was
+    /// stored rather than a local guess — and `stepLabel` is re-joined from the catalog
+    /// here, never stored, which is the same rule the server's own read follows.
+    ///
+    /// Returns false when the write was refused, and leaves the board exactly as it was.
+    @discardableResult
+    func update(
+        id: String, note: String?, stepKey: String??, sessionId: String
+    ) async -> Bool {
+        guard !parking else { return false }
+        parking = true
+        errorMessage = nil
+        defer {
+            parking = false
+            revision &+= 1
+        }
+        do {
+            let item = try await updateNote(id, note, stepKey, sessionId)
+            if let i = parked.firstIndex(where: { $0.id == item.id }) {
+                parked[i] = WaffledAPI.HorizonNote(
+                    id: item.id, note: item.note, stepKey: item.stepKey,
+                    stepLabel: item.stepKey.flatMap { key in tags.first { $0.stepKey == key }?.label },
+                    createdAt: item.createdAt)
+            }
             return true
         } catch {
             errorMessage = APIErrorText.message(for: error, fallback: LooseEndCopy.writeFailed)

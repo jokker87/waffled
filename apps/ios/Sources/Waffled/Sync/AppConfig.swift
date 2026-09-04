@@ -208,6 +208,11 @@ enum DemoHooks {
     /// Auto-focus the add field (keyboard verification): a list detail's "Add item",
     /// or — with kioskPage=today — the Today grocery card's quick-add.
     static var focusAdd: Bool { AppConfig.env("WAFFLED_FOCUS_ADD") == "1" }
+    /// Auto-focus a planning session's park-a-note field (keyboard verification): step 1's
+    /// capture bar, and step 3's park bar. The session's footer is PINNED, so the band
+    /// between it and the keyboard is only measurable with the keyboard up — and there is
+    /// no headless way to tap a text field, which is the same reason `focusAdd` exists.
+    static var focusPark: Bool { AppConfig.env("WAFFLED_FOCUS_PARK") == "1" }
     /// Skip the iPad boot cover (headless verification of REST-driven kiosk pages
     /// when the PowerSync endpoint isn't reachable from the simulator).
     static var skipBootCover: Bool { AppConfig.env("WAFFLED_SKIP_BOOT_COVER") == "1" }

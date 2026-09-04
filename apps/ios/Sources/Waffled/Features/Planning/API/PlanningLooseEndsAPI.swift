@@ -229,6 +229,40 @@ extension WaffledAPI {
             as: PlanningParkedResponse.self).item
     }
 
+    /// FIX A NOTE THAT IS ALREADY PARKED — its words, its tag, or both.
+    ///
+    /// "Parked in this session — I have no way to edit the item or change the category and
+    /// I should." Until this route a note was written once and only ever ANSWERED, so a
+    /// typo or the wrong tag chip could be repaired only by dropping the note and typing
+    /// it again — and Drop is supposed to mean "it was never really a thing".
+    ///
+    /// THE TWO OPTIONALS ARE NOT THE SAME KIND OF OPTIONAL, which is why `stepKey` is
+    /// doubly wrapped. The server reads both fields for PRESENCE:
+    ///
+    ///   * `note: nil`               → key omitted → leave the words alone.
+    ///   * `stepKey: nil`            → key omitted → leave the tag alone.
+    ///   * `stepKey: .some(nil)`     → `null` sent → "No tag", the real answer.
+    ///
+    /// A synthesized `Encodable` cannot say the third thing, which is the reason every
+    /// body in this module is a `[String: JSONValue]` dictionary.
+    ///
+    /// `sessionId` is optional and worth passing: a note that step 1 ROUTED also has an
+    /// entry on that session's trail quoting its words and naming its destination, and the
+    /// server moves the two together. (It repairs every open trail that names the note
+    /// either way — the id only says which one to echo back.)
+    @discardableResult
+    func updatePlanningParkedNote(
+        id: String, note: String? = nil, stepKey: String?? = nil, sessionId: String? = nil
+    ) async throws -> PlanningParkedItem {
+        var body: [String: JSONValue] = [:]
+        if let note { body["note"] = .string(note) }
+        if let stepKey { body["stepKey"] = stepKey.map(JSONValue.string) ?? .null }
+        if let sessionId, !sessionId.isEmpty { body["sessionId"] = .string(sessionId) }
+        return try await sendReturning(
+            "PATCH", "/api/weekly-planning/loose-ends/parked/\(PlanningQuery.esc(id))", body: body,
+            as: PlanningParkedResponse.self).item
+    }
+
 }
 
 /// Percent-encode one query value. Session ids and week starts are tame, but a

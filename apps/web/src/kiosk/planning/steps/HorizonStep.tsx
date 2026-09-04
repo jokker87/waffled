@@ -17,6 +17,7 @@ import { EventModal } from '../../components/EventModal'
 import { MonthView } from '../../components/MonthView'
 import { MONTHS, addDays, monthGridStart, ymd } from '../../components/cal-utils'
 import type { PlanningStepModule, StepBodyProps } from '../registry'
+import { ParkedNoteEditor } from '../ParkedNoteEditor'
 import '../../../styles/planning-horizon.css'
 
 // Step 3 · Horizon scan — THE MONTH YOU ALREADY SHIP, PLUS ONE BAR.
@@ -124,6 +125,8 @@ function Body({ weekStart, sessionId, setDecisionData, refresh, busy }: StepBody
   const [parking, setParking] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [added, setAdded] = useState(0)
+  // Which board row is being corrected, if any. One at a time.
+  const [editing, setEditing] = useState<string | null>(null)
   // Parking is a BURST — somebody reads the month and empties their head into the bar —
   // so the cursor goes back after each note rather than making you re-aim at the input.
   const inputRef = useRef<HTMLInputElement>(null)
@@ -339,11 +342,59 @@ function Body({ weekStart, sessionId, setDecisionData, refresh, busy }: StepBody
           <ul className="wph-board" data-testid="wph-board">
             {parked.map((n) => (
               <li key={n.id} className="wph-parked">
-                <span className="wph-parked-note">{n.note}</span>
-                {n.stepLabel ? (
-                  <span className="wph-parked-tag">{n.stepLabel}</span>
+                {editing === n.id ? (
+                  // "Parked in this session — I have no way to edit the item or change the
+                  // category and I should." The same editor the shell's gold box uses, so a
+                  // correction reads the same wherever you catch the mistake — and offered
+                  // the SAME tags the bar above offered, since re-tagging here and tagging
+                  // here are the same choice.
+                  <ParkedNoteEditor
+                    id={n.id}
+                    note={n.note}
+                    stepKey={n.stepKey}
+                    tags={tags}
+                    sessionId={sessionId}
+                    busy={busy}
+                    onCancel={() => setEditing(null)}
+                    onSaved={(next) => {
+                      setEditing(null)
+                      setParked((cur) =>
+                        cur.map((p) =>
+                          p.id !== next.id
+                            ? p
+                            : {
+                                ...p,
+                                note: next.note,
+                                stepKey: next.stepKey,
+                                // The label is joined from the catalog, never stored — the
+                                // same rule the server's own read follows.
+                                stepLabel: tags.find((t) => t.stepKey === next.stepKey)?.label ?? null,
+                              }
+                        )
+                      )
+                      // The gold box further down the session quotes this note; the shell
+                      // is what refetches it.
+                      refresh()
+                    }}
+                  />
                 ) : (
-                  <span className="wph-parked-tag is-unset">No tag</span>
+                  <>
+                    <span className="wph-parked-note">{n.note}</span>
+                    {n.stepLabel ? (
+                      <span className="wph-parked-tag">{n.stepLabel}</span>
+                    ) : (
+                      <span className="wph-parked-tag is-unset">No tag</span>
+                    )}
+                    <button
+                      type="button"
+                      className="wph-parked-edit"
+                      disabled={disabled}
+                      onClick={() => setEditing(n.id)}
+                      aria-label={`Edit “${n.note}”`}
+                    >
+                      Edit
+                    </button>
+                  </>
                 )}
               </li>
             ))}

@@ -64,6 +64,17 @@ struct LooseEndsStepView: View {
             // fetch failed must not push an empty array over what the first one routed.
             model.seedRoutes(from: props.step.data["routes"])
             await model.load(weekStart: props.weekStart, sessionId: props.sessionId)
+            // Headless keyboard verification (`DemoHooks.focusPark`): the session footer is
+            // PINNED, so the band between it and the keyboard is only measurable with the
+            // keyboard up — and the Simulator has no way to tap a text field. The capture
+            // bar belongs to group B's deck, so switch to it first or there is no field to
+            // focus. The sleep waits for the deck to lay out; focus on a view that isn't on
+            // screen yet is a silent no-op, exactly as it is on a disabled one.
+            if DemoHooks.focusPark {
+                group = .parked
+                try? await Task.sleep(for: .seconds(1))
+                noteFocused = true
+            }
         }
         // The crumb, pushed on every state change rather than from five call sites.
         .onChange(of: model.revision) { _, _ in props.setDecisionData(model.decisionData) }
@@ -398,7 +409,11 @@ struct LooseEndsStepView: View {
         }
         .padding(.horizontal, 12).padding(.vertical, 10)
         .wfField()
-        .wfKeyboardDoneToolbar { noteFocused = false }
+        // NO `.wfKeyboardDoneToolbar` HERE, deliberately — see the note in
+        // PlanningShellView.sessionScreen. That accessory bar measured ~79pt on an
+        // iPhone 17 Pro for a single button, stacked directly on top of the session's
+        // fixed footer: "why is there so much extra space?" The shell dismisses the
+        // keyboard on scroll instead, and this field's keyboard has a return key.
     }
 
     private var canPark: Bool {

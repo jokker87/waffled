@@ -16,6 +16,7 @@ import { STEP_MODULES, type PlanningStepModule, type StepBodyProps } from './pla
 import { StepPlaceholder } from './planning/StepPlaceholder'
 import { StepErrorBoundary } from './planning/StepErrorBoundary'
 import { HandoffCtx, type HandoffAction } from './planning/handoff'
+import { ParkedNoteEditor, type ParkedTag } from './planning/ParkedNoteEditor'
 import '../styles/planning.css'
 
 // Weekly Planning — the session shell.
@@ -132,8 +133,10 @@ function DiscardBlock({ confirming, setConfirming, busy, onDiscard }: {
  * lends nothing and the banner stays as it was — a button promising an action it does
  * not perform is worse than the plain one.
  */
-function Handoff({ step, sessionId, busy, onDone, action, onAct }: {
+function Handoff({ step, steps, sessionId, busy, onDone, action, onAct }: {
   step: PlanningStep
+  /** Every step in the catalog — the tag list an edit may re-address a note to. */
+  steps: PlanningStep[]
   sessionId: string
   busy: boolean
   onDone: () => void
@@ -142,6 +145,19 @@ function Handoff({ step, sessionId, busy, onDone, action, onAct }: {
 }) {
   const [working, setWorking] = useState<string | null>(null)
   const [hidden, setHidden] = useState<string[]>([])
+  // Which note is being corrected, if any. One at a time: the box is a nudge, not a form.
+  const [editing, setEditing] = useState<string | null>(null)
+
+  // EVERY STEP THIS HOUSEHOLD RUNS, except the one that triages notes (the server refuses
+  // that as a circle). Wider than the park bar's forward-only list on purpose: this note
+  // has already LANDED somewhere, and a correction must not be narrower than the mistake
+  // — including sending it back to a step you have already walked past, which is the same
+  // thing routing it there in step 1 would have done. Titles come from the server-owned
+  // catalog, so a retitled step renames every chip at once.
+  const tags: ParkedTag[] = useMemo(
+    () => availableSteps(steps).filter((s) => s.key !== 'looseEnds').map((s) => ({ stepKey: s.key, label: s.title })),
+    [steps]
+  )
 
   const answer = async (id: string, action: 'done' | 'drop') => {
     if (working) return
@@ -171,11 +187,46 @@ function Handoff({ step, sessionId, busy, onDone, action, onAct }: {
       <ul className="wp-handoff-list">
         {notes.map((n) => (
           <li key={n.id} className="wp-handoff-row" data-testid={`wp-handoff-${n.id}`}>
+            {editing === n.id ? (
+              // In place, replacing the row: the note is one line, and a dialog for one
+              // line loses the list you were reading it in.
+              <ParkedNoteEditor
+                id={n.id}
+                note={n.note}
+                // The box raises a note BECAUSE it is tagged for this step, so that is
+                // the tag the editor opens on. (`step.parked` carries no `stepKey` — it
+                // does not need to; the step it arrived on is the answer.)
+                stepKey={step.key}
+                tags={tags}
+                sessionId={sessionId}
+                busy={busy}
+                onCancel={() => setEditing(null)}
+                onSaved={() => {
+                  setEditing(null)
+                  // The refetch is what makes it true — and a re-tagged note has to leave
+                  // this box, which only the session view can decide.
+                  onDone()
+                }}
+              />
+            ) : (
+            <>
             <span className="wp-handoff-note">
               {n.note}
               {n.byline && <em>{n.byline}</em>}
             </span>
             <span className="wp-handoff-acts">
+              {/* FIRST, and quiet. "I have no way to edit the item or change the category
+                  and I should" — until this, a typo or the wrong tag could only be fixed
+                  by dropping the note and typing it again, and Drop is supposed to mean
+                  "it was never really a thing". */}
+              <button
+                type="button"
+                className="btn btn-ghost wp-handoff-act"
+                disabled={busy || working === n.id}
+                onClick={() => setEditing(n.id)}
+              >
+                Edit
+              </button>
               {action && (
                 <button
                   type="button"
@@ -203,6 +254,8 @@ function Handoff({ step, sessionId, busy, onDone, action, onAct }: {
                 Drop it
               </button>
             </span>
+            </>
+            )}
           </li>
         ))}
       </ul>
@@ -583,6 +636,7 @@ export function WeeklyPlanning() {
         {current && (current.parked ?? []).length > 0 && (
           <Handoff
             step={current}
+            steps={view.steps}
             sessionId={session.id}
             busy={busy}
             onDone={refetch}

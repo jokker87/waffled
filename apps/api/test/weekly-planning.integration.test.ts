@@ -389,3 +389,150 @@ describe('planning · a parked note reaches the step it was tagged for', () => {
     expect(steps1.find((x) => x.key === 'tasks')!.parked.map((n) => n.note)).toContain('fix the gate')
   })
 })
+
+describe('planning · editing a note after it has been parked', () => {
+  // "parked in this session - I have no way to edit the item or change the category and
+  // I should."
+  //
+  // A note was written once and then only answered: a typo, or the wrong destination
+  // chosen in the bar, could be fixed only by dropping it and re-typing. (0100's own
+  // comment says as much — "editing a parked note is not a thing the step offers" — and
+  // that sentence is what this route retires.)
+  //
+  // THE HARD PART IS NOT THE COLUMN, IT IS THE ROUTE. Routing a note in step 1 stamps
+  // `planning_parked_items.step_key` AND writes a `{ kind:'parked', id, title, to }`
+  // entry on the looseEnds step's own `data.routes`. So a tag change has to move BOTH,
+  // or the note's badge says one step while the trail under step 1's card says another.
+  // A note parked with a tag from step 3 has no route entry at all, and must not grow
+  // one — that is a state parking itself can never produce.
+  const routesOf = (view: { steps: { key: string; data?: { routes?: unknown } }[] }) =>
+    (view.steps.find((s) => s.key === 'looseEnds')?.data?.routes ?? []) as
+      { kind: string; id: string; title: string; to: string }[]
+
+  const park = (sessionId: string, note: string, stepKey?: string) =>
+    call('POST', '/api/weekly-planning/loose-ends/parked', kevin, {
+      note, sessionId, ...(stepKey ? { stepKey } : {}),
+    })
+
+  const parkedOn = (view: { steps: { key: string; parked?: { id: string; note: string }[] }[] }, key: string) =>
+    (view.steps.find((s) => s.key === key)?.parked ?? []).map((n) => n.note)
+
+  it('rewrites the words, and the route entry that quoted them', async () => {
+    const s = json(await call('POST', '/api/weekly-planning/session', kevin)).session
+    const id = json(await park(s.id, 'by the poster bored')).item.id
+    expect((await call('POST', '/api/weekly-planning/loose-ends/route', kevin, {
+      sessionId: s.id, kind: 'parked', id, to: 'tasks', title: 'by the poster bored',
+    })).statusCode).toBe(200)
+
+    const res = await call('PATCH', `/api/weekly-planning/loose-ends/parked/${id}`, kevin, {
+      note: 'buy the poster board', sessionId: s.id,
+    })
+    expect(res.statusCode).toBe(200)
+    expect(json(res).item.note).toBe('buy the poster board')
+
+    const view = json(await call('GET', '/api/weekly-planning', kevin))
+    // The gold box on step 8 says the new words…
+    expect(parkedOn(view, 'tasks')).toContain('buy the poster board')
+    expect(parkedOn(view, 'tasks')).not.toContain('by the poster bored')
+    // …and so does step 1's own trail, which quoted the old ones.
+    const route = routesOf(view).find((r) => r.id === id)!
+    expect(route.title).toBe('buy the poster board')
+  })
+
+  it('moves the tag AND the route together', async () => {
+    const s = json(await call('POST', '/api/weekly-planning/session', kevin)).session
+    const id = json(await park(s.id, 'thaw the chicken')).item.id
+    await call('POST', '/api/weekly-planning/loose-ends/route', kevin, {
+      sessionId: s.id, kind: 'parked', id, to: 'tasks', title: 'thaw the chicken',
+    })
+
+    expect((await call('PATCH', `/api/weekly-planning/loose-ends/parked/${id}`, kevin, {
+      stepKey: 'meals', sessionId: s.id,
+    })).statusCode).toBe(200)
+
+    const view = json(await call('GET', '/api/weekly-planning', kevin))
+    expect(parkedOn(view, 'meals')).toContain('thaw the chicken')
+    expect(parkedOn(view, 'tasks')).not.toContain('thaw the chicken')
+    expect(routesOf(view).find((r) => r.id === id)!.to).toBe('meals')
+  })
+
+  it('clearing the tag retires the route, exactly as un-routing does', async () => {
+    const s = json(await call('POST', '/api/weekly-planning/session', kevin)).session
+    const id = json(await park(s.id, 'the shed door')).item.id
+    await call('POST', '/api/weekly-planning/loose-ends/route', kevin, {
+      sessionId: s.id, kind: 'parked', id, to: 'tasks', title: 'the shed door',
+    })
+
+    expect((await call('PATCH', `/api/weekly-planning/loose-ends/parked/${id}`, kevin, {
+      stepKey: null, sessionId: s.id,
+    })).statusCode).toBe(200)
+
+    const view = json(await call('GET', '/api/weekly-planning', kevin))
+    expect(parkedOn(view, 'tasks')).not.toContain('the shed door')
+    // A note with no tag is nobody's — and a trail entry saying it went to Tasks would be
+    // the exact disagreement this route exists to prevent.
+    expect(routesOf(view).find((r) => r.id === id)).toBeUndefined()
+  })
+
+  it('does not invent a route for a note that was never routed', async () => {
+    const s = json(await call('POST', '/api/weekly-planning/session', kevin)).session
+    // Parked from step 3's bar WITH a tag: `step_key` set, no route entry — and retagging
+    // it must not manufacture one, because parking itself never can.
+    const id = json(await park(s.id, 'pack for camping', 'tasks')).item.id
+    expect(routesOf(json(await call('GET', '/api/weekly-planning', kevin))).find((r) => r.id === id)).toBeUndefined()
+
+    expect((await call('PATCH', `/api/weekly-planning/loose-ends/parked/${id}`, kevin, {
+      note: 'pack for the camping trip', stepKey: 'kids', sessionId: s.id,
+    })).statusCode).toBe(200)
+
+    const view = json(await call('GET', '/api/weekly-planning', kevin))
+    expect(parkedOn(view, 'kids')).toContain('pack for the camping trip')
+    expect(routesOf(view).find((r) => r.id === id)).toBeUndefined()
+  })
+
+  it('keeps the trail honest even when the caller sends no session', async () => {
+    // `parkedByStep` is not session-scoped, so a surface showing a note (the gold box)
+    // need not know which session is running. The trail still must not be left saying
+    // something the note no longer says — so with no `sessionId` the server repairs the
+    // household's ACTIVE session, which is the only one that could disagree.
+    const s = json(await call('POST', '/api/weekly-planning/session', kevin)).session
+    const id = json(await park(s.id, 'reglue the chair')).item.id
+    await call('POST', '/api/weekly-planning/loose-ends/route', kevin, {
+      sessionId: s.id, kind: 'parked', id, to: 'tasks', title: 'reglue the chair',
+    })
+
+    expect((await call('PATCH', `/api/weekly-planning/loose-ends/parked/${id}`, kevin, {
+      note: 'reglue the kitchen chair', stepKey: 'meals',
+    })).statusCode).toBe(200)
+
+    const view = json(await call('GET', '/api/weekly-planning', kevin))
+    expect(parkedOn(view, 'meals')).toContain('reglue the kitchen chair')
+    const route = routesOf(view).find((r) => r.id === id)!
+    expect(route.to).toBe('meals')
+    expect(route.title).toBe('reglue the kitchen chair')
+  })
+
+  it('refuses a step the household is not running, an unknown one, and step 1 itself', async () => {
+    const s = json(await call('POST', '/api/weekly-planning/session', kevin)).session
+    const id = json(await park(s.id, 'ask about the field trip')).item.id
+    const patch = (body: Record<string, unknown>) =>
+      call('PATCH', `/api/weekly-planning/loose-ends/parked/${id}`, kevin, body)
+
+    expect((await patch({ stepKey: 'nonsense' })).statusCode).toBe(400)
+    // A note addressed to the step that triages notes is a circle.
+    expect((await patch({ stepKey: 'looseEnds' })).statusCode).toBe(400)
+    expect((await patch({ note: '   ' })).statusCode).toBe(400)
+    expect((await patch({ note: 'x'.repeat(501) })).statusCode).toBe(400)
+  })
+
+  it('will not edit a note that has already been answered', async () => {
+    const s = json(await call('POST', '/api/weekly-planning/session', kevin)).session
+    const id = json(await park(s.id, 'never mind this one')).item.id
+    await call('POST', '/api/weekly-planning/loose-ends/resolve', kevin, {
+      kind: 'parked', id, action: 'drop', sessionId: s.id,
+    })
+    expect((await call('PATCH', `/api/weekly-planning/loose-ends/parked/${id}`, kevin, {
+      note: 'actually it mattered',
+    })).statusCode).toBe(404)
+  })
+})

@@ -562,13 +562,9 @@ export async function routeLooseEnd(tenant: Tenant, input: RouteInput): Promise<
     return { ok: true, routes }
   }
 
-  if (!isStepKey(input.to)) return bad400('unknown step')
-  const to = input.to
-  if (to === 'looseEnds') return bad400('a loose end cannot be routed to the step it came from')
-  const steps = await resolveSteps(tenant.householdId, null)
-  if (!steps.some((s) => s.key === to && s.available)) {
-    return bad400(`the ${to} step is not running in this household`)
-  }
+  const problem = await destinationProblem(tenant.householdId, input.to)
+  if (problem) return bad400(problem)
+  const to = input.to as string
   const source = GROUPS.find((g) => g === input.source) ?? (kind === 'parked' ? 'parked' : 'notDone')
   const title = typeof input.title === 'string' && input.title.trim() ? input.title.trim().slice(0, MAX_NOTE) : ''
   if (!title) return bad400('a route needs the title it was routed under')
@@ -582,12 +578,178 @@ export async function routeLooseEnd(tenant: Tenant, input: RouteInput): Promise<
   return { ok: true, routes: next }
 }
 
+// IS THIS A STEP A NOTE MAY BE ADDRESSED TO? One answer, two callers — `routeLooseEnd`
+// and `updateParkedItem` — because a tag set by editing must be exactly as restricted as
+// one set by routing. If editing were looser you could tag a note for a step the
+// household has turned off, and the gold box that raises it would never fire.
+//
+// Returns the sentence to refuse with, or null when the step is a fair destination.
+// WHICH TRAILS QUOTE THIS NOTE. Not "the current session" — sessions are per WEEK and
+// several can be open at once (planning the week after next does not close this week's),
+// so "the active one" is not a thing. What is a thing is the set of trails that would be
+// left saying something the note no longer says, and jsonb containment asks exactly that.
+//
+// Completed sessions are excluded: their record is what the family decided that evening
+// and stands as history. The recap reads parked notes through the table itself, so a
+// finished trail quoting old words misleads nobody.
+async function sessionsQuoting(householdId: string, id: string): Promise<string[]> {
+  const { rows } = await query<{ session_id: string }>(
+    `select ss.session_id
+       from planning_session_steps ss
+       join planning_sessions s on s.id = ss.session_id
+      where s.household_id = $1 and s.status = 'active'
+        and ss.step_key = 'looseEnds'
+        and ss.data -> 'routes' @> $2::jsonb`,
+    [householdId, JSON.stringify([{ kind: 'parked', id }])]
+  )
+  return rows.map((r) => r.session_id)
+}
+
+async function destinationProblem(householdId: string, to: unknown): Promise<string | null> {
+  if (!isStepKey(to)) return 'unknown step'
+  if (to === 'looseEnds') return 'a loose end cannot be routed to the step it came from'
+  const steps = await resolveSteps(householdId, null)
+  if (!steps.some((s) => s.key === to && s.available)) {
+    return `the ${to} step is not running in this household`
+  }
+  return null
+}
+
 async function setParkedStepKey(householdId: string, id: string, stepKey: string | null): Promise<boolean> {
   const { rowCount } = await query(
     `update planning_parked_items set step_key = $3 where household_id = $1 and id = $2 and status = 'open'`,
     [householdId, id, stepKey]
   )
   return !!rowCount
+}
+
+// ---------------------------------------------------------------------------
+// Editing a note that is already parked
+// ---------------------------------------------------------------------------
+
+export interface UpdateParkedInput {
+  // ABSENT MEANS "LEAVE IT ALONE", for both fields — which is why they are read for
+  // PRESENCE rather than for truthiness. `stepKey: null` is a real answer ("No tag") and
+  // has to be tellable from "I'm only fixing the words".
+  note?: unknown
+  stepKey?: unknown
+  // The session being planned, when there is one. Not required — see below — and used
+  // for one thing only: keeping this session's route trail agreeing with the tag.
+  sessionId?: unknown
+}
+
+export type UpdateParkedResult =
+  | { ok: true; item: ParkedItem; routes: LooseEndRoute[] | null }
+  | { ok: false; status: 400 | 404; error: string; message: string }
+
+/**
+ * Fix a parked note's words, or re-address it to a different step.
+ *
+ * 0100's own comment says "editing a parked note is not a thing the step offers — a note
+ * is written once and then answered". That was the shape of the table, not a law, and it
+ * stopped being true the moment somebody typed a note with a typo in it or reached for
+ * the wrong tag chip: "parked in this session — I have no way to edit the item or change
+ * the category and I should." Dropping the note and re-typing it was the only repair, and
+ * a drop is supposed to MEAN something ("it was never really a thing").
+ *
+ * THE COLUMN IS THE EASY HALF. A tag lives in two places at once whenever step 1 put it
+ * there: `planning_parked_items.step_key`, and a `{ kind:'parked', id, title, to }` entry
+ * on the looseEnds step's `data.routes` (see `routeLooseEnd`). Change one without the
+ * other and the note's badge says Meals while step 1's trail says Tasks — worse than not
+ * being able to edit at all. So:
+ *
+ *   · the words change      → the route entry's `title`, which QUOTED them, changes too
+ *   · the tag moves         → the route entry's `to` moves with it
+ *   · the tag is cleared    → the route entry is RETIRED, which is exactly what
+ *                             `routeLooseEnd`'s undo branch does, so "clear the tag" and
+ *                             "undo the routing" converge on one state
+ *   · there is no entry     → nothing is written to the session. A note parked from step
+ *                             3's bar carries a tag and no route, and inventing one here
+ *                             would manufacture a state parking itself can never produce.
+ *
+ * `sessionId` is OPTIONAL because the gold box is not session-scoped (`parkedByStep`
+ * reads every open note, including one from three Sundays ago), so a surface that shows a
+ * note need not know which session is running. WITHOUT ONE THE TRAIL IS STILL REPAIRED —
+ * `sessionsQuoting` finds every OPEN session whose trail names this note and fixes each,
+ * which is the invariant stated directly rather than guessed at. (There is no such thing
+ * as "the" current session: sessions are per week and several can be open at once.) A
+ * named session is repaired too even if it holds no entry, and is the one echoed back.
+ */
+export async function updateParkedItem(
+  tenant: Tenant,
+  id: unknown,
+  input: UpdateParkedInput
+): Promise<UpdateParkedResult> {
+  const bad400 = (message: string): UpdateParkedResult => ({ ok: false, status: 400, error: 'BadRequest', message })
+  if (typeof id !== 'string' || !UUID_RE.test(id)) return bad400('id must be a uuid')
+
+  const touchNote = input.note !== undefined
+  const touchTag = input.stepKey !== undefined
+  if (!touchNote && !touchTag) return bad400('nothing to change')
+
+  // Same cap and same trim as `parkItem`: an edit must not be able to store a note the
+  // bar could never have parked.
+  let note: string | null = null
+  if (touchNote) {
+    if (typeof input.note !== 'string') return bad400('a parked item needs a note')
+    note = input.note.trim()
+    if (!note) return bad400('a parked item needs a note')
+    if (note.length > MAX_NOTE) return bad400(`a note is at most ${MAX_NOTE} characters`)
+  }
+
+  let stepKey: string | null = null
+  if (touchTag && input.stepKey !== null) {
+    const problem = await destinationProblem(tenant.householdId, input.stepKey)
+    if (problem) return bad400(problem)
+    stepKey = input.stepKey as string
+  }
+
+  // `status = 'open'` for the same reason every other write here checks it: a note that
+  // has been talked through or dropped is answered, and answered is not editable.
+  const { rows } = await query<ParkedRow>(
+    `update planning_parked_items
+        set note = coalesce($3::text, note),
+            step_key = case when $4::boolean then $5::text else step_key end
+      where household_id = $1 and id = $2 and status = 'open'
+      returning id, note, step_key, status, session_id, created_at`,
+    [tenant.householdId, id, note, touchTag, stepKey]
+  )
+  const row = rows[0]
+  if (!row) return { ok: false, status: 404, error: 'NotFound', message: 'loose end not found' }
+
+  // The other half of the tag. Scoped to the session we were handed — the same shape as
+  // `resolveLooseEnd`'s `retire()` — and never hunting through other sessions, whose
+  // trails record what THEY decided at the time.
+  const named =
+    typeof input.sessionId === 'string' && UUID_RE.test(input.sessionId)
+      ? (await getSessionById(tenant.householdId, input.sessionId))?.id ?? null
+      : null
+  // The caller's own session first (so the trail it is about to re-render is repaired
+  // even when it holds no entry yet), then every other open trail that quotes the note.
+  const targets = new Set(named ? [named] : [])
+  for (const s of await sessionsQuoting(tenant.householdId, id)) targets.add(s)
+
+  let routes: LooseEndRoute[] | null = null
+  for (const sessionId of targets) {
+    const current = await listRoutes(sessionId)
+    const entry = current.find((r) => r.kind === 'parked' && r.id === id)
+    let next = current
+    // NO ENTRY, NO WRITE. A note parked with a tag from step 3's bar has a `step_key` and
+    // no route, and inventing one here would manufacture a state parking cannot produce.
+    if (entry) {
+      next =
+        touchTag && row.step_key === null
+          ? current.filter((r) => r !== entry)
+          : current.map((r) =>
+              r === entry ? { ...r, title: row.note, ...(row.step_key ? { to: row.step_key } : {}) } : r
+            )
+      await writeRoutes(sessionId, next)
+    }
+    // The answer echoes the trail the CALLER asked about; the rest are repaired quietly.
+    if (sessionId === named) routes = next
+  }
+
+  return { ok: true, item: toParked(row), routes }
 }
 
 // ---------------------------------------------------------------------------

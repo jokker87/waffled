@@ -68,7 +68,50 @@ struct PlanningHandoffBanner: View {
     /// refetch lands.
     let resolve: (_ id: String, _ action: String) async -> Bool
 
+    /// EVERY STEP THIS HOUSEHOLD RUNS — the tag row an edit may re-address a note to.
+    ///
+    /// Defaulted, and the banner loads the catalog itself when it is empty (lazily, the
+    /// first time somebody actually taps Edit), so the shell's call site needs no change
+    /// to get the affordance. Handing it `model.steps` skips that read; nothing else
+    /// differs. Wider than the park bar's forward-only tags on purpose: this note has
+    /// already LANDED somewhere, and a correction must not be narrower than the mistake.
+    var steps: [WaffledAPI.PlanningStep] = []
+
+    /// Fix a note's words and/or its tag. Defaulted to the real route so the shell needs
+    /// no wiring; a test injects its own.
+    ///
+    /// RETURNS THE REFUSAL, NOT A BOOL. The reachable failures here all carry the useful
+    /// half — "a note is at most 500 characters", "the meals step is not running in this
+    /// household" — and flattening them to "that didn't go through" is the half of the
+    /// failure worth keeping thrown away. `PlanningHorizonModel.update` keeps the same
+    /// sentence on the board; the two must not diverge on that. nil ⇒ the server took it.
+    ///
+    /// NO SESSION ID, deliberately. Re-tagging a note that step 1 ROUTED also has to move
+    /// that session's trail entry, and the server does not need to be told which session
+    /// that is — `updateParkedItem` repairs every OPEN trail that names the note, which is
+    /// the invariant stated instead of guessed at.
+    var update: (_ id: String, _ note: String?, _ stepKey: String??) async -> String? = { id, note, stepKey in
+        do {
+            _ = try await WaffledAPI().updatePlanningParkedNote(id: id, note: note, stepKey: stepKey)
+            return nil
+        } catch {
+            return APIErrorText.message(for: error, fallback: LooseEndCopy.writeFailed)
+        }
+    }
+
     @State private var working: String?
+    /// Which note is being corrected, if any. One at a time: the box is a nudge, not a
+    /// form.
+    @State private var editing: String?
+    /// Words this sitting has rewritten, by note id. The shell owns `step.parked` and only
+    /// refetches after a resolve, so this overlay is what makes an edit visible now; the
+    /// next refetch is authoritative and agrees with it.
+    @State private var edited: [String: String] = [:]
+    /// The catalog, when the shell didn't hand it over. See `steps`.
+    @State private var loadedSteps: [WaffledAPI.PlanningStep] = []
+    /// A refused edit's sentence, shown under the field you typed in rather than at the
+    /// top of the screen.
+    @State private var editError: String?
     /// Hidden locally as well as refetched: the refetch is what makes it true, and this
     /// is what makes it FEEL true before the round trip lands.
     @State private var hidden: Set<String> = []
@@ -83,6 +126,19 @@ struct PlanningHandoffBanner: View {
     /// to — there is no error boundary above it.
     private var notes: [WaffledAPI.PlanningStepHandoff] {
         (step.parked ?? []).filter { !hidden.contains($0.id) }
+    }
+
+    /// The words to show for a note — this sitting's rewrite when there is one.
+    private func words(_ note: WaffledAPI.PlanningStepHandoff) -> String {
+        edited[note.id] ?? note.note
+    }
+
+    /// The tag chips an edit may choose from. Step 1 is never among them: the server
+    /// refuses "the step it came from" as a circle.
+    private var tags: [PlanningParkedTag] {
+        (steps.isEmpty ? loadedSteps : steps)
+            .filter { $0.available && $0.key != "looseEnds" }
+            .map { PlanningParkedTag(stepKey: $0.key, label: $0.title) }
     }
 
     /// The routed ends addressed here. `step.parked` is passed RAW — not `notes` — so that
@@ -127,6 +183,15 @@ struct PlanningHandoffBanner: View {
         .overlay(
             RoundedRectangle(cornerRadius: WF.rLG, style: .continuous)
                 .strokeBorder(WF.gold.opacity(0.30), lineWidth: 1))
+        // The tag catalog, and only once somebody actually opens an editor — the box
+        // itself needs none of it, so a step nobody corrects a note on costs no read.
+        // Skipped entirely when the shell handed `steps` over.
+        .task(id: editing) {
+            guard editing != nil, steps.isEmpty, loadedSteps.isEmpty else { return }
+            // A failure costs the chips, never the box: the editor still offers the note's
+            // own tag and "No tag", and the words can be fixed regardless.
+            loadedSteps = (try? await WaffledAPI().weeklyPlanning())?.steps ?? []
+        }
     }
 
     /// ONE heading treatment for both halves, so neither reads as the more important one —
@@ -143,18 +208,47 @@ struct PlanningHandoffBanner: View {
 
     // MARK: - A parked note
 
-    private func noteRow(_ note: WaffledAPI.PlanningStepHandoff) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(note.note)
-                .font(.system(size: 14, weight: .semibold)).foregroundStyle(WF.ink)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            if let byline = note.byline, !byline.isEmpty {
-                Text(byline).font(.system(size: 11.5)).foregroundStyle(WF.ink3)
+    @ViewBuilder private func noteRow(_ note: WaffledAPI.PlanningStepHandoff) -> some View {
+        if editing == note.id {
+            // In place, replacing the row: the note is one line, and a sheet for one line
+            // loses the box you were reading it in. The step it ARRIVED on is its current
+            // tag — that is why the box raised it — so the editor opens on that chip.
+            PlanningParkedNoteEditor(
+                note: words(note),
+                stepKey: step.key,
+                tags: tags,
+                busy: busy,
+                errorMessage: editError,
+                onCancel: {
+                    editing = nil
+                    editError = nil
+                },
+                onSave: { text, stepKey in
+                    // The server's own sentence, under the field you typed in.
+                    if let refusal = await update(note.id, text, stepKey) {
+                        editError = refusal
+                        return false
+                    }
+                    editError = nil
+                    if let text { edited[note.id] = text }
+                    // RE-TAGGED AWAY FROM HERE, so it stops being this step's business —
+                    // the same local hide a resolve does, and the next refetch agrees.
+                    if case .some(let moved) = stepKey, moved != step.key { hidden.insert(note.id) }
+                    return true
+                })
+        } else {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(words(note))
+                    .font(.system(size: 14, weight: .semibold)).foregroundStyle(WF.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if let byline = note.byline, !byline.isEmpty {
+                    Text(byline).font(.system(size: 11.5)).foregroundStyle(WF.ink3)
+                }
+                actions(for: note)
             }
-            actions(for: note)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// The verb first (when the step lent one), then the two bookkeeping answers.
@@ -182,6 +276,13 @@ struct PlanningHandoffBanner: View {
             // as the same offer twice.
             answerButton(verb == nil ? "Handled" : "Already handled", tint: WF.ink2, filled: false, key: note.id) {
                 answer(note.id, "done")
+            }
+            // FIX IT INSTEAD OF ANSWERING IT. "I have no way to edit the item or change the
+            // category and I should" — before this, a typo or the wrong tag could only be
+            // cleared with Drop, which is supposed to mean "it was never really a thing".
+            answerButton("Edit", tint: WF.ink2, filled: false, key: note.id) {
+                editError = nil
+                editing = note.id
             }
             answerButton("Drop it", tint: WF.danger, filled: false, key: note.id) {
                 answer(note.id, "drop")
@@ -228,18 +329,11 @@ struct PlanningHandoffBanner: View {
         _ label: String, tint: Color, filled: Bool,
         key: String, action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
-            Text(label)
-                .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(filled ? .white : tint)
-                .padding(.horizontal, 13).padding(.vertical, 7)
-                .background(filled ? tint : WF.card)
-                .overlay(Capsule().strokeBorder(filled ? .clear : WF.hair, lineWidth: 1))
-                .clipShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .disabled(busy || working == key)
-        .opacity(working == key ? 0.5 : 1)
+        // `PlanningPillButton` IS this capsule, lifted into the editor's file so the box
+        // and the editor that opens inside it cannot end up with two of them.
+        PlanningPillButton(
+            label: label, tint: tint, filled: filled,
+            disabled: busy, working: working == key, action: action)
     }
 
     private func answer(_ id: String, _ action: String) {

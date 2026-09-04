@@ -61,6 +61,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   say that one *is* your time together. Nothing is written to the calendar — nobody's
   event is edited — and the choice is remembered rather than forgotten when you move on.
 
+- **A parked note can be edited after you park it.** Fix the wording or change which step
+  should look at it — **Edit** on the "Parked in this session" board and in the gold box
+  that hands the note back at its step, on both the browser and the app. Until now a note
+  was written once and then only answered, so a typo or the wrong tag could be cleared only
+  by dropping the note and typing it again. Re-tagging moves the note's whole trail with
+  it, so the badge on the note and the receipt under Loose ends never disagree.
+
 - **A parked note can be turned into the thing it was asking for.** The banner that hands
   a note back to the step it was tagged for now offers that step's own verb — **Make a
   task** on Tasks, **Make an event** on Calendar — which opens the same composer the step

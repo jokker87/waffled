@@ -212,3 +212,14 @@
 }
 /* No tag is a whole answer, so it is stated rather than left blank — but quietly. */
 .wph-parked-tag.is-unset { background: transparent; border: 1px dashed var(--hair); color: var(--ink-3); }
+/* "I have no way to edit the item or change the category and I should." Quiet — the row
+   is a receipt, and the repair is the exception, not the offer. It swaps the row for
+   `.wp-pne` (the shared editor, in planning.css) rather than opening a dialog. */
+.wph-parked-edit {
+  flex: none; margin-top: 1px; padding: 3px 8px;
+  font-size: 11px; font-weight: 800; color: var(--ink-3);
+  background: transparent; border: 1px solid var(--hair); border-radius: 999px;
+  cursor: pointer;
+}
+.wph-parked-edit:hover:not(:disabled) { color: var(--ink); border-color: var(--ink-3); }
+.wph-parked-edit:disabled { cursor: default; opacity: 0.6; }

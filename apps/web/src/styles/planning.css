@@ -123,6 +123,38 @@
   .wp-handoff-act { flex: 1; }
 }
 
+/* ── Editing a parked note (ParkedNoteEditor) ────────────────────────────────────
+   One editor, used by the shell's gold box and by the Horizon board, so a correction
+   looks and behaves the same wherever the note is on screen. It replaces the row it is
+   editing rather than opening a modal: the note is one line, and a dialog for one line
+   loses the list you were reading it in.
+
+   Lives in planning.css rather than planning-horizon.css because the SHELL loads this
+   file on every step, and the gold box is the shell's. */
+.wp-pne { display: flex; flex-direction: column; gap: 8px; width: 100%; min-width: 0; }
+.wp-pne-in {
+  width: 100%; padding: 9px 11px;
+  font: inherit; font-size: 13.5px; font-weight: 600; color: var(--ink);
+  background: var(--card); border: 1px solid var(--hair-2); border-radius: var(--r-md);
+}
+.wp-pne-in:focus { outline: none; border-color: var(--primary); }
+.wp-pne-in:disabled { opacity: 0.6; }
+.wp-pne-tags { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+/* The park bar's chip, in the shell's stylesheet. Same shape as `.wph-tag` on purpose —
+   re-tagging a note and tagging it in the first place are the same choice. */
+.wp-pne-tag {
+  padding: 5px 10px;
+  font-size: 12px; font-weight: 700; color: var(--ink-2);
+  background: transparent; border: 1px solid var(--hair); border-radius: 999px;
+  cursor: pointer;
+}
+.wp-pne-tag:hover:not(:disabled) { color: var(--ink); border-color: var(--ink-3); }
+.wp-pne-tag.on { background: var(--ink); border-color: var(--ink); color: var(--on-accent); }
+.wp-pne-tag:disabled { cursor: default; opacity: 0.6; }
+.wp-pne-err { margin: 0; font-size: 12px; font-weight: 600; color: var(--danger); }
+.wp-pne-acts { display: flex; gap: 7px; }
+.wp-pne-act { padding: 7px 13px; font-size: 12.5px; }
+
 .wp-foot {
   display: flex; align-items: center; gap: 12px;
   padding: 14px 28px; background: var(--card); border-top: 1px solid var(--hair);

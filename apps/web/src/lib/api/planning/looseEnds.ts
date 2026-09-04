@@ -174,6 +174,29 @@ export const looseEndsApi = {
       return r
     }),
 
+  // FIX WHAT YOU JUST WROTE — the words, the tag, or both. "Parked in this session — I
+  // have no way to edit the item or change the category and I should."
+  //
+  // BOTH FIELDS ARE READ FOR PRESENCE by the server, which is why they are optional here
+  // and why `stepKey` is `string | null | undefined`: omitting it leaves the tag alone,
+  // and `null` is the real answer "No tag". Pass `sessionId` whenever there is one — a
+  // note that step 1 ROUTED also has an entry in the session's route trail quoting its
+  // words and naming its destination, and the server moves that entry with the note.
+  // Without the session id the row still changes and the trail is left to disagree.
+  update: (id: string, patch: { note?: string; stepKey?: string | null; sessionId?: string }) =>
+    apiSend<{ item: { id: string; note: string; stepKey: string | null }; routes?: LooseEndRoute[] }>(
+      'PATCH',
+      `/api/weekly-planning/loose-ends/parked/${encodeURIComponent(id)}`,
+      {
+        ...(patch.note !== undefined ? { note: patch.note } : {}),
+        ...(patch.stepKey !== undefined ? { stepKey: patch.stepKey } : {}),
+        ...(patch.sessionId ? { sessionId: patch.sessionId } : {}),
+      }
+    ).then((r) => {
+      emit('weeklyPlanning')
+      return r
+    }),
+
   // The capture bar under group B. Step 3 ("Horizon scan") calls this too, from the
   // month view, passing `stepKey: 'horizon'`.
   park: (note: string, opts?: { stepKey?: string; sessionId?: string }) =>

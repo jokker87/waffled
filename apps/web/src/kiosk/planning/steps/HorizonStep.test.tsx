@@ -91,6 +91,7 @@ function mockApi(opts: Opts = {}) {
   const eventReads: string[] = []
   const eventPosts: Record<string, unknown>[] = []
   const parkPosts: Record<string, unknown>[] = []
+  const patchPosts: Record<string, unknown>[] = []
   globalThis.fetch = vi.fn(async (url: string, init?: RequestInit) => {
     const u = String(url)
     const method = init?.method ?? 'GET'
@@ -103,6 +104,21 @@ function mockApi(opts: Opts = {}) {
     }
     if (u.startsWith('/api/weekly-planning/horizon')) {
       return { ok: true, json: async () => ({ tags: opts.tags ?? TAGS, parked: [...parked] }) }
+    }
+    // Correcting a note already on the board. Same prefix as the park POST, so it has to
+    // be matched FIRST — and it is stateful too, because "the board says the new words"
+    // is the whole assertion.
+    if (u.startsWith('/api/weekly-planning/loose-ends/parked/') && method === 'PATCH') {
+      const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>
+      const id = decodeURIComponent(u.split('/').pop()!)
+      patchPosts.push({ id, ...body })
+      const row = parked.find((p) => p.id === id)!
+      if (body.note !== undefined) row.note = String(body.note)
+      if (body.stepKey !== undefined) {
+        row.stepKey = body.stepKey as string | null
+        row.stepLabel = TAGS.find((t) => t.stepKey === body.stepKey)?.label ?? null
+      }
+      return { ok: true, json: async () => ({ item: { ...row } }) }
     }
     if (u.startsWith('/api/weekly-planning/loose-ends/parked') && method === 'POST') {
       const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>
@@ -153,7 +169,7 @@ function mockApi(opts: Opts = {}) {
     if (u.startsWith('/api/calendar/google/status')) return { ok: true, json: async () => ({ calendars: [] }) }
     return { ok: true, json: async () => ({}) }
   }) as unknown as typeof fetch
-  return { eventReads, eventPosts, parkPosts }
+  return { eventReads, eventPosts, parkPosts, patchPosts }
 }
 
 function renderStep(over: Partial<StepBodyProps> = {}) {
@@ -527,5 +543,87 @@ describe('Horizon scan · looking further out', () => {
     expect(screen.getByRole('button', { name: /previous month/i })).toBeEnabled()
     fireEvent.click(screen.getByRole('button', { name: /previous month/i }))
     expect(await screen.findByText('September 2026')).toBeInTheDocument()
+  })
+})
+
+describe('Horizon scan · fixing a note that is already parked', () => {
+  // "parked in this session - I have no way to edit the item or change the category and
+  // I should." Before this the board was a receipt: the only repair for a typo or for the
+  // wrong chip was to drop the note and type it again, and Drop is supposed to mean "it
+  // was never really a thing".
+  const NOTE = {
+    id: 'n1',
+    note: 'by the poster bored',
+    stepKey: 'tasks',
+    stepLabel: 'Tasks',
+    createdAt: new Date().toISOString(),
+  }
+
+  it('rewrites the words in place', async () => {
+    const { patchPosts } = mockApi({ parked: [{ ...NOTE }] })
+    renderStep()
+
+    fireEvent.click(await screen.findByRole('button', { name: /edit “by the poster bored”/i }))
+    const field = await screen.findByLabelText('Edit this note')
+    fireEvent.change(field, { target: { value: 'buy the poster board' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(patchPosts.length).toBe(1))
+    // Only what moved: the tag was not touched, so it is not in the body — the server
+    // reads both fields for PRESENCE, and sending an unchanged tag would rewrite this
+    // note's route entry for nothing.
+    expect(patchPosts[0]).toMatchObject({ id: 'n1', note: 'buy the poster board' })
+    expect(patchPosts[0].stepKey).toBeUndefined()
+    // The session id travels with it: a note step 1 ROUTED also has a trail entry quoting
+    // its words, and the server is what moves the two together.
+    expect(patchPosts[0].sessionId).toBe('11111111-1111-4111-8111-111111111111')
+
+    expect(await screen.findByText('buy the poster board')).toBeInTheDocument()
+    expect(screen.queryByText('by the poster bored')).not.toBeInTheDocument()
+  })
+
+  it('changes the category, and the badge says so', async () => {
+    const { patchPosts } = mockApi({ parked: [{ ...NOTE }] })
+    renderStep()
+
+    fireEvent.click(await screen.findByRole('button', { name: /edit “by the poster bored”/i }))
+    const editor = await screen.findByTestId('wp-pne-n1')
+    fireEvent.click(within(editor).getByRole('button', { name: 'Meals' }))
+    fireEvent.click(within(editor).getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(patchPosts.length).toBe(1))
+    expect(patchPosts[0]).toMatchObject({ id: 'n1', stepKey: 'meals' })
+    expect(patchPosts[0].note).toBeUndefined()
+    await waitFor(() => expect(screen.getByText('Meals')).toBeInTheDocument())
+  })
+
+  it('“No tag” is an answer an edit can give, not just a park', async () => {
+    // The absence of a tag is a real state — no step raises the note, it just stays on the
+    // board — so taking a tag OFF has to be reachable. `null`, never an omitted key.
+    const { patchPosts } = mockApi({ parked: [{ ...NOTE }] })
+    renderStep()
+
+    fireEvent.click(await screen.findByRole('button', { name: /edit “by the poster bored”/i }))
+    const editor = await screen.findByTestId('wp-pne-n1')
+    fireEvent.click(within(editor).getByRole('button', { name: 'No tag' }))
+    fireEvent.click(within(editor).getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(patchPosts.length).toBe(1))
+    expect(patchPosts[0].stepKey).toBeNull()
+    expect(await screen.findByText('No tag')).toBeInTheDocument()
+  })
+
+  it('cancel writes nothing and puts the row back', async () => {
+    const { patchPosts } = mockApi({ parked: [{ ...NOTE }] })
+    renderStep()
+
+    fireEvent.click(await screen.findByRole('button', { name: /edit “by the poster bored”/i }))
+    const field = await screen.findByLabelText('Edit this note')
+    fireEvent.change(field, { target: { value: 'something else entirely' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    expect(patchPosts.length).toBe(0)
+    expect(await screen.findByText('by the poster bored')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Edit this note')).not.toBeInTheDocument()
   })
 })

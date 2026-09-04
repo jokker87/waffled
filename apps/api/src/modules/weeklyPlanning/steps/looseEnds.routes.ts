@@ -2,7 +2,7 @@ import type createAPI from 'lambda-api'
 import type { Request, Response } from 'lambda-api'
 import { moduleRoutes } from '../../../platform/route-guards'
 import { resolveWeekStart } from '../weeklyPlanning'
-import { getLooseEnds, parkItem, resolveLooseEnd, routeLooseEnd } from './looseEnds'
+import { getLooseEnds, parkItem, resolveLooseEnd, routeLooseEnd, updateParkedItem } from './looseEnds'
 
 type Api = ReturnType<typeof createAPI>
 
@@ -62,5 +62,19 @@ export function registerLooseEndsStepRoutes(api: Api): void {
     const result = await parkItem(tenant, (req.body ?? {}) as Record<string, unknown>)
     if (!result.ok) return res.status(result.status).json({ error: result.error, message: result.message })
     return { item: result.item }
+  }))
+
+  // FIX WHAT YOU JUST WROTE. A typo, or the wrong tag chip, used to be repairable only by
+  // dropping the note and re-typing it — and a drop is meant to MEAN something. Both
+  // fields are read for PRESENCE, so an omitted key leaves that half alone while
+  // `stepKey: null` is the real answer "No tag".
+  //
+  // `routes` comes back only when a `sessionId` was sent: re-tagging a note that step 1
+  // ROUTED has to move its trail entry too, or the badge and the trail disagree. See
+  // `updateParkedItem`.
+  api.patch('/api/weekly-planning/loose-ends/parked/:id', tenantRoute(async (tenant, req: Request, res: Response) => {
+    const result = await updateParkedItem(tenant, req.params.id, (req.body ?? {}) as Record<string, unknown>)
+    if (!result.ok) return res.status(result.status).json({ error: result.error, message: result.message })
+    return { item: result.item, ...(result.routes ? { routes: result.routes } : {}) }
   }))
 }

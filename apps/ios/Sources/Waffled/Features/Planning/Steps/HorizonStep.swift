@@ -37,6 +37,9 @@ struct HorizonStepView: View {
     @State private var ahead = 0
     @State private var selectedDay = ""
     @State private var note = ""
+    /// Which board row is being corrected, if any. One at a time — the board is a receipt,
+    /// not a form.
+    @State private var editing: String?
     @FocusState private var noteFocused: Bool
     @State private var composer: HorizonComposer?
     @State private var pending: PendingComposer?
@@ -89,7 +92,9 @@ struct HorizonStepView: View {
                 saysLine
             }
 
-            if let message = model.errorMessage {
+            // Not while a board row is open: the editor shows the refusal directly under
+            // what you typed, and the same sentence in two places reads as two failures.
+            if let message = model.errorMessage, editing == nil {
                 DismissibleErrorBanner(message: message) { model.clearError() }
             }
 
@@ -97,7 +102,16 @@ struct HorizonStepView: View {
 
             board
         }
-        .task(id: props.sessionId) { await model.load(sessionId: props.sessionId) }
+        .task(id: props.sessionId) {
+            await model.load(sessionId: props.sessionId)
+            // Headless keyboard verification — see `DemoHooks.focusPark`. Step 1's capture
+            // bar is the other field it focuses; this one is always on screen, so it needs
+            // no mode switch.
+            if DemoHooks.focusPark {
+                try? await Task.sleep(for: .seconds(1))
+                noteFocused = true
+            }
+        }
         .task { await countdowns.load() }
         .onAppear {
             if selectedDay.isEmpty { selectedDay = props.weekStart }
@@ -229,7 +243,11 @@ struct HorizonStepView: View {
         }
         .padding(.horizontal, 12).padding(.vertical, 10)
         .wfField()
-        .wfKeyboardDoneToolbar { noteFocused = false }
+        // NO `.wfKeyboardDoneToolbar` HERE, deliberately — see the note in
+        // PlanningShellView.sessionScreen. That accessory bar measured ~79pt on an
+        // iPhone 17 Pro for a single button, stacked directly on top of the session's
+        // fixed footer: "why is there so much extra space?" The shell dismisses the
+        // keyboard on scroll instead, and this field's keyboard has a return key.
     }
 
     /// The tags, plus "No tag" — which is the ABSENCE of a tag and so is never a row the
@@ -256,17 +274,11 @@ struct HorizonStepView: View {
     private func tagChip(
         label: String, selected: Bool, hint: String?, action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
-            Text(label)
-                .font(.system(size: 12.5, weight: .bold))
-                .foregroundStyle(selected ? WF.aiD : WF.ink2)
-                .padding(.horizontal, 11).padding(.vertical, 7)
-                .wfChip(selected: selected, tint: WF.ai)
-        }
-        .buttonStyle(.plain)
-        .disabled(disabled)
-        .accessibilityHint(hint ?? "")
-        .accessibilityAddTraits(selected ? .isSelected : [])
+        // `PlanningTagChip` IS this chip, lifted out so the note editor's tag row and this
+        // bar's cannot drift: re-tagging a note and tagging it in the first place are the
+        // same choice, and they must look like it.
+        PlanningTagChip(
+            label: label, selected: selected, hint: hint, disabled: disabled, action: action)
     }
 
     /// "What does no tag do? where does it put it?" — a question a tooltip was never going
@@ -303,14 +315,56 @@ struct HorizonStepView: View {
             VStack(alignment: .leading, spacing: 8) {
                 SectionLabel(text: "Parked in this session")
                 ForEach(model.parked) { n in
-                    HStack(alignment: .top, spacing: 8) {
-                        Text(n.note).font(.system(size: 13.5)).foregroundStyle(WF.ink)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Spacer(minLength: 6)
-                        if let label = n.stepLabel {
-                            WaffledStatusBadge(text: label, color: WF.ai)
+                    Group {
+                        if editing == n.id {
+                            // "I have no way to edit the item or change the category and I
+                            // should." The same editor the shell's gold box uses, so a
+                            // correction reads identically wherever you catch the mistake
+                            // — and offered the SAME tags the bar above offers, because
+                            // re-tagging here and tagging here are one choice.
+                            PlanningParkedNoteEditor(
+                                note: n.note,
+                                stepKey: n.stepKey,
+                                tags: model.tags.map {
+                                    PlanningParkedTag(stepKey: $0.stepKey, label: $0.label, hint: $0.hint)
+                                },
+                                busy: props.busy,
+                                errorMessage: model.errorMessage,
+                                onCancel: {
+                                    editing = nil
+                                    model.clearError()
+                                },
+                                onSave: { note, stepKey in
+                                    let took = await model.update(
+                                        id: n.id, note: note, stepKey: stepKey,
+                                        sessionId: props.sessionId)
+                                    // The gold box further down the session quotes this
+                                    // note; only the shell can refetch it.
+                                    if took { props.refresh() }
+                                    return took
+                                })
                         } else {
-                            WaffledStatusBadge(text: "No tag", color: WF.ink3)
+                            HStack(alignment: .top, spacing: 8) {
+                                Text(n.note).font(.system(size: 13.5)).foregroundStyle(WF.ink)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                Spacer(minLength: 6)
+                                if let label = n.stepLabel {
+                                    WaffledStatusBadge(text: label, color: WF.ai)
+                                } else {
+                                    WaffledStatusBadge(text: "No tag", color: WF.ink3)
+                                }
+                                // Quiet, and last: the row is a receipt, so the repair is
+                                // the exception rather than the offer.
+                                Button("Edit") {
+                                    model.clearError()
+                                    editing = n.id
+                                }
+                                .font(.system(size: 11.5, weight: .bold))
+                                .foregroundStyle(disabled ? WF.ink3 : WF.ai)
+                                .buttonStyle(.plain)
+                                .disabled(disabled)
+                                .accessibilityLabel("Edit “\(n.note)”")
+                            }
                         }
                     }
                     .padding(11)

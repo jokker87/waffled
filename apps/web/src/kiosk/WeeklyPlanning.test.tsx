@@ -76,6 +76,19 @@ function mockApi(view: Record<string, unknown>) {
     if (method === 'POST' && u.endsWith('/api/weekly-planning/session')) {
       state.session = session({ weekStart: state.weekStart as string, currentStep: 'looseEnds' })
     }
+    // Correcting a parked note from the gold box. Matched before the session PATCH below
+    // — both are PATCHes under /api/weekly-planning — and it answers with the ROW, which
+    // is what the editor reads back.
+    if (method === 'PATCH' && u.includes('/loose-ends/parked/')) {
+      const body = (init?.body ? JSON.parse(String(init.body)) : {}) as Record<string, unknown>
+      const id = decodeURIComponent(u.split('/').pop()!)
+      return {
+        ok: true,
+        json: async () => ({
+          item: { id, note: body.note ?? 'book the campsite', stepKey: body.stepKey ?? 'calendar' },
+        }),
+      }
+    }
     if (method === 'PATCH' && u.includes('/session/')) {
       const patch = init?.body ? JSON.parse(String(init.body)) : {}
       state.session = { ...(state.session as object), ...patch, ...(patch.status === 'active' ? { completedAt: null } : {}) }
@@ -508,5 +521,51 @@ describe('the parked-note handoff', () => {
     draw()
     await screen.findByTestId('wp-handoff')
     expect(calls.some((c) => c.url.includes('/loose-ends/resolve'))).toBe(false)
+  })
+
+  // "I have no way to edit the item or change the category and I should." A note reaches
+  // this box BECAUSE of its tag, so the box is the other place the mistake is visible —
+  // and until this, the only repair was Drop, which is supposed to mean something else.
+  it('fixes the words without dropping the note', async () => {
+    mockApi(baseView({ steps: withNote(), session: session({ currentStep: 'calendar' }) }))
+    draw()
+    await screen.findByTestId('wp-handoff')
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+
+    fireEvent.change(await screen.findByLabelText('Edit this note'), {
+      target: { value: 'book the campsite for Friday' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => {
+      const patch = calls.find((c) => c.method === 'PATCH' && c.url.includes('/loose-ends/parked/pk1'))
+      expect(patch).toBeTruthy()
+      expect(patch!.body).toMatchObject({ note: 'book the campsite for Friday', sessionId: 's1' })
+    })
+    // Nothing was resolved: an edit is not an answer.
+    expect(calls.some((c) => c.url.includes('/loose-ends/resolve'))).toBe(false)
+  })
+
+  it('re-addresses the note to another step this household runs', async () => {
+    mockApi(baseView({ steps: withNote(), session: session({ currentStep: 'calendar' }) }))
+    draw()
+    await screen.findByTestId('wp-handoff')
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+
+    const editor = await screen.findByTestId('wp-pne-pk1')
+    // The step it is ON is the chip it opens on — that is why the box raised it.
+    expect(within(editor).getByRole('button', { name: 'Calendar' })).toHaveAttribute('aria-pressed', 'true')
+    // …and step 1 is never offered: the server refuses "the step it came from" as a circle.
+    expect(within(editor).queryByRole('button', { name: 'Loose ends' })).toBeNull()
+    // Nor is a step whose module the household turned off.
+    expect(within(editor).queryByRole('button', { name: 'Family night' })).toBeNull()
+
+    fireEvent.click(within(editor).getByRole('button', { name: 'Horizon scan' }))
+    fireEvent.click(within(editor).getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => {
+      const patch = calls.find((c) => c.method === 'PATCH' && c.url.includes('/loose-ends/parked/pk1'))
+      expect(patch!.body).toMatchObject({ stepKey: 'horizon', sessionId: 's1' })
+    })
   })
 })

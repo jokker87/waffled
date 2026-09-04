@@ -78,7 +78,11 @@ struct FamilyNightStepView: View {
         // The crumb, kept in step with every read and write, so the affirmative writes
         // back what is already true instead of erasing it.
         .onChange(of: model.rev) { props.setDecisionData(model.crumb) }
-        .wfKeyboardDoneToolbar { focusedField = nil }
+        // NO `.wfKeyboardDoneToolbar` HERE, deliberately — see the note in
+        // PlanningShellView.sessionScreen. That accessory bar measured ~79pt on an
+        // iPhone 17 Pro for a single button, stacked directly on top of the session's
+        // fixed footer: "why is there so much extra space?" The shell dismisses the
+        // keyboard on scroll instead, and this field's keyboard has a return key.
     }
 
     // MARK: - The gathering

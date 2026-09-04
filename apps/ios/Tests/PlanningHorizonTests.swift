@@ -200,8 +200,13 @@ private final class HorizonFeed {
     var snapshot: WaffledAPI.HorizonView
     var fetchFails = false
     var parkFails = false
+    var updateFails = false
     var fetchCount = 0
     var parkCalls: [(note: String, stepKey: String?, sessionId: String)] = []
+    /// `stepKey` is DOUBLY optional on the way out: absent leaves the tag alone, and
+    /// `.some(nil)` is the real answer "No tag". Recording it flat would lose the
+    /// distinction the whole route is built on.
+    var updateCalls: [(id: String, note: String?, stepKey: String??, sessionId: String)] = []
 
     init(snapshot: WaffledAPI.HorizonView) { self.snapshot = snapshot }
 }
@@ -232,6 +237,18 @@ private func model(_ feed: HorizonFeed) -> PlanningHorizonModel {
             return WaffledAPI.PlanningParkedItem(
                 id: parkedNoteId, note: note, stepKey: stepKey, status: "open",
                 sessionId: sessionId, createdAt: "2026-09-02T18:04:11.000Z")
+        },
+        updateNote: { id, note, stepKey, sessionId in
+            feed.updateCalls.append((id, note, stepKey, sessionId))
+            if feed.updateFails { throw HorizonFailure.refused }
+            // The row the SERVER wrote: it echoes the whole note back, so an omitted field
+            // comes back unchanged rather than nil. The double optional is unwrapped once
+            // for "was the tag touched" and once for the value it was set to.
+            let existing = feed.snapshot.parked.first { $0.id == id }
+            return WaffledAPI.PlanningParkedItem(
+                id: id, note: note ?? existing?.note ?? "",
+                stepKey: stepKey ?? existing?.stepKey, status: "open",
+                sessionId: sessionId, createdAt: existing?.createdAt ?? "2026-09-02T18:04:11.000Z")
         })
 }
 
@@ -375,5 +392,123 @@ private func model(_ feed: HorizonFeed) -> PlanningHorizonModel {
         #expect(await m.park("A note", sessionId: horizonSession))
 
         #expect(m.decisionData == ["added": .int(2), "parked": .int(1)])
+    }
+}
+
+// MARK: - Editing a note that is already parked
+
+@MainActor
+@Suite struct PlanningParkedNoteEditTests {
+
+    private func board() -> HorizonFeed {
+        HorizonFeed(
+            snapshot: WaffledAPI.HorizonView(
+                tags: fullTags,
+                parked: [
+                    WaffledAPI.HorizonNote(
+                        id: parkedNoteId, note: "by the poster bored", stepKey: "tasks",
+                        stepLabel: "Tasks", createdAt: "2026-09-02T18:04:11.000Z"),
+                    WaffledAPI.HorizonNote(
+                        id: "55555555-5555-4555-8555-555555555555", note: "Something else",
+                        stepKey: nil, stepLabel: nil, createdAt: "2026-09-02T18:06:02.000Z"),
+                ]))
+    }
+
+    /// "Parked in this session — I have no way to edit the item or change the category and
+    /// I should." Fixing the words sends ONLY the words: `stepKey` absent means "leave the
+    /// tag alone", and sending it unchanged would rewrite this note's route entry for
+    /// nothing.
+    @Test func rewritesTheWordsAndSendsNothingElse() async {
+        let feed = board()
+        let m = model(feed)
+        await m.load(sessionId: horizonSession)
+
+        #expect(await m.update(
+            id: parkedNoteId, note: "buy the poster board", stepKey: nil,
+            sessionId: horizonSession))
+
+        #expect(feed.updateCalls.count == 1)
+        #expect(feed.updateCalls[0].id == parkedNoteId)
+        #expect(feed.updateCalls[0].note == "buy the poster board")
+        // Absent, not null: `.none` is "leave it alone".
+        #expect(feed.updateCalls[0].stepKey == nil)
+        #expect(feed.updateCalls[0].sessionId == horizonSession)
+
+        #expect(m.parked[0].note == "buy the poster board")
+        // The tag it already had survives the edit — and so does its label.
+        #expect(m.parked[0].stepKey == "tasks")
+        #expect(m.parked[0].stepLabel == "Tasks")
+        // Untouched rows stay put, in order.
+        #expect(m.parked.map(\.id) == [parkedNoteId, "55555555-5555-4555-8555-555555555555"])
+        #expect(m.errorMessage == nil)
+    }
+
+    /// Changing the category re-joins the label from the CATALOG, never storing one — the
+    /// same rule the server's own read follows, so retitling a step renames every badge.
+    @Test func movesTheTagAndRelabelsFromTheCatalog() async {
+        let feed = board()
+        let m = model(feed)
+        await m.load(sessionId: horizonSession)
+
+        #expect(await m.update(
+            id: parkedNoteId, note: nil, stepKey: .some("meals"), sessionId: horizonSession))
+
+        #expect(feed.updateCalls[0].note == nil)
+        #expect(feed.updateCalls[0].stepKey == .some(.some("meals")))
+        #expect(m.parked[0].stepKey == "meals")
+        #expect(m.parked[0].stepLabel == "Meals")
+        // The words are the ones the server echoed, not a local guess.
+        #expect(m.parked[0].note == "by the poster bored")
+    }
+
+    /// "No tag" is an answer an EDIT can give, not only a park: `.some(nil)` sends `null`,
+    /// which is the deliberate absence of a tag. No step raises the note after that — it
+    /// stays on the board.
+    @Test func takingTheTagOffSendsAnExplicitNull() async {
+        let feed = board()
+        let m = model(feed)
+        await m.load(sessionId: horizonSession)
+
+        #expect(await m.update(
+            id: parkedNoteId, note: nil, stepKey: .some(nil), sessionId: horizonSession))
+
+        // The distinction the double optional exists for: touched, and set to nothing.
+        #expect(feed.updateCalls[0].stepKey != nil)
+        #expect(feed.updateCalls[0].stepKey! == nil)
+        #expect(m.parked[0].stepKey == nil)
+        #expect(m.parked[0].stepLabel == nil)
+    }
+
+    /// A REFUSED EDIT LEAVES THE BOARD ALONE and keeps the server's sentence — the note is
+    /// capped at 500 characters and a tag naming a step the household turned off is
+    /// refused, so a refusal is reachable rather than theoretical.
+    @Test func aRefusedEditChangesNothing() async {
+        let feed = board()
+        feed.updateFails = true
+        let m = model(feed)
+        await m.load(sessionId: horizonSession)
+
+        #expect(await m.update(
+            id: parkedNoteId, note: "something new", stepKey: .some("meals"),
+            sessionId: horizonSession) == false)
+
+        #expect(m.parked[0].note == "by the poster bored")
+        #expect(m.parked[0].stepKey == "tasks")
+        #expect(m.errorMessage == LooseEndCopy.writeFailed)
+        #expect(m.parking == false)
+    }
+
+    /// An id the board doesn't hold cannot corrupt it. (The gold box shows notes that are
+    /// not session-scoped, so a stale row is a real possibility.)
+    @Test func anUnknownIdLeavesTheBoardUntouched() async {
+        let feed = board()
+        let m = model(feed)
+        await m.load(sessionId: horizonSession)
+
+        #expect(await m.update(
+            id: "99999999-9999-4999-8999-999999999999", note: "elsewhere", stepKey: nil,
+            sessionId: horizonSession))
+
+        #expect(m.parked.map(\.note) == ["by the poster bored", "Something else"])
     }
 }
