@@ -25,16 +25,25 @@ import SwiftUI
 /// same `ChoreEditSheet` the strip's own "Add a task" opens, seeded with the note's
 /// words, and reports back `true` only if a task was really created.
 ///
-/// TWO KNOWN DIVERGENCES FROM THE WEB, both deliberate:
+/// DRAGGING DOES THE SAME THING AS TAPPING, AND ADDS NOTHING OF ITS OWN. Grip a card,
+/// drop it on a person's block or back on the strip; it resolves through the very same
+/// `give` the faces call (`PlanningTasksModel.drop`), and a card dropped where it already
+/// sits writes nothing. Tapping a face is NOT replaced by it — one gesture for the person
+/// who reaches for a drag, one for the person who can't. Three things this cost us:
 ///
-///  1. **No drag-and-drop.** Tapping a face already does everything a drag does — the web
-///     ships both only because a kiosk mouse wants a grip — and a phone-width single
-///     column has nowhere to drag to. The web's own layout (side-by-side columns) is what
-///     makes a drag legible there.
-///  2. **The chore editor here cannot delete** (`canDelete: false`, matching the web).
-///     This step asks who does what, not which chores should exist: removing one reaches
-///     far outside the week being planned, and the Meals step's shopping trip is a real
-///     chore on this very board whose identity other steps resolve by id.
+///  * **The drag lives on a grip, not on the whole card.** A card holds three Buttons
+///    (title, day chip, faces); making the card itself `.draggable` would have meant
+///    demoting those to `.onTapGesture` and fighting the drag for every tap.
+///  * **The payload is a custom `PlanningTaskDrag`, never a `String`.** A string id is
+///    offered to every text field in the app and gets pasted in as text.
+///  * **`ScrollView`, not `List`.** `List` silently refuses `.dropDestination`, so the
+///    drop targets would have been dead with no error anywhere.
+///
+/// ONE KNOWN DIVERGENCE FROM THE WEB, deliberate: **the chore editor here cannot delete**
+/// (`canDelete: false`, matching the web). This step asks who does what, not which chores
+/// should exist: removing one reaches far outside the week being planned, and the Meals
+/// step's shopping trip is a real chore on this very board whose identity other steps
+/// resolve by id.
 struct TasksStepView: View {
     let props: PlanningStepProps
 
@@ -46,6 +55,19 @@ struct TasksStepView: View {
     private var canAssign: Bool { sync.can("chore.manage") }
     /// A write is in flight somewhere — the shell's or ours.
     private var frozen: Bool { props.busy || model.savingChoreId != nil }
+
+    /// The column a drag is hovering, for the highlight ring. Nil the rest of the time.
+    @State private var dropTarget: PlanningTaskColumn?
+
+    /// Whether a column should accept drops right now. A ring that lights up while a
+    /// write is already in flight is a ring that lies — `give` refuses a second one.
+    ///
+    /// DELIBERATELY NOT USED TO GATE THE GRIP. `frozen` flips the moment a hand-out
+    /// starts, so gating the grip on it would delete the drag source out from under the
+    /// finger holding it — including the very drag that started the write. The Chores
+    /// board gates its own grip on the permission alone for the same reason. A grip whose
+    /// drop lands nowhere is far better than one that vanishes mid-gesture.
+    private var canDrop: Bool { canAssign && !frozen }
 
     var body: some View {
         ScrollView {
@@ -112,10 +134,12 @@ struct TasksStepView: View {
                     Text("Up for grabs")
                         .font(.system(size: 16, weight: .bold)).foregroundStyle(WF.ink)
                 }
+                // The drag hint is in the copy because a drag is otherwise invisible —
+                // there is no way to discover a grip you weren't told about (web parity).
                 Text(board.unassigned.isEmpty
                      ? "✓ Everything's handed out."
                      : canAssign
-                        ? "Tap a face to hand one over. Leaving one up for grabs is a real answer — whoever does it gets the stars."
+                        ? "Tap a face (or drag the card by its grip) to hand one over. Leaving one up for grabs is a real answer — whoever does it gets the stars."
                         : "Whoever does one gets the stars.")
                     .font(.system(size: 12.5, weight: .semibold)).foregroundStyle(WF.ink2)
                     .fixedSize(horizontal: false, vertical: true)
@@ -136,6 +160,9 @@ struct TasksStepView: View {
         .background(LinearGradient(colors: [WF.aiT, WF.infoT], startPoint: .topLeading, endPoint: .bottomTrailing))
         .clipShape(RoundedRectangle(cornerRadius: WF.rLG, style: .continuous))
         .wfShadow1()
+        // The strip is a drop target too, which is what makes a hand-out reversible by
+        // drag as well as by tap (web parity).
+        .planningTaskDropTarget(.upForGrabs, enabled: canDrop, hovered: $dropTarget, onDrop: drop)
     }
 
     // MARK: - One person
@@ -170,18 +197,29 @@ struct TasksStepView: View {
                     .font(.system(size: 11.5, weight: .semibold)).foregroundStyle(WF.ink3)
             }
         }
+        // Drop a card anywhere on somebody's block to hand it to them — the whole block,
+        // not a slot inside it, because the block IS the answer to "who's doing what".
+        .planningTaskDropTarget(.person(person.id), enabled: canDrop,
+                                hovered: $dropTarget, onDrop: drop)
     }
 
     // MARK: - One card
     //
-    // FOUR regions that must never be mistaken for each other, and they are SIBLINGS,
+    // FIVE regions that must never be mistaken for each other, and they are SIBLINGS,
     // not nested — so no tap has to be stopped from reaching a parent and no region can
     // swallow another's:
+    //   the grip          drags the card onto a person (or the strip)
     //   the title block   opens the app's own chore editor
     //   the day chip      opens the SAME editor (one card, one editor, so a title change
     //                     and a day change can't race each other on the same chore)
     //   the faces         hand it over / take it back
     //   the reward badge  says what it's worth, and is not a control
+    //
+    // THE GRIP IS WHY THE CARD ITSELF ISN'T `.draggable`. Three of those regions are
+    // Buttons; a drag on the card would have to win the gesture from each of them, which
+    // means demoting every one to `.onTapGesture` and hoping the arbitration goes our way
+    // (RecipeEditorView's ingredient rows already learned this against TextFields). A
+    // grip owns one small rectangle and takes nothing away from the taps beside it.
 
     @ViewBuilder
     private func choreCard(_ chore: WaffledAPI.PlanningTasksChore, owner: String?,
@@ -193,19 +231,23 @@ struct TasksStepView: View {
         let chipText = unset && settable ? "Set a day" : (model.dayChip[chore.id] ?? "")
 
         VStack(alignment: .leading, spacing: 8) {
-            if canAssign {
-                // Editing a chore is PATCH /api/chores/:id, which the chores module gates
-                // on chore.manage — the same rule the board applies when it decides
-                // whether a card opens the editor. No looser rule here: a sheet that
-                // 403s on Save is worse than no sheet.
-                Button { model.openEdit(chore, owner: owner) } label: {
+            HStack(alignment: .top, spacing: 8) {
+                // The PERMISSION only — never `frozen`. See `canDrop`.
+                if canAssign { grip(chore) }
+                if canAssign {
+                    // Editing a chore is PATCH /api/chores/:id, which the chores module
+                    // gates on chore.manage — the same rule the board applies when it
+                    // decides whether a card opens the editor. No looser rule here: a
+                    // sheet that 403s on Save is worse than no sheet.
+                    Button { model.openEdit(chore, owner: owner) } label: {
+                        titleBlock(chore)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(frozen)
+                    .accessibilityLabel("Edit \(chore.title)")
+                } else {
                     titleBlock(chore)
                 }
-                .buttonStyle(.plain)
-                .disabled(frozen)
-                .accessibilityLabel("Edit \(chore.title)")
-            } else {
-                titleBlock(chore)
             }
 
             HStack(spacing: 8) {
@@ -257,6 +299,34 @@ struct TasksStepView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .wfField(radius: WF.rMD, fill: WF.panel)
         .opacity(model.savingChoreId == chore.id ? 0.55 : 1)
+    }
+
+    /// The drag handle. Same glyph the recipe editor's ingredient rows use, so "this is
+    /// the bit you grab" reads the same wherever the app offers a drag.
+    ///
+    /// HIDDEN FROM VOICEOVER ON PURPOSE. A drag isn't a gesture VoiceOver can perform, so
+    /// a labelled grip would be a dead end; the faces below the card are the accessible
+    /// way to hand a task over, and they do exactly the same thing.
+    private func grip(_ chore: WaffledAPI.PlanningTasksChore) -> some View {
+        Image(systemName: "line.3.horizontal")
+            .font(.system(size: 13, weight: .bold)).foregroundStyle(WF.ink3)
+            .frame(width: 22, height: 30).contentShape(Rectangle())
+            .draggable(PlanningTaskDrag(choreId: chore.id)) { dragPreview(chore) }
+            .accessibilityHidden(true)
+    }
+
+    /// The floating ghost under the finger — the Chores board's own drag preview, because
+    /// this is the same act on the same data and it should look like it.
+    private func dragPreview(_ chore: WaffledAPI.PlanningTasksChore) -> some View {
+        HStack(spacing: 6) {
+            Text(chore.emoji ?? "🧹").font(.system(size: 14))
+            Text(chore.title)
+                .font(.system(size: 14, weight: .semibold)).foregroundStyle(WF.ink).lineLimit(1)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .background(WF.card)
+        .clipShape(Capsule())
+        .overlay(Capsule().strokeBorder(WF.gold.opacity(0.5), lineWidth: 1))
     }
 
     private func titleBlock(_ chore: WaffledAPI.PlanningTasksChore) -> some View {
@@ -378,6 +448,16 @@ struct TasksStepView: View {
         }
     }
 
+    /// A card landed on a column. The model decides what that MEANS — including that it
+    /// means nothing, when the card was dropped where it already sat.
+    private func drop(_ choreId: String, onto column: PlanningTaskColumn) {
+        Task {
+            if await model.drop(choreId: choreId, onto: column, weekStart: props.weekStart) {
+                props.refresh()
+            }
+        }
+    }
+
     private func reload() {
         Task {
             await model.load(weekStart: props.weekStart)
@@ -385,6 +465,50 @@ struct TasksStepView: View {
             // "Needs your OK", the kiosk board.
             sync.bumpChores()
             props.refresh()
+        }
+    }
+}
+
+// MARK: - A column as a drop target
+
+private extension View {
+    /// Make this surface accept a dragged task card, with the highlight ring that says
+    /// so. Used by the up-for-grabs strip and by every person's block, so the two
+    /// directions of a hand-out are the same piece of code — a drag can never do
+    /// something the drag back can't undo.
+    ///
+    /// `enabled: false` attaches NO drop destination at all, rather than one that refuses
+    /// on arrival: a ring that lights up for a drop that can't land is worse than no ring.
+    ///
+    /// Attached AFTER the surface's own background/clipShape/shadow — modifier order is
+    /// load-bearing for drag and drop (see `MealPlanReviewCard`).
+    ///
+    /// This works ONLY because the step is a `ScrollView`. `List` silently drops
+    /// `.dropDestination` with no error anywhere — do not restructure the step into one.
+    @ViewBuilder
+    func planningTaskDropTarget(_ column: PlanningTaskColumn, enabled: Bool,
+                                hovered: Binding<PlanningTaskColumn?>,
+                                onDrop: @escaping (String, PlanningTaskColumn) -> Void) -> some View {
+        if enabled {
+            overlay(RoundedRectangle(cornerRadius: WF.rLG, style: .continuous)
+                .strokeBorder(hovered.wrappedValue == column ? WF.primary : .clear, lineWidth: 2))
+            .dropDestination(for: PlanningTaskDrag.self) { items, _ in
+                hovered.wrappedValue = nil
+                guard let dragged = items.first else { return false }
+                onDrop(dragged.choreId, column)
+                // TRUE even when the model resolves the drop to nothing (a card dropped
+                // where it already sat). It WAS a valid target; returning false fires the
+                // snap-back animation, which reads as a rejection of a harmless gesture.
+                return true
+            } isTargeted: { over in
+                withAnimation(.easeInOut(duration: 0.12)) {
+                    hovered.wrappedValue = over
+                        ? column
+                        : (hovered.wrappedValue == column ? nil : hovered.wrappedValue)
+                }
+            }
+        } else {
+            self
         }
     }
 }

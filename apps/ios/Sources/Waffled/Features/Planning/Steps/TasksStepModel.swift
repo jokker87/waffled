@@ -1,5 +1,7 @@
+import CoreTransferable
 import Foundation
 import Observation
+import UniformTypeIdentifiers
 
 // Weekly Planning · step 8 (Tasks) — the step's model and its pure formatting.
 //
@@ -98,6 +100,40 @@ enum PlanningTasksFormat {
         f.dateFormat = "MMM d"
         return f
     }()
+}
+
+// MARK: - Dragging a card onto a person
+
+/// Where a card sits, in the SAME two-way vocabulary the web uses for its `data-colkey`
+/// (`'unassigned'` + a person id) and the Chores board uses for its columns. A drop
+/// target names one of these, and so does the place a card came from — which is what
+/// makes "did this drop actually move anything?" a comparison rather than a special case.
+enum PlanningTaskColumn: Hashable {
+    case upForGrabs
+    case person(String)
+}
+
+/// The custom drag payload for handing a task out by dragging it.
+///
+/// A `.draggable(String)` payload is offered to EVERY text field in the app, so the
+/// dragged id gets pasted into whatever the finger lands near — this bit us on the recipe
+/// ingredient rows. A private UTType conforming to `public.data` (**not** `public.text`,
+/// and declared in `project.yml` under `UTExportedTypeDeclarations`) means only this
+/// step's drop targets will take it.
+extension UTType {
+    static let waffledPlanningTask = UTType(exportedAs: "app.waffled.planning-task")
+}
+
+/// IT CARRIES AN ID AND NOTHING ELSE — deliberately. The chore, and above all *who has
+/// it*, are read back off the current board at drop time (`PlanningTasksModel.drop`): a
+/// column is the week and the server owns it, so a payload minted at drag start and
+/// resolved a re-read later must not be the authority on anything.
+struct PlanningTaskDrag: Transferable, Codable {
+    let choreId: String
+
+    static var transferRepresentation: some TransferRepresentation {
+        CodableRepresentation(contentType: .waffledPlanningTask)
+    }
 }
 
 // MARK: - Model
@@ -225,6 +261,54 @@ final class PlanningTasksModel {
         // Re-read rather than bookkeeping: the column is the week, and the server owns it.
         if let fresh = try? await fetchBoard(weekStart) { apply(fresh) }
         return true
+    }
+
+    // MARK: Dragging a card onto a person
+
+    /// Which column a card sits in RIGHT NOW, or nil when the board no longer has it.
+    ///
+    /// The board is the only authority here — the drag payload carries an id, not an
+    /// owner, so a re-read landing mid-drag can't leave a drop acting on a stale idea of
+    /// who had the task.
+    func column(ofChore choreId: String) -> PlanningTaskColumn? { located(choreId)?.column }
+
+    /// A card was dropped on a column. THE THIRD CALLER OF `give`, not a fourth write
+    /// path — dragging has to be undoable by exactly the same means as tapping a face.
+    ///
+    /// Two gestures resolve to nothing and must not spend a write:
+    ///
+    ///  * **A card dropped where it already sits.** `give` tallies unconditionally, so
+    ///    letting this through would both PATCH the chore to the name it already has and
+    ///    inflate `assigned` — the crumb the recap reports — for a move that never
+    ///    happened.
+    ///  * **A card the board no longer holds** (deleted mid-drag, or a payload minted
+    ///    against a board this step has since replaced). There is nothing to PATCH, and
+    ///    guessing would move the wrong task.
+    ///
+    /// Returns true only when a write really landed, so the caller knows whether to tell
+    /// the shell. The DROP ITSELF still succeeds either way — see the view: a harmless
+    /// gesture is not an error, and bouncing the card back reads like one.
+    @discardableResult
+    func drop(choreId: String, onto column: PlanningTaskColumn, weekStart: String) async -> Bool {
+        guard let found = located(choreId), found.column != column else { return false }
+        switch column {
+        case .upForGrabs:            return await give(found.chore, to: nil, weekStart: weekStart)
+        case let .person(personId):  return await give(found.chore, to: personId, weekStart: weekStart)
+        }
+    }
+
+    /// The card AND the column it sits in, in one pass — "is it still here?" and "where
+    /// did it come from?" are the same question asked of the same two collections, and a
+    /// drop needs both answers to agree with each other.
+    private func located(_ choreId: String)
+        -> (chore: WaffledAPI.PlanningTasksChore, column: PlanningTaskColumn)? {
+        if let hit = board?.unassigned.first(where: { $0.id == choreId }) { return (hit, .upForGrabs) }
+        for person in board?.people ?? [] {
+            if let hit = person.chores.first(where: { $0.id == choreId }) {
+                return (hit, .person(person.id))
+            }
+        }
+        return nil
     }
 
     // MARK: The chore editor

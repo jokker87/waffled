@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import UniformTypeIdentifiers
 @testable import Waffled
 
 // Weekly Planning · step 8 (Tasks).
@@ -416,5 +417,110 @@ private func model(_ feed: TasksBoardFeed) -> PlanningTasksModel {
         #expect(crumb["assigned"] == JSONValue.int(0))
         #expect(crumb["leftUpForGrabs"] == JSONValue.int(1))
         // No titles, no ids, no people — the recap reads those through to chores itself.
+    }
+
+    // ── Dragging a card onto a person ───────────────────────────────────────────
+    //
+    // Drag is an ADDITION to tapping a face, never a replacement — reaching for a drag
+    // is not a gesture everybody can make. So a drop resolves to the very same hand-out:
+    // `give` stays the one path both directions travel, or a drop could do something a
+    // tap can't undo.
+
+    @Test func aDropResolvesAgainstTheBoardRatherThanTheGestureThatStartedIt() async throws {
+        let feed = TasksBoardFeed(try decodedBoard())
+        let model = model(feed)
+        await model.load(weekStart: "2026-09-06")
+
+        // A CARD'S COLUMN IS A SERVER FACT, not something the drag carries. The payload
+        // is only an id, so a board re-read under a half-finished drag can't leave the
+        // drop acting on a stale idea of who had it.
+        #expect(model.column(ofChore: "c-trash") == .person("p-wally"))
+        #expect(model.column(ofChore: "c-library") == .person("p-lottie"))
+        #expect(model.column(ofChore: "c-sitter") == .upForGrabs)
+        #expect(model.column(ofChore: "c-nowhere") == nil)
+    }
+
+    @Test func droppingACardOnSomeoneHandsItOverDownTheSamePathAsTappingAFace() async throws {
+        let feed = TasksBoardFeed(try decodedBoard())
+        let model = model(feed)
+        await model.load(weekStart: "2026-09-06")
+
+        let wrote = await model.drop(choreId: "c-sitter", onto: .person("p-wally"),
+                                     weekStart: "2026-09-06")
+
+        #expect(wrote)
+        #expect(feed.handOuts.map(\.choreId) == ["c-sitter"])
+        #expect(feed.handOuts.map(\.personId) == ["p-wally"])
+        #expect(model.assigned == 1)
+        // Re-read rather than bookkeeping — a column is the WEEK, and the server owns it.
+        #expect(feed.fetchCount == 2)
+    }
+
+    @Test func droppingSomeonesCardOnTheStripPutsItBackUpForGrabs() async throws {
+        let feed = TasksBoardFeed(try decodedBoard())
+        let model = model(feed)
+        await model.load(weekStart: "2026-09-06")
+
+        let wrote = await model.drop(choreId: "c-trash", onto: .upForGrabs,
+                                     weekStart: "2026-09-06")
+
+        #expect(wrote)
+        // EVERY MOVE IS REVERSIBLE by the same gesture that made it, or drag would be a
+        // one-way door the 🙌 has to clean up after.
+        #expect(feed.handOuts.map(\.personId) == [String?.none])
+        #expect(model.assigned == 0)
+    }
+
+    @Test func droppingACardBackWhereItAlreadySitsWritesNothingAndTalliesNothing() async throws {
+        let feed = TasksBoardFeed(try decodedBoard())
+        let model = model(feed)
+        await model.load(weekStart: "2026-09-06")
+
+        // Wally's card, dropped on Wally. `give` tallies UNCONDITIONALLY, so letting this
+        // through would spend a PATCH *and* inflate `assigned` — the crumb the recap
+        // reports — for a gesture that moved nothing.
+        let onOwner = await model.drop(choreId: "c-trash", onto: .person("p-wally"),
+                                       weekStart: "2026-09-06")
+        // Same in the strip: a card nobody has, dropped back where it already is.
+        let onStrip = await model.drop(choreId: "c-sitter", onto: .upForGrabs,
+                                       weekStart: "2026-09-06")
+
+        #expect(!onOwner)
+        #expect(!onStrip)
+        #expect(feed.handOuts.isEmpty)
+        #expect(model.assigned == 0)
+        #expect(feed.fetchCount == 1)          // the initial load only
+        #expect(model.errorMessage == nil)     // a harmless gesture is not an error
+    }
+
+    @Test func aCardThatIsNoLongerOnTheBoardIsRefusedWithoutAWrite() async throws {
+        let feed = TasksBoardFeed(try decodedBoard())
+        let model = model(feed)
+        await model.load(weekStart: "2026-09-06")
+
+        // Somebody deleted it mid-drag, or the payload came from a board this step has
+        // since replaced. Either way there is no chore to PATCH, and guessing one would
+        // move the wrong task.
+        let wrote = await model.drop(choreId: "c-gone", onto: .person("p-wally"),
+                                     weekStart: "2026-09-06")
+
+        #expect(!wrote)
+        #expect(feed.handOuts.isEmpty)
+        #expect(model.assigned == 0)
+    }
+
+    @Test func theDragPayloadIsNotTextSoItCannotBePastedIntoAField() throws {
+        // A `.draggable(String)` payload is accepted by EVERY TextField in the app —
+        // this bit us on the recipe ingredient rows, where the dragged id got pasted in
+        // as text. Conforming to public.data means only this step's drop targets take it.
+        #expect(UTType.waffledPlanningTask.identifier == "app.waffled.planning-task")
+        #expect(!UTType.waffledPlanningTask.conforms(to: .text))
+
+        // It carries an id and NOTHING ELSE — see the resolve-against-the-board test.
+        let data = try JSONEncoder().encode(PlanningTaskDrag(choreId: "c-trash"))
+        let roundTripped = try JSONDecoder().decode(PlanningTaskDrag.self, from: data)
+        #expect(roundTripped.choreId == "c-trash")
+        let fields = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(fields.count == 1)
     }
 }
