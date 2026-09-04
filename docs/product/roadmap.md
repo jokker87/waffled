@@ -256,7 +256,19 @@ Legend: ✅ done · 🟡 partial / in progress · 🚧 planned · ⛔ dropped (s
   Goals, Meals, Tasks, Kids, Recap — built in parallel behind a per-step file seam (see the
   plan doc's "Building the steps in parallel"), five at a time in two waves that merged with
   no conflicts, then a validation pass that fixed ten reported defects across five of them.
-  **Pending: iOS parity for all of it.** The architectural point held: the session stores almost nothing — two tables
+  **iOS parity shipped too** — the session shell (lobby, chrome, agenda sheet, the
+  parked-note handoff with each step's lent verb, "leave for now" as a per-device pause,
+  the saved record, the settings panel) and all ten step bodies, reachable from a Today
+  card, the Family hub, Settings, and the iPad kiosk's own rail page. Built the same way
+  the web steps were — a registry naming all ten keys and ten stub files on day one, so
+  each step could be written against its own files and nothing shared; six agents in two
+  waves, integrating with two compile errors between them, both in the wiring rather than
+  the steps. The port also turned up three defects in shipped code: `step.number` is a
+  CATALOG index and neither client's counter may use it (the server's own comment said the
+  opposite), the progress hair was positional on web and settled-based on iOS, and iOS had
+  never decoded `periodDone`/`stepDone`/`stepTotal` at all — so every iOS surface had been
+  showing habit goals their LIFETIME count instead of this period's. The architectural
+  point held: the session stores almost nothing — two tables
   (`planning_sessions`, `planning_session_steps`) plus `planning_parked_items` — and every
   decision lands in the module that owns it. Step 1 is the one exception and it stores nothing
   either: it *routes* items to later steps, recorded in the session's own jsonb — and the

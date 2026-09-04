@@ -15,6 +15,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Weekly Planning is on iPhone and iPad.** The whole guided session — the lobby, all ten
+  steps, the agenda sheet, the parked-note handoff, the recap and the saved record — now
+  runs in the app, not just in the browser. On the phone it opens from a Today card, from
+  Family → Weekly Planning, or from Settings; on the family display it has its own
+  **Planning** page in the rail. Leaving a session part-way keeps it exactly where it was
+  on that device, and another device can still pick it up.
+
+- **Habit goals on iPhone now show this period's count, not their lifetime total.** A habit
+  resets each period, so a goal with 340 reps against a target of 5 had been reading as
+  long-since-done everywhere on iOS — the goals list, the hero card, the Today card and a
+  goal's own screen — when the week's honest answer was "2 of 5". Checklist goals likewise
+  now read as steps done out of steps total.
+
 - **Weekly Planning has a visible way out, and it takes you somewhere useful.** Every step
   shows **Leave for now** in the header, so you can stop part-way without hunting through
   the agenda sheet. It puts you back on the Planning lobby — what is part-planned, a button

@@ -54,6 +54,53 @@ per step (repo convention: a batch is one PR). The session is **single-driver**:
 runs it on one device. `planning_sessions.driver_person_id` is the seam for adding
 multi-device presence later without rewriting the schema; nothing realtime ships now.
 
+### The iOS port: what it cost, and the three defects it found
+
+**Shipped.** The shell plus all ten steps, reachable from a Today card, the Family hub,
+Settings, and the iPad display's own **Planning** rail page. The phone's bottom bar is four
+tabs plus the capture FAB with no fifth slot, so there is no planning tab and there was
+never going to be one.
+
+**It was built the way the web steps were, and for the same reason.** A registry naming all
+ten keys, with all ten step files existing as walk-past-able stubs, on day one — so writing
+a step means editing that step's own files and never coming back to register anything. Six
+agents across two waves integrated with two compile errors between them, and both were in
+the shared wiring rather than in any step.
+
+**THREE DEFECTS IN ALREADY-SHIPPED CODE turned up, which is the real argument for doing a
+port properly rather than transliterating:**
+
+- **`step.number` is a CATALOG index and neither client's counter may use it.** The
+  server's own comment claimed it was "what '2 of 10' counts". It is `i + 1` over all ten
+  steps, so a household with meals off would render "4 of 9" with no step 3. The web had
+  always derived position from the runnable list; the comment was simply wrong, and it
+  misled the port before it was caught.
+- **The progress hair disagreed across platforms.** Web draws `pos / runnable.length`; the
+  first iOS helper used settled-over-available. They agree only at the two ends of a
+  session. Positional won — not because it is better in isolation, but because a bar that
+  fills differently on the phone than on the kiosk for the same session is worse than
+  either definition.
+- **iOS had never decoded `periodDone` / `stepDone` / `stepTotal`.** Every iOS surface —
+  goals list, hero card, Today card, a goal's own screen — was showing habit goals their
+  LIFETIME total, so 340 reps against a target of 5 read as done when the week's answer was
+  "2 of 5". The web has had `goalDisplayProgress` since the goal-axis work; the iOS half
+  was never written, and the note recording that rule wrongly said both platforms had it.
+  `GoalDisplay` is the port, with an overload per goal DTO so a row and the screen it opens
+  cannot show different numbers.
+
+**Two places where iOS is deliberately not identical**, both recorded in the code:
+
+- **Routed loose ends surface on their destination step.** `looseEnds.ts` persists
+  `data.routes` on step 1's OWN row, so a destination step cannot read it from `step.data`
+  — the shell passes it down. The web does not surface these at all; iOS is ahead, kept
+  because it is the same fix the parked-note handoff was, and owed back to web.
+- **No month-chip squash fix on Horizon**, because an iOS month cell draws dots rather than
+  chips: there is nothing to compress, and tapping a day *is* "+N more".
+
+**Known debt from the port:** `CalendarView`'s `monthCells`/`monthCell` are `private`, so
+the planning month grid is a documented copy of that 42-cell grid. Two copies will drift;
+extracting one shared grid is the fix.
+
 ### Changes outside the step seams that iOS parity must mirror
 
 A step is allowed to want something from a component it doesn't own. When that happens the
