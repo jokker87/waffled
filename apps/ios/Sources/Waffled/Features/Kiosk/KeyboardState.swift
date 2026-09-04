@@ -64,8 +64,25 @@ import UIKit
         // Headless verification: WAFFLED_FAKE_KB_TOP=<windowY> pretends a docked
         // keyboard's top edge sits at that window-space Y, so landscape lift behavior
         // can be screenshot without the Simulator's flaky programmatic focus.
+        //
+        // It sets `overlap` as well as `topInWindow`, and that is the whole point of the
+        // hook rather than an extra: with a REAL keyboard up you cannot tell "the tab bar
+        // hid" from "the tab bar is behind the keyboard" in a screenshot, because both
+        // look identical. Simulating the keyboard WITHOUT drawing one separates them —
+        // anything that should move out of the way still moves, over bare canvas where
+        // you can see it. Leaving `overlap` at 0 here made the hook silently unable to
+        // exercise `hidesBottomBar`, which is how a bottom-bar bug survived a screenshot
+        // I had called verification.
         if let fake = AppConfig.env("WAFFLED_FAKE_KB_TOP").flatMap(Double.init) {
             topInWindow = CGFloat(fake)
+            let windowMaxY = UIApplication.shared.connectedScenes
+                .compactMap { $0 as? UIWindowScene }
+                .flatMap(\.windows)
+                .first(where: \.isKeyWindow)?.bounds.maxY
+            // A positive fallback when the window isn't up yet: the exact overlap only
+            // matters to `barShift`, but ANY positive value has to make the docked-ness
+            // itself true, or the hook pretends a keyboard that covers nothing.
+            overlap = max(1, (windowMaxY ?? CGFloat(fake) + 1) - CGFloat(fake))
         }
         let nc = NotificationCenter.default
         nc.addObserver(forName: UIResponder.keyboardWillChangeFrameNotification,
