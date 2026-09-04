@@ -1,4 +1,4 @@
-import { useEffect, useState, useSyncExternalStore } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import {
   planningKidsApi,
   planningKidsDecision,
@@ -60,9 +60,20 @@ interface StepState {
   changing: boolean
   // Which escape hatch is open, if any.
   typing: { personId: string; which: 'focus' | 'forward' } | null
+  // WHAT THEY TYPED BUT NEVER SAVED, keyed `<personId>:<which>`.
+  //
+  // "I added a custom 'something else' and then clicked an existing one and the one I
+  // wrote disappeared, is that expected?" Half of it was: picking an existing option
+  // IS a change of answer, and only one option can be the chosen one. The other half
+  // was not — the typing had been saved nowhere, so going back for it was the only way
+  // to get it, and an empty box said it was gone for good.
+  //
+  // Kept out of `view` on purpose: a draft is not an answer, it never reaches the
+  // server, and it lives exactly as long as the step is on screen.
+  drafts: Record<string, string>
 }
 
-const EMPTY: StepState = { key: '', view: null, loading: true, error: null, saving: null, active: null, changing: false, typing: null }
+const EMPTY: StepState = { key: '', view: null, loading: true, error: null, saving: null, active: null, changing: false, typing: null, drafts: {} }
 
 let state: StepState = EMPTY
 const listeners = new Set<() => void>()
@@ -204,7 +215,7 @@ function ForwardOption({ option, checked, disabled, onPick }: {
   )
 }
 
-function TypeIn({ label, placeholder, initial, disabled, onCancel, onSave }: {
+function TypeIn({ label, placeholder, initial, disabled, onCancel, onSave, onDraft }: {
   label: string
   placeholder: string
   // What they said last time, when this is reopening their own answer. An empty box here
@@ -213,8 +224,15 @@ function TypeIn({ label, placeholder, initial, disabled, onCancel, onSave }: {
   disabled: boolean
   onCancel: () => void
   onSave: (text: string) => void
+  // Called ONCE, as the box goes away, with whatever was in it. On unmount rather than
+  // on every keystroke deliberately: the draft lives in the step's shared store, and
+  // writing to it per character would re-render every card in the step to move a cursor.
+  onDraft: (text: string) => void
 }) {
   const [text, setText] = useState(initial)
+  const latest = useRef(text)
+  latest.current = text
+  useEffect(() => () => onDraft(latest.current), [])
   return (
     <form
       className="wpk-type"
@@ -340,9 +358,10 @@ function Card({ kid, s, p, readBack }: { kid: PlanningKidCard; s: StepState; p: 
               <TypeIn
                 label={`Something else for ${kid.name}`}
                 placeholder="In their own words"
-                initial={kid.focus?.source === 'custom' ? kid.focus.label : ''}
+                initial={s.drafts[`${kid.personId}:focus`] ?? (kid.focus?.source === 'custom' ? kid.focus.label : '')}
                 disabled={frozen}
                 onCancel={() => set({ typing: null })}
+                onDraft={(text) => set({ drafts: { ...state.drafts, [`${kid.personId}:focus`]: text } })}
                 onSave={(text) => void answer(p, kid.personId, { focus: { text } })}
               />
             )}
@@ -375,9 +394,10 @@ function Card({ kid, s, p, readBack }: { kid: PlanningKidCard; s: StepState; p: 
               <TypeIn
                 label={`Something else for ${kid.name} to look forward to`}
                 placeholder="Something on their week"
-                initial={kid.forward != null && kid.forward.eventId === null ? kid.forward.label : ''}
+                initial={s.drafts[`${kid.personId}:forward`] ?? (kid.forward != null && kid.forward.eventId === null ? kid.forward.label : '')}
                 disabled={frozen}
                 onCancel={() => set({ typing: null })}
+                onDraft={(text) => set({ drafts: { ...state.drafts, [`${kid.personId}:forward`]: text } })}
                 onSave={(text) => void answer(p, kid.personId, { forward: { text } })}
               />
             )}

@@ -313,6 +313,34 @@ describe('KidsStep · answering', () => {
     expect((again as HTMLInputElement).value).toBe('Extra Thing')
   })
 
+  it('keeps an unsaved draft when they change their mind and pick an existing option', async () => {
+    // "I added a custom 'something else' and then clicked an existing one and the one I
+    // wrote disappeared, is that expected?"
+    //
+    // Changing your answer SHOULD change your answer — the existing option is now the
+    // chosen one, and only one of them can be. What should not happen is the typing
+    // being thrown away: it was never saved anywhere, so going back for it is the only
+    // way to get it, and an empty box says it is gone for good.
+    renderStep()
+    const w = await card('Wally')
+    fireEvent.click(w.getByRole('radio', { name: /Something else/ }))
+    const typed = await screen.findByLabelText(/something else/i)
+    fireEvent.change(typed, { target: { value: 'Build the treehouse' } })
+
+    // Change of mind, without saving: an option that already existed.
+    const existing = w.getAllByRole('radio')[0]
+    fireEvent.click(existing)
+    await waitFor(() => expect(existing).toHaveAttribute('aria-checked', 'true'))
+
+    // The escape hatch is NOT also chosen — one answer at a time.
+    expect(w.getByRole('radio', { name: /Something else/ })).toHaveAttribute('aria-checked', 'false')
+
+    // …but the words are still there when they go back for them.
+    fireEvent.click(w.getByRole('radio', { name: /Something else/ }))
+    const reopened = await screen.findByLabelText(/something else/i)
+    expect((reopened as HTMLInputElement).value).toBe('Build the treehouse')
+  })
+
   it('mirrors what the session already knows onto the step’s crumb', async () => {
     const { setDecisionData } = renderStep()
     await waitFor(() => expect(setDecisionData).toHaveBeenCalled())
