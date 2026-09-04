@@ -263,13 +263,24 @@ struct PlanningShellView: View {
     ///   it instead of below it.
     /// - **the ask** — the one question the step puts to you. This is the only line of
     ///   the four that was ever the point, so it is the only one that kept its own row.
+    /// "I think we have this backwards" — and it was.
+    ///
+    /// The screen's own name goes in the top row where a navigation title would be, with
+    /// the week beside it; the session's MACHINERY — which step you're on, the way out,
+    /// the progress hair — sits underneath it. The first arrangement led with the
+    /// machinery and buried the name of the thing you were actually doing.
+    ///
+    /// - **row 1** — back out, the step's name, the week. What screen is this?
+    /// - **row 2** — the counter (the door to the agenda) and the exit. Session controls,
+    ///   grouped, directly above the hair that belongs with them.
+    /// - **the ask** — the one question the step puts to you.
     private var sessionHeader: some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 10) {
                 if !isKiosk {
-                    // The navigation bar's job, done in the header's own first row. On
-                    // the kiosk this screen is a rail PAGE with nothing to pop, so there
-                    // is deliberately no chevron there.
+                    // The navigation bar's job, done in the header's own first row — so
+                    // it sits with the title it used to sit above. On the kiosk this
+                    // screen is a rail PAGE with nothing to pop, so no chevron there.
                     Button { dismiss() } label: {
                         Image(systemName: "chevron.left")
                             .font(.system(size: 16, weight: .bold)).foregroundStyle(WF.ink2)
@@ -279,6 +290,17 @@ struct PlanningShellView: View {
                     .accessibilityLabel("Back")
                 }
 
+                Text(model.current?.title ?? "")
+                    .font(WF.serif(22, .bold)).foregroundStyle(WF.ink)
+                    .lineLimit(1).minimumScaleFactor(0.8)
+
+                Spacer(minLength: 6)
+
+                Text(model.weekLabel)
+                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(WF.ink3)
+                    .lineLimit(1)
+            }
+            HStack(spacing: 10) {
                 Button { sheet = true } label: {
                     // `WaffledMenuPill` is the app's "tap to change" trigger — bold text
                     // plus a down chevron — which is exactly what the counter is: the
@@ -297,7 +319,7 @@ struct PlanningShellView: View {
                 // now" is the part that matters, because leaving keeps the session and
                 // everything it has already decided.
                 //
-                // It stays a SEPARATE control from the chevron beside it: back pops this
+                // It stays a SEPARATE control from the chevron above it: back pops this
                 // screen and leaves the session current, so re-opening Planning drops you
                 // straight back in — which is the very thing "leave for now" was added to
                 // fix. Same direction, different promise.
@@ -306,14 +328,6 @@ struct PlanningShellView: View {
                         .font(.system(size: 13.5, weight: .bold)).foregroundStyle(WF.ink3)
                 }
                 .buttonStyle(.plain)
-            }
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text(model.current?.title ?? "")
-                    .font(WF.serif(22, .bold)).foregroundStyle(WF.ink)
-                Spacer(minLength: 6)
-                Text(model.weekLabel)
-                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(WF.ink3)
-                    .lineLimit(1)
             }
             Text(model.current?.ask ?? "")
                 .font(.system(size: 13.5)).foregroundStyle(WF.ink2)
@@ -348,7 +362,12 @@ struct PlanningShellView: View {
         // `fixedBarClearance`, NOT `bottomBarClearance`. This footer is pinned, not
         // scrolled, so it wants to sit flush on top of the tab bar; the scrolling figure
         // left ~46pt of bare canvas between the buttons and the bar. See WF.tabBarHeight.
-        .padding(.bottom, 10 + WF.fixedBarClearance)
+        //
+        // …and no clearance at all while a keyboard is docked, because `AppRoot` has taken
+        // the bar away by then (KeyboardState.hidesBottomBar — one rule, read in both
+        // places). Reserving for an absent bar is what stacked the footer, the tab bar and
+        // the keyboard into three rows of chrome with the step squeezed above them.
+        .padding(.bottom, 10 + (KeyboardState.shared.hidesBottomBar ? 0 : WF.fixedBarClearance))
         .background(WF.card)
         .overlay(alignment: .top) { Rectangle().fill(WF.hair).frame(height: 1) }
     }
