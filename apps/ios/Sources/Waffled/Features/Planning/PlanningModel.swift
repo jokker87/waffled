@@ -200,7 +200,24 @@ final class PlanningModel {
 
     /// The finished record is the surface. Checked BEFORE the paused screen, as on the
     /// web: a completed session is a receipt whether or not somebody once stepped out.
-    var showsRecord: Bool { session?.isCompleted == true }
+    ///
+    /// `askedStep` overrides it, for the same reason it overrides `isPaused` directly
+    /// below: **asking for a step by name is asking to be in the session.** That became
+    /// load-bearing when the record started showing the recap read-back, because the
+    /// recap's rows are POINTERS — each names the step whose module owns that decision —
+    /// and without this they were buttons that did nothing. "Leave for now" clears
+    /// `askedStep` again, so the record is still reachable from inside.
+    ///
+    /// It yields only to a step that can actually RUN. `resolveCurrent` falls back to the
+    /// first runnable step when the asked-for one isn't available, so without that guard
+    /// following a pointer to a step whose module has since been turned off would leave
+    /// the record and silently dump you on step 1 — which looks like the app losing your
+    /// place rather than declining to go somewhere that no longer exists.
+    var showsRecord: Bool {
+        guard session?.isCompleted == true else { return false }
+        guard let asked = askedStep else { return true }
+        return !runnable.contains { $0.key == asked }
+    }
 
     /// "Left for now": this device stepped out of THIS session and hasn't asked for a
     /// step since. An explicitly-asked-for step overrides it — asking for a step by name

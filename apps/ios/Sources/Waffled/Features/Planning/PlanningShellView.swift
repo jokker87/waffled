@@ -168,17 +168,47 @@ struct PlanningShellView: View {
                     Text(model.savedAtLabel.map { "\(model.weekLabel) · saved \($0)" } ?? model.weekLabel)
                         .font(.system(size: 13, weight: .semibold)).foregroundStyle(WF.ink3)
                 }
-                WaffledCard(padding: 4) {
-                    VStack(spacing: 0) {
-                        if model.decidedSteps.isEmpty {
-                            Text("Nothing was decided in this session.")
-                                .font(.system(size: 14)).foregroundStyle(WF.ink3)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, 11).padding(.vertical, 14)
-                        } else {
-                            ForEach(Array(model.decidedSteps.enumerated()), id: \.element.key) { i, step in
-                                if i > 0 { Divider().background(WF.hair) }
-                                recordRow(step)
+                // THE WEEK ITSELF, first — "if a week is done, any reason we wouldnt show
+                // the recap page basically instead of a checklist being complete? the
+                // weekly recap is more relevant and has the info".
+                //
+                // Quite right. Ten green ticks against ten step names says the session
+                // finished; it says nothing about the week the session decided. The recap
+                // step's body already reads that week back — the days, what changed
+                // grouped by the module that owns it, the notes nobody tagged, what was
+                // left alone on purpose — so the record renders THAT rather than a second,
+                // thinner summary of it. Through the seam, not by naming the concrete
+                // view, so a step body that gets renamed can't leave this screen behind.
+                //
+                // Its `.task` does one extra read here. That is the trade: a receipt you
+                // can actually read is worth a fetch. Note the recap's own crumb write is
+                // pure local state (see PlanningModel.setDecisionData), so rendering it
+                // outside a running session writes nothing to the server.
+                if let recap = model.steps.first(where: { $0.key == "recap" }),
+                   let sessionId = model.session?.id,
+                   let week = model.view?.weekStart {
+                    planningStepBody(stepProps(recap, sessionId: sessionId, weekStart: week))
+                        .id("record-recap")
+                }
+
+                // The per-step tick-list is KEPT, and demoted. It carries the one thing
+                // the recap can't: which steps were skipped on purpose ("Kids · Skipped —
+                // a real answer"). That is a real answer about the week and deleting it
+                // would lose it — but it belongs under the week, not in front of it.
+                VStack(alignment: .leading, spacing: 8) {
+                    SectionLabel(text: "What each step decided")
+                    WaffledCard(padding: 4) {
+                        VStack(spacing: 0) {
+                            if model.decidedSteps.isEmpty {
+                                Text("Nothing was decided in this session.")
+                                    .font(.system(size: 14)).foregroundStyle(WF.ink3)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.horizontal, 11).padding(.vertical, 14)
+                            } else {
+                                ForEach(Array(model.decidedSteps.enumerated()), id: \.element.key) { i, step in
+                                    if i > 0 { Divider().background(WF.hair) }
+                                    recordRow(step)
+                                }
                             }
                         }
                     }
@@ -262,16 +292,6 @@ struct PlanningShellView: View {
         }
     }
 
-    /// Two rows and the step's question, where there used to be a navigation bar and
-    /// four rows. Every line here earns its height:
-    ///
-    /// - **row 1** — back out, the step counter (the door to the agenda), and the exit.
-    ///   Three controls, one row, because none of them is content.
-    /// - **row 2** — the step title in serif, with the week riding the same baseline on
-    ///   the right. The week is context for the title, so it costs nothing to sit beside
-    ///   it instead of below it.
-    /// - **the ask** — the one question the step puts to you. This is the only line of
-    ///   the four that was ever the point, so it is the only one that kept its own row.
     /// "I think we have this backwards" — and it was.
     ///
     /// The screen's own name goes in the top row where a navigation title would be, with

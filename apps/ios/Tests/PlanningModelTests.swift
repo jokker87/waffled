@@ -334,6 +334,63 @@ private func scratchDefaults() -> UserDefaults {
         #expect(model.savedAtLabel != nil)
     }
 
+    // MARK: the record yields to a step you ask for by name
+    //
+    // The record screen shows the recap's read-back now, and the recap's rows are
+    // POINTERS — each names the step whose module owns that decision. Following one has to
+    // land you there. `showsRecord` used to be `session.isCompleted` alone, which made
+    // every one of those rows a button that did nothing.
+    //
+    // Written after the rule was changed rather than before it, which is the wrong way
+    // round — recorded honestly rather than dressed up as TDD.
+
+    @Test func askingForAStepByNameLeavesTheRecord() async {
+        let feed = PlanningFeed(session: session(status: "completed",
+                                                 completedAt: "2026-09-04T21:50:00.000Z"))
+        let model = makeModel(feed, defaults: scratchDefaults())
+        await model.load()
+        #expect(model.showsRecord)
+
+        // What a recap pointer does — local only, no PATCH of the session's own pointer.
+        model.show("calendar")
+
+        #expect(model.showsRecord == false)
+        #expect(model.current?.key == "calendar")
+        #expect(feed.patches.isEmpty)
+    }
+
+    @Test func aPointerAtAStepThatCannotRunKeepsYouOnTheRecord() async {
+        // `meals` is in the catalog but unavailable in this fixture (module off). Asking
+        // for it must NOT leave the record: `resolveCurrent` would fall back to the first
+        // runnable step, so yielding here would dump you on step 1 — indistinguishable
+        // from the app losing your place.
+        let feed = PlanningFeed(session: session(status: "completed",
+                                                 completedAt: "2026-09-04T21:50:00.000Z"))
+        let model = makeModel(feed, defaults: scratchDefaults())
+        await model.load()
+
+        model.show("meals")
+
+        #expect(model.showsRecord)
+    }
+
+    @Test func leavingPutsYouBackOnTheRecordRatherThanThePausedScreen() async {
+        let feed = PlanningFeed(session: session(status: "completed",
+                                                 completedAt: "2026-09-04T21:50:00.000Z"))
+        let model = makeModel(feed, defaults: scratchDefaults())
+        await model.load()
+        model.show("calendar")
+        #expect(model.showsRecord == false)
+
+        model.leave()
+
+        // `leave()` clears `askedStep`, so the record is reachable again from inside — and
+        // `isPaused` must NOT win here: it requires an ACTIVE session, and this one is
+        // finished. A completed session is a receipt, not something you stepped out of.
+        #expect(model.showsRecord)
+        #expect(model.isPaused == false)
+    }
+
     @Test func aFailedAnswerDoesNotMoveTheSessionOn() async {
         let feed = PlanningFeed(session: session())
         feed.decideFails = true
