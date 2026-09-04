@@ -201,6 +201,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   much you park. The note explaining the difference between adding an event and parking a
   note has been rewritten, too.
 
+- **A finished week reads the week back, instead of ticking off the steps.** Saving a
+  planning session used to leave you looking at ten green ticks against ten step names —
+  which told you the session had finished and nothing at all about the week it decided. It
+  now opens with the week itself: each day with its meal and events, what the session
+  changed grouped by where that change lives, the notes nobody tagged, and what was left
+  alone on purpose. The per-step list is still there underneath, because it's the only
+  place that records which steps you skipped on purpose. Following a line in the read-back
+  takes you back into the step that owns it.
+
+- **Two planning steps were narrower than the other eight.** Family night and Tasks each
+  inset their content twice, so their cards sat 32pt narrower than the calendar's on every
+  device. They now match.
+
+- **The planning session's buttons no longer float above the keyboard.** Typing on a step
+  left a band of empty space between the step's own action bar and the keys — roughly 80pt
+  of it on an iPhone 17 Pro, taken up by a keyboard toolbar holding a single "Done" button
+  that the session never needed (its fields all have a return key, and dragging the page
+  now dismisses the keyboard). The action bar sits directly on the keyboard.
+
 - **Everything sent to a planning step now turns up in the same box at the top of it.**
   Notes you parked for a step appeared in a box at the top; things you routed to it from
   **Loose ends** were drawn in a separate list at the bottom, below the week — so where to
