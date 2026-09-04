@@ -248,6 +248,49 @@ const handoffView = {
   ),
 }
 
+test('the month’s event chips keep their own height on a busy day', async ({ page }) => {
+  // "the events still look too smushed, they should have a minimum height."
+  //
+  // `.cal-cell` is a flex COLUMN, so its children shrink by default: at the height six
+  // week-rows used to be given, the day number and all three chips compressed at once and
+  // the labels sat on the chips' edges. A unit test cannot see this — the chips are in the
+  // DOM either way, at whatever height the layout squeezed them to — so the assertion has
+  // to be a measured one.
+  await mockApi(page)
+  // Five things on one day: more than the three the cell draws, so it also renders "+N
+  // more" and the row is under the most pressure it ever gets.
+  const day = '2026-09-09'
+  await page.route('**/api/events**', async (route) => {
+    const events = [
+      'Piano lesson', 'Little League', 'Temple Visit', 'Trip to the coast', 'Kramerica',
+    ].map((title, i) => ({
+      id: `e${i}`, title, startsAt: `${day}T${15 + i}:00:00.000Z`, endsAt: `${day}T${16 + i}:00:00.000Z`,
+      allDay: false, personId: null, personColor: null, participants: [], rrule: null,
+      occurrenceStart: null, rhythmId: null, goalId: null, location: null, notes: null,
+    }))
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ events }) })
+  })
+
+  await signIn(page)
+  await page.goto('/planning/horizon')
+  await expect(page.locator('.wp-title')).toHaveText('Horizon scan')
+  await expect(page.locator('.wph-cal .cal-cell').first()).toBeVisible()
+
+  await page.screenshot({ path: 'test-results/weekly-planning-horizon-month.png' })
+
+  // Every chip drawn is at least its own content's height. 18px is below the ~20px a
+  // chip costs unsqueezed and well above the ~12px the compressed ones were rendering at.
+  const heights = await page.locator('.wph-cal .ev').evaluateAll((els) =>
+    els.map((el) => el.getBoundingClientRect().height)
+  )
+  expect(heights.length).toBeGreaterThan(0)
+  for (const h of heights) expect(h).toBeGreaterThanOrEqual(18)
+
+  // And the step still doesn't cost the footer its place or scroll sideways.
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+  expect(overflow).toBeLessThanOrEqual(0)
+})
+
 test('a parked note is handed to its step, above the body and on screen', async ({ page }) => {
   await mockApi(page, handoffView)
   await signIn(page)
@@ -263,7 +306,13 @@ test('a parked note is handed to its step, above the body and on screen', async 
   // It must not cost the footer its place — the banner is a sibling of the step body in
   // `.wp-body`, and anything there that isn't `flex: none` competes for height.
   expect(await withinViewport(page, '.wp-foot')).toBe(true)
-  await expect(page.getByRole('button', { name: 'Handled' }).first()).toBeVisible()
+
+  // The step lends the banner its OWN verb, and this is the assertion that proves the
+  // context reaches a lazily-loaded step body in a real browser rather than only in a
+  // unit test that mounts it directly.
+  await expect(banner.getByRole('button', { name: 'Make an event' }).first()).toBeVisible()
+  // The bookkeeping answer is still there, worded so it doesn't compete with the verb.
+  await expect(banner.getByRole('button', { name: 'Already handled' }).first()).toBeVisible()
 
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
   expect(overflow).toBeLessThanOrEqual(0)
