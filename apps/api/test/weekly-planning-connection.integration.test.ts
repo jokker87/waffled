@@ -236,7 +236,10 @@ describe('weekly planning · connection', () => {
     // Sunday has nothing on it: an open day, and NO time — the event modal's own
     // picker decides that, rather than this file guessing an evening.
     expect(byDate.get(day(0))).toMatchObject({ kind: 'open', startsAt: null })
-    expect(byDate.get(day(0))!.label).toBe(`${DateTime.fromISO(day(0)).toFormat('EEE')} · open`)
+    // "the chips that are there 'sat open' what does that mean?" — one word carrying
+    // "this day has nothing on it at all", next to a sibling chip that spells its own
+    // meaning out ("Thu after 9:00 PM"). Says what it means now.
+    expect(byDate.get(day(0))!.label).toBe(`${DateTime.fromISO(day(0)).toFormat('EEE')} · free all day`)
 
     // Monday's gap opens when Monday's last event ends.
     expect(byDate.get(day(1))).toMatchObject({ kind: 'after', afterTitle: 'Dinner at the Hales' })

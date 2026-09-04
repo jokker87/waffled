@@ -86,7 +86,7 @@ const BOARD = {
       lastTogetherTitle: 'Date night',
       alreadyThisWeek: [],
       togetherThisWeek: [evt({ id: 'hales', title: 'Dinner at the Hales', day: 'Friday', time: '6:00 PM', when: 'Friday 6:00 PM', minutes: 150 })],
-      slots: [slot(), slot({ date: '2026-09-12', kind: 'open', startsAt: null, afterTitle: null, label: 'Sat · open' })],
+      slots: [slot(), slot({ date: '2026-09-12', kind: 'open', startsAt: null, afterTitle: null, label: 'Sat · free all day' })],
     },
     {
       personIds: ['p1', 'p3'],
@@ -104,7 +104,7 @@ const BOARD = {
       lastTogetherTitle: null,
       alreadyThisWeek: [],
       togetherThisWeek: [evt({ id: 'd1', title: 'Dance', day: 'Tuesday' }), evt({ id: 'd2', title: 'Dance', day: 'Thursday' })],
-      slots: [slot({ date: '2026-09-10', kind: 'open', startsAt: null, afterTitle: null, label: 'Thu · open' })],
+      slots: [slot({ date: '2026-09-10', kind: 'open', startsAt: null, afterTitle: null, label: 'Thu · free all day' })],
     },
     {
       // A fourth pair the server ranked but the step does not draw — the rows are a
@@ -254,7 +254,7 @@ describe('Weekly planning · step 5 · Connection', () => {
     mockApi()
     renderStep()
     const kk = await row('p1-p2')
-    fireEvent.click(within(kk).getByRole('button', { name: /Sat · open/ }))
+    fireEvent.click(within(kk).getByRole('button', { name: /Sat · free all day/ }))
     const modal = await eventModal()
     expect(within(modal).getByLabelText('Date')).toHaveValue('2026-09-12')
     // No invented evening: the modal's default stands, whatever it is.

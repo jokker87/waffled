@@ -53,7 +53,15 @@ export interface ConnectionSlot {
   kind: 'after' | 'open'
   /** The event the gap opens after ('after' only) — what makes the label a sentence. */
   afterTitle: string | null
-  /** "Wed after Scouts" / "Tue after 8:30 PM" / "Sun · open". Built server-side so web and iOS say it the same way. */
+  /**
+   * "Wed after Scouts" / "Tue after 8:30 PM" / "Sun · free all day". Built server-side
+   * so web and iOS say it the same way.
+   *
+   * The empty-day chip used to read "Sun · open", which was asked about directly —
+   * "the chips that are there 'sat open' what does that mean?". One word was carrying
+   * "this day has nothing on it at all", sitting next to a sibling that spells its own
+   * meaning out in full. Both halves say when you are free now.
+   */
   label: string
 }
 
@@ -183,7 +191,7 @@ export function slotsFor(
     const onDay = byDay.get(date) ?? []
 
     if (!onDay.length) {
-      out.push({ date, startsAt: null, kind: 'open', afterTitle: null, label: `${dow} · open` })
+      out.push({ date, startsAt: null, kind: 'open', afterTitle: null, label: `${dow} · free all day` })
       continue
     }
     // The gap opens when the LAST thing on the day ends (an event with no end is

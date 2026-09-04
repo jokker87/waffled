@@ -20,7 +20,7 @@ export interface PlanningConnectionSlot {
   kind: 'after' | 'open'
   /** The event the gap opens after ('after' only). */
   afterTitle: string | null
-  /** "Wed after Scouts" / "Tue after 8:30 PM" / "Sun · open". Built server-side so iOS says it the same way. */
+  /** "Wed after Scouts" / "Tue after 8:30 PM" / "Sun · free all day". Built server-side so iOS says it the same way. */
   label: string
 }
 
