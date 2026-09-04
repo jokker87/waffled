@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   usePersons,
   planningConnectionApi,
-  weeklyPlanningApi,
   type Person,
   type PlanningConnectionBoard,
   type PlanningConnectionEvent,
@@ -267,19 +266,23 @@ function Body({ step, sessionId, weekStart, setDecisionData, refresh, busy }: St
     setDecisionData({ added, alreadyCounted: Object.keys(links).length, links })
   }, [board, added, links, setDecisionData])
 
-  // Written through the step's OWN record, at its CURRENT status — linking a time is
-  // not answering the step, so this must not settle it. `setDecisionData` alone would
-  // not do: it only reaches the server when the step is answered, and somebody who
-  // links a time and then walks off has answered nothing.
+  // Written through the step's own MID-STEP route, which merges the map onto the step's
+  // row and leaves `status` and `decided_at` alone — linking a time is not answering the
+  // step, and `decideStep` would have stamped it as decided on every link.
+  //
+  // `setDecisionData` alone would not do either: it only reaches the server when the step
+  // IS answered, and somebody who links a time and then walks off has answered nothing.
+  // (The crumb still carries `links` so that pressing the primary, which REPLACES the
+  // step's data, doesn't wipe what this wrote.)
   const remember = useCallback(
     (next: Record<string, string>) => {
-      weeklyPlanningApi
-        .decideStep(sessionId, 'connection', step.status, { added, alreadyCounted: Object.keys(next).length, links: next })
+      planningConnectionApi
+        .saveLinks(sessionId, next)
         // The link is already on screen; a failed write costs the memory of it, not the
         // sitting. The next ordinary read is authoritative.
         .catch(() => {})
     },
-    [sessionId, step.status, added]
+    [sessionId]
   )
 
   const link = useCallback(

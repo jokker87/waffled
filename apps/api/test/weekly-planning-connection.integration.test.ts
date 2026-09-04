@@ -300,3 +300,68 @@ describe('weekly planning · connection', () => {
     }
   })
 })
+
+describe('connection · linking a time the two of them already share', () => {
+  // "I want to be able to select an existing event that has both people on it."
+  //
+  // The link is the ANSWER to a pairing, so it has to outlive the render that made it —
+  // but recording it is NOT answering the step. That distinction is the whole of this
+  // block: the same rule the Goals step already follows for its own mid-step write.
+  let sid: string
+
+  const link = (links: Record<string, string>, session = sid) =>
+    call('PUT', '/api/weekly-planning/connection/links', kevin, { sessionId: session, links })
+
+  const stepRow = async () => {
+    const view = json(await call('GET', `/api/weekly-planning?weekStart=${week}`, kevin))
+    return (view.steps as { key: string; status: string; data: Record<string, unknown>; decidedAt: string | null }[])
+      .find((s) => s.key === 'connection')!
+  }
+
+  beforeAll(async () => {
+    sid = json(await call('POST', '/api/weekly-planning/session', kevin, { weekStart: week })).session.id
+  })
+
+  it('remembers which event answers a pairing', async () => {
+    expect((await link({ [`${kevinId}-${kellyId}`]: 'evt-1' })).statusCode).toBe(200)
+    const step = await stepRow()
+    expect(step.data.links).toMatchObject({ [`${kevinId}-${kellyId}`]: 'evt-1' })
+  })
+
+  it('does NOT answer the step', async () => {
+    // `status` is what every reader gates on, and a link must not move it. (`decidedAt`
+    // is NOT NULL in this schema, so a row created by a mid-step write does carry a
+    // timestamp it hasn't earned — there is no way to spell "not decided yet". What
+    // matters, and what the next test pins, is that a link never MOVES one.)
+    const step = await stepRow()
+    expect(step.status).toBe('pending')
+  })
+
+  it('leaves a settled step settled, and its decision time alone', async () => {
+    await call('POST', `/api/weekly-planning/session/${sid}/step`, kevin, {
+      stepKey: 'connection', status: 'done', data: { added: 0, alreadyCounted: 0 },
+    })
+    const before = await stepRow()
+    expect(before.status).toBe('done')
+    expect(before.decidedAt).not.toBeNull()
+
+    await new Promise((r) => setTimeout(r, 15))
+    await link({ [`${kevinId}-${wallyId}`]: 'evt-2' })
+
+    const after = await stepRow()
+    expect(after.status).toBe('done')
+    expect(after.decidedAt).toBe(before.decidedAt)
+    // …and the crumb the primary wrote is still there beside the new link.
+    expect(after.data).toMatchObject({ added: 0, alreadyCounted: 0 })
+    expect(after.data.links).toMatchObject({ [`${kevinId}-${wallyId}`]: 'evt-2' })
+  })
+
+  it('refuses a body that is not a map of pairing → event id', async () => {
+    expect((await link({ 'p1-p2': 42 } as unknown as Record<string, string>)).statusCode).toBe(400)
+    expect((await call('PUT', '/api/weekly-planning/connection/links', kevin, { sessionId: sid })).statusCode).toBe(400)
+  })
+
+  it('404s a session that is not this household’s', async () => {
+    expect((await link({ a: 'b' }, '11111111-1111-4111-8111-111111111111')).statusCode).toBe(404)
+  })
+})

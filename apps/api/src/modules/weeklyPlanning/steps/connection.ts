@@ -346,3 +346,48 @@ export async function getConnectionSlots(
 }
 
 export class InvalidPairingError extends Error {}
+
+
+// ---------------------------------------------------------------------------
+// The one thing this step remembers
+// ---------------------------------------------------------------------------
+
+/**
+ * WHICH EVENT ANSWERS EACH PAIRING, merged onto the step row.
+ *
+ * The step's rule is still "nothing new is stored": this records no event, no pairing
+ * and no time — only a pointer from a pairing to an event that already exists. An id
+ * cannot drift from itself, which is why it does not breach the rule the rest of this
+ * file keeps (the row's sentence — title, duration, the household's clock — stays
+ * composed server-side from the live calendar).
+ *
+ * It exists because a link is the ANSWER to a pairing and has to outlive the render that
+ * made it. Asked for directly: "I want to be able to select an existing event that has
+ * both people on it."
+ *
+ * MERGED, AND NOT A DECISION. On conflict, `status` and `decided_at` are left alone —
+ * exactly as the Goals step's `writeFocus` does, and for the same reason: a mid-step
+ * write is not a decision about the step. The shell's `decideStep` stamps
+ * `decided_at = now()` on EVERY write, which is right when somebody presses the primary
+ * and wrong here: re-linking on a settled step would quietly move when it was settled,
+ * and that is the guarantee this function exists to keep.
+ *
+ * On INSERT the column takes its own default (`now()`), because `planning_session_steps.
+ * decided_at` is NOT NULL — there is no way to spell "not decided yet" in this schema, so
+ * a row created by a mid-step write carries a timestamp it hasn't earned. Harmless today
+ * (`status` is what every reader gates on, and it stays `pending`) and not worth a
+ * migration on its own; noted because the row is not quite what it looks like. Goals'
+ * `writeFocus` has had the same shape since it shipped.
+ *
+ * `jsonb_set` keeps whatever else the step has already written, and the step body mirrors
+ * this map back through `setDecisionData` so pressing the primary doesn't wipe it.
+ */
+export async function writeConnectionLinks(sessionId: string, links: Record<string, string>): Promise<void> {
+  await query(
+    `insert into planning_session_steps (session_id, step_key, status, data)
+     values ($1, 'connection', 'pending', jsonb_build_object('links', $2::jsonb))
+     on conflict (session_id, step_key)
+       do update set data = jsonb_set(coalesce(planning_session_steps.data, '{}'::jsonb), '{links}', $2::jsonb, true)`,
+    [sessionId, JSON.stringify(links)]
+  )
+}

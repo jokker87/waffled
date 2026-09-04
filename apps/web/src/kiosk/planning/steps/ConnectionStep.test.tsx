@@ -140,9 +140,9 @@ function mockApi(board: unknown = BOARD) {
     if (u.startsWith('/api/persons')) return { ok: true, json: async () => ({ persons: PERSONS }) }
     if (u.startsWith('/api/household')) return { ok: true, json: async () => ({ household: null, person: null }) }
     // Order matters: /connection/slots is a prefix match away from /connection.
-    if (u.includes('/api/weekly-planning/session/') && u.endsWith('/step') && method === 'POST') {
+    if (u.startsWith('/api/weekly-planning/connection/links') && method === 'PUT') {
       steps.push(JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>)
-      return { ok: true, json: async () => ({ steps: [] }) }
+      return { ok: true, json: async () => ({ ok: true }) }
     }
     if (u.startsWith('/api/weekly-planning/connection/slots')) {
       slotCalls.push(u)
@@ -344,10 +344,12 @@ describe('Weekly planning · step 5 · Connection', () => {
 
     await waitFor(() => expect(steps.length).toBeGreaterThan(0))
     const last = steps[steps.length - 1]
-    expect(last).toMatchObject({ stepKey: 'connection' })
-    expect((last.data as { links: Record<string, string> }).links).toMatchObject({ 'p2-p4': 'd2' })
-    // Written WITHOUT settling the step — linking a time is not answering the step.
-    expect(last.status).toBe('pending')
+    expect(last).toMatchObject({ sessionId: 's1' })
+    expect(last.links).toMatchObject({ 'p2-p4': 'd2' })
+    // Through the step's MID-STEP route, not `decideStep` — linking a time is not
+    // answering the step, and `decideStep` stamps `decided_at = now()` on every write,
+    // which would move when a settled step was settled.
+    expect(last).not.toHaveProperty('status')
   })
 
   it('leaves the time to the modal’s own picker when the whole day is open', async () => {

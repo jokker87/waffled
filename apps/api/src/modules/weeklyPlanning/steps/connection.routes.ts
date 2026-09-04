@@ -1,8 +1,8 @@
 import type createAPI from 'lambda-api'
 import type { Request, Response } from 'lambda-api'
 import { moduleRoutes } from '../../../platform/route-guards'
-import { resolveWeekStart } from '../weeklyPlanning'
-import { getConnectionBoard, getConnectionSlots, InvalidPairingError } from './connection'
+import { getSessionById, resolveWeekStart } from '../weeklyPlanning'
+import { getConnectionBoard, getConnectionSlots, writeConnectionLinks, InvalidPairingError } from './connection'
 
 type Api = ReturnType<typeof createAPI>
 
@@ -10,10 +10,14 @@ type Api = ReturnType<typeof createAPI>
 //
 // Nothing new is stored for this step. A pairing's status is a query over
 // event_participants; claiming a slot writes an ORDINARY CALENDAR EVENT through the
-// app's own event modal, i.e. `POST /api/events` with those participants. So there is
-// deliberately no write route here: a `/api/weekly-planning/connection` mirror of the
-// events endpoint would be a second door onto the same rows, and the two would drift
-// (the same argument calendar.routes.ts makes for registering nothing at all).
+// app's own event modal, i.e. `POST /api/events` with those participants. There is
+// deliberately no route here that creates an event: a `/api/weekly-planning/connection`
+// mirror of the events endpoint would be a second door onto the same rows, and the two
+// would drift (the same argument calendar.routes.ts makes for registering nothing).
+//
+// The ONE write is `/links`, and it holds the line: it stores a POINTER from a pairing to
+// an event that already exists — no event, no pairing, no time — because a link is the
+// answer to a pairing and has to outlive the render that made it.
 //
 // NOTE the guard list. The catalog gives `connection` no `requiresModule` — a household
 // with chores, goals or meals switched off still has people in it — so these routes are
@@ -50,5 +54,31 @@ export function registerConnectionStepRoutes(api: Api): void {
       if (err instanceof InvalidPairingError) return res.status(400).json({ error: 'BadRequest', message: err.message })
       throw err
     }
+  }))
+
+  // Which event answers which pairing. A mid-step write: it merges onto the step's row
+  // and deliberately does NOT settle the step — see `writeConnectionLinks`.
+  api.put('/api/weekly-planning/connection/links', tenantRoute(async (tenant, req: Request, res: Response) => {
+    const body = (req.body ?? {}) as { sessionId?: unknown; links?: unknown }
+    if (typeof body.sessionId !== 'string') {
+      return res.status(400).json({ error: 'BadRequest', message: 'sessionId is required' })
+    }
+    // A map of pairing key → event id, and nothing else in it. Validated rather than
+    // trusted: this lands in a jsonb column the recap reads back.
+    const raw = body.links
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      return res.status(400).json({ error: 'BadRequest', message: 'links must be an object' })
+    }
+    const links: Record<string, string> = {}
+    for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+      if (typeof v !== 'string') return res.status(400).json({ error: 'BadRequest', message: 'each link must be an event id' })
+      links[k] = v
+    }
+    // The session must be THIS household's — the step row is reachable by id alone.
+    const session = await getSessionById(tenant.householdId, body.sessionId)
+    if (!session) return res.status(404).json({ error: 'NotFound', message: 'session not found' })
+
+    await writeConnectionLinks(session.id, links)
+    return { ok: true }
   }))
 }

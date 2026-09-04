@@ -6,7 +6,7 @@
 // the app's own `EventModal`, which already owns the local-first write path. A `create
 // pairing` call here would be a second door onto the events table, and the two would
 // drift, so there deliberately isn't one.
-import { apiGet } from '../client'
+import { apiGet, apiSend } from '../client'
 
 export interface PlanningConnectionSlot {
   /** The day inside the planned week (YYYY-MM-DD, household-local). */
@@ -81,4 +81,14 @@ export const planningConnectionApi = {
     apiGet<PlanningConnectionSlots>(
       `/api/weekly-planning/connection/slots?weekStart=${weekStart}&people=${personIds.join(',')}`
     ),
+
+  // WHICH EVENT ANSWERS EACH PAIRING, keyed by the pairing's people. The step's one
+  // write, and it stores a POINTER — no event, no pairing, no time — because a link is
+  // the answer to a pairing and has to outlive the render that made it.
+  //
+  // A MID-STEP write: it merges onto the step's row and deliberately does not settle the
+  // step. Not `decideStep`, which stamps `decided_at = now()` on every write and would
+  // move when a settled step was settled.
+  saveLinks: (sessionId: string, links: Record<string, string>) =>
+    apiSend<{ ok: true }>('PUT', '/api/weekly-planning/connection/links', { sessionId, links }),
 }
