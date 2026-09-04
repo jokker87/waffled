@@ -1046,7 +1046,7 @@ final class SyncManager {
 enum WaffledModule: String, CaseIterable, Identifiable {
     // Declaration order drives the Settings → Modules list; keep it in step with the
     // Settings → Family feature rows so the two screens read the same.
-    case chores, goals, meals, lists, pantry, rhythms, familyNight, waffledBites, quotes
+    case chores, goals, meals, lists, pantry, rhythms, familyNight, weeklyPlanning, waffledBites, quotes
     var id: String { rawValue }
 
     var isAvailable: Bool {
@@ -1055,9 +1055,14 @@ enum WaffledModule: String, CaseIterable, Identifiable {
         default: return true
         }
     }
-    /// Opt-in modules default off (pantry, rhythms, familyNight, waffledBites); the rest
-    /// default on.
-    var defaultOn: Bool { self != .pantry && self != .rhythms && self != .familyNight && self != .waffledBites }
+    /// Opt-in modules default off (pantry, rhythms, familyNight, weeklyPlanning,
+    /// waffledBites); the rest default on. Mirrors `defaultOn` in modules.ts — a module
+    /// that defaults ON here and OFF on the server would show its pages to a household
+    /// whose API 403s them.
+    var defaultOn: Bool {
+        self != .pantry && self != .rhythms && self != .familyNight
+            && self != .weeklyPlanning && self != .waffledBites
+    }
 
     var name: String {
         switch self {
@@ -1068,6 +1073,7 @@ enum WaffledModule: String, CaseIterable, Identifiable {
         case .meals: return "Meals & Recipes"
         case .lists: return "Lists & Groceries"
         case .familyNight: return "Family Night"
+        case .weeklyPlanning: return "Weekly Planning"
         case .waffledBites: return "Waffled-Bites"
         case .quotes: return "Daily quote"
         }
@@ -1081,6 +1087,7 @@ enum WaffledModule: String, CaseIterable, Identifiable {
         case .meals: return "🍽️"
         case .lists: return "🛒"
         case .familyNight: return "🏡"
+        case .weeklyPlanning: return "🗓️"
         case .waffledBites: return "🧇"
         case .quotes: return "💬"
         }
@@ -1094,6 +1101,8 @@ enum WaffledModule: String, CaseIterable, Identifiable {
         case .meals: return "Recipe library, weekly meal planning, and meals on the calendar."
         case .lists: return "Shared lists and the auto-built grocery board."
         case .familyNight: return "A weekly family gathering with a rotating agenda and a Today card."
+        // Copy lifted verbatim from modules.ts so the two Settings screens read the same.
+        case .weeklyPlanning: return "A guided session that walks the family through deciding the week ahead — loose ends, the calendar, meals, tasks and goals — reading from the modules you already use."
         case .waffledBites: return "Pair a kid's companion touchscreen — quiet time, wake-light, nightlight, alarm, and sound machine."
         case .quotes: return "A daily quote or snippet on the Today tab."
         }

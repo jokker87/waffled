@@ -727,21 +727,37 @@ struct EventEditSheet: View {
     private static let iso = ISO8601DateFormatter()
     private static let durations = [15, 30, 45, 60, 90, 120, 180, 240]
 
+    /// `prefillTitle` / `prefillStart` exist for surfaces that already KNOW what the
+    /// event is before the sheet opens, and Weekly Planning is all of them:
+    ///
+    ///   * the parked-note handoff's "Make an event" turns a note somebody already wrote
+    ///     into an event — retyping their own words back is the thing that makes an
+    ///     affordance feel pointless;
+    ///   * the Connection step's slot chips name a real gap in the week ("Wed after
+    ///     Scouts"), so opening at 5pm would throw away the one fact the chip carried.
+    ///
+    /// `prefillStart` is a full `Date`, not an hour: the gap it comes from is an instant
+    /// the server computed in the household's zone, and re-deriving it here from a day
+    /// plus a snapped hour is how the two would disagree.
     init(event: SyncedEvent?, initialDate: Date, prefillGoalId: String? = nil,
-         prefillGoalStepId: String? = nil, prefillParticipantIds: [String]? = nil) {
+         prefillGoalStepId: String? = nil, prefillParticipantIds: [String]? = nil,
+         prefillTitle: String? = nil, prefillStart: Date? = nil) {
         self.event = event
         self.initialDate = initialDate
         self.prefillGoalId = prefillGoalId
         self.prefillGoalStepId = prefillGoalStepId
         self.prefillParticipantIds = prefillParticipantIds
         let cal = Cal.current
-        // Create defaults to 5pm on the given day; edit uses the event's times.
-        let startDate = event?.startsAt ?? (cal.date(bySettingHour: 17, minute: 0, second: 0, of: initialDate) ?? initialDate)
+        // Create defaults to 5pm on the given day — unless the caller named the instant
+        // (a connection slot). Edit always uses the event's own times.
+        let startDate = event?.startsAt
+            ?? prefillStart
+            ?? (cal.date(bySettingHour: 17, minute: 0, second: 0, of: initialDate) ?? initialDate)
         let mins: Int = {
             guard let s = event?.startsAt, let e = event?.endsAt else { return 60 }
             return max(15, Int(e.timeIntervalSince(s) / 60))
         }()
-        _title = State(initialValue: event?.title ?? "")
+        _title = State(initialValue: event?.title ?? prefillTitle ?? "")
         _day = State(initialValue: startDate)
         _start = State(initialValue: startDate)
         _durationMin = State(initialValue: mins)

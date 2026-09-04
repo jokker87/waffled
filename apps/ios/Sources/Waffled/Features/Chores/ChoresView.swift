@@ -990,15 +990,20 @@ struct ChoreEditSheet: View {
     @State private var saveError: String?
     @FocusState private var titleFocused: Bool
 
+    /// `prefillTitle` is for a caller that already knows what the task is. Weekly
+    /// Planning's parked-note handoff turns a note somebody wrote into a task, and making
+    /// them retype their own words is what makes such a button not worth pressing.
+    /// Ignored when editing — an existing chore's title is its own.
     init(assignableMembers: [SyncedMember], currencies: [WaffledAPI.Currency],
          target: ChoresView.ChoreEditorTarget, initialDate: Date = Date(),
+         prefillTitle: String? = nil,
          onSave: @escaping (String?, [String: JSONValue]) async -> String?, onDelete: @escaping (String) -> Void) {
         self.assignableMembers = assignableMembers; self.currencies = currencies
         self.target = target; self.onSave = onSave; self.onDelete = onDelete
         switch target {
         case let .new(pid):
             editChoreId = nil
-            _title = State(initialValue: ""); _emoji = State(initialValue: "")
+            _title = State(initialValue: prefillTitle ?? ""); _emoji = State(initialValue: "")
             _personId = State(initialValue: pid); _stars = State(initialValue: 1)
             _currencyKey = State(initialValue: nil)
             // Default a new chore to a one-off due on the day you're currently viewing —

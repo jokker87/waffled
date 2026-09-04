@@ -3270,6 +3270,24 @@ struct WaffledAPI: Sendable {
         let isSpotlight: Bool?
         let target: Double?
         let totalProgress: Double
+        // THE DISPLAY AXIS. `totalProgress` is the LIFETIME total, and for two goal types
+        // it is the wrong number to show: a habit's question is "how many this period?"
+        // (it resets), and a checklist's is "how many steps?". The server has always sent
+        // these three; iOS simply never decoded them, so every iOS surface has been
+        // showing habits their lifetime count. See `goalDisplayProgress`.
+        //
+        // `var`, not `let`, and deliberately: a `let` with an `= nil` initializer is
+        // excluded from BOTH the memberwise init and synthesized `Decodable`, so it would
+        // silently never decode. A `var` Optional gets an implicit nil default in the
+        // memberwise init — which keeps the four existing `WaffledAPI.Goal(...)` call
+        // sites compiling untouched — and is still decoded with `decodeIfPresent`.
+        var periodDone: Double?
+        var stepDone: Double?
+        var stepTotal: Double?
+        /// How progress is logged (manual | steps | health | calendar) — nil on older responses.
+        var logMethod: String?
+        /// Whether this goal has any milestone rewards attached.
+        var hasRewards: Bool?
         let milestoneTotal: Int
         let milestoneReached: Int
         let streakDays: Int
@@ -4216,7 +4234,25 @@ struct WaffledAPI: Sendable {
 
     /// POST/PATCH a JSON body to `path`, throwing on non-2xx. The response body is
     /// ignored — capture commits only care that the write succeeded.
-    private func send(_ method: String, _ path: String, body: [String: JSONValue]) async throws {
+    // MARK: - Transport
+    //
+    // THESE SIX ARE DELIBERATELY NOT `private`, and it is worth knowing why before
+    // tightening them back up.
+    //
+    // Swift's `private` at type scope is visible inside the type's declaration and any
+    // extension IN THE SAME FILE. This file is already ~4,300 lines because every
+    // feature's endpoints have had to live in it: an `extension WaffledAPI` in its own
+    // file cannot call a private helper, so there was nowhere else for them to go.
+    //
+    // Weekly Planning adds ~25 endpoints across ten steps. Widening these to internal
+    // lets each step keep its own `Planning<Step>API.swift` next to the feature that
+    // uses it, and stops this file growing by another thousand lines. Nothing about the
+    // API surface changes — internal is still module-private, and `url`/`authorize`/
+    // `perform`/`check` below stay private because they are genuinely internal
+    // machinery (token refresh, status checking) that callers must not reach around.
+    //
+    /// POST/PATCH a JSON body with no response to decode, throwing on non-2xx.
+    func send(_ method: String, _ path: String, body: [String: JSONValue]) async throws {
         var req = URLRequest(url: try url(path))
         req.httpMethod = method
         authorize(&req)
@@ -4227,7 +4263,7 @@ struct WaffledAPI: Sendable {
     }
 
     /// POST/PATCH a JSON body and decode the JSON response, throwing on non-2xx.
-    private func sendReturning<T: Decodable>(_ method: String, _ path: String, body: [String: JSONValue], as: T.Type) async throws -> T {
+    func sendReturning<T: Decodable>(_ method: String, _ path: String, body: [String: JSONValue], as: T.Type) async throws -> T {
         var req = URLRequest(url: try url(path))
         req.httpMethod = method
         authorize(&req)
@@ -4241,7 +4277,7 @@ struct WaffledAPI: Sendable {
     /// PATCH an arbitrary Encodable body and decode the JSON response. Optionals in
     /// the body are omitted when nil (Swift's `encodeIfPresent`), so only the fields
     /// you set are sent.
-    private func patchEncodable<B: Encodable, T: Decodable>(_ path: String, body: B, as: T.Type) async throws -> T {
+    func patchEncodable<B: Encodable, T: Decodable>(_ path: String, body: B, as: T.Type) async throws -> T {
         var req = URLRequest(url: try url(path))
         req.httpMethod = "PATCH"
         authorize(&req)
@@ -4253,7 +4289,7 @@ struct WaffledAPI: Sendable {
     }
 
     /// POST/PATCH (no body) and decode the JSON response, throwing on non-2xx.
-    private func sendJSON<T: Decodable>(_ method: String, _ path: String, as: T.Type) async throws -> T {
+    func sendJSON<T: Decodable>(_ method: String, _ path: String, as: T.Type) async throws -> T {
         var req = URLRequest(url: try url(path))
         req.httpMethod = method
         authorize(&req)
@@ -4263,7 +4299,7 @@ struct WaffledAPI: Sendable {
     }
 
     /// GET `path` and decode the JSON body, throwing on non-2xx.
-    private func getJSON<T: Decodable>(_ path: String, as: T.Type) async throws -> T {
+    func getJSON<T: Decodable>(_ path: String, as: T.Type) async throws -> T {
         var req = URLRequest(url: try url(path))
         authorize(&req)
         let (data, resp) = try await perform(req)
@@ -4272,7 +4308,7 @@ struct WaffledAPI: Sendable {
     }
 
     /// DELETE `path`, throwing on non-2xx (204 is success).
-    private func delete(_ path: String) async throws {
+    func delete(_ path: String) async throws {
         var req = URLRequest(url: try url(path))
         req.httpMethod = "DELETE"
         authorize(&req)
