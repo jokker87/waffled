@@ -201,7 +201,9 @@ struct WaffledTabBar: View {
             item(.family, "checklist", "Family", badge: familyBadge)
         }
         .padding(.horizontal, 8)
-        .padding(.top, 10)
+        // Shared with WF.tabBarHeight, so a screen's clearance and the bar's real
+        // height are the same arithmetic rather than two numbers that agree by luck.
+        .padding(.top, WF.barTopPadding)
         .background(
             WF.card
                 .overlay(WF.hair.frame(height: 1), alignment: .top)
@@ -245,7 +247,9 @@ struct WaffledTabBar: View {
                     .font(.system(size: 24, weight: .bold))
                     .foregroundStyle(.white)
             }
-            .frame(width: 54, height: 54)
+            // The tallest child in the bar — see WF.captureButtonSize. The offset
+            // below lifts it above the bar visually but not in layout.
+            .frame(width: WF.captureButtonSize, height: WF.captureButtonSize)
             .wfShadow3()
         }
         .buttonStyle(.plain)

@@ -21,6 +21,9 @@ import SwiftUI
 /// The whole session surface: lobby → session → record, plus the agenda sheet.
 struct PlanningShellView: View {
     @Environment(SyncManager.self) private var sync
+    /// Pops the screen for the header's own back chevron — see `sessionHeader`, which
+    /// replaces the navigation bar rather than sitting under it.
+    @Environment(\.dismiss) private var dismiss
 
     @State private var model = PlanningModel()
     @State private var sheet = false
@@ -43,8 +46,18 @@ struct PlanningShellView: View {
     var body: some View {
         content
             .background(WF.canvas)
-            .navigationTitle("Weekly planning")
-            .navigationBarTitleDisplayMode(.inline)
+            // THE NAVIGATION BAR IS GONE, and that is a deliberate ~44pt.
+            //
+            // It cost a full bar to render the word "Weekly planning" directly above a
+            // serif "Horizon scan" — two titles for one screen, and the one that mattered
+            // was the lower one. Between that bar, four header rows and a footer carrying
+            // the wrong clearance, the chrome had taken over half of an iPhone 17 Pro:
+            // "that is too much so that I dont even want to go through the steps."
+            //
+            // `sessionHeader` now carries the back chevron itself, in the same 36pt
+            // circular treatment the reward shop uses for exactly this — a pushed screen
+            // that draws its own header. Swipe-back still works.
+            .toolbar(.hidden, for: .navigationBar)
             // Keyed on the refresh signal, not a bare `.task`: SwiftUI runs a bare one
             // once per appearance, so this screen would sit on launch-time data through
             // every pull-to-refresh. See SyncManager.refreshRev.
@@ -240,9 +253,32 @@ struct PlanningShellView: View {
         }
     }
 
+    /// Two rows and the step's question, where there used to be a navigation bar and
+    /// four rows. Every line here earns its height:
+    ///
+    /// - **row 1** — back out, the step counter (the door to the agenda), and the exit.
+    ///   Three controls, one row, because none of them is content.
+    /// - **row 2** — the step title in serif, with the week riding the same baseline on
+    ///   the right. The week is context for the title, so it costs nothing to sit beside
+    ///   it instead of below it.
+    /// - **the ask** — the one question the step puts to you. This is the only line of
+    ///   the four that was ever the point, so it is the only one that kept its own row.
     private var sessionHeader: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 10) {
+                if !isKiosk {
+                    // The navigation bar's job, done in the header's own first row. On
+                    // the kiosk this screen is a rail PAGE with nothing to pop, so there
+                    // is deliberately no chevron there.
+                    Button { dismiss() } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 16, weight: .bold)).foregroundStyle(WF.ink2)
+                            .frame(width: 36, height: 36).background(WF.panel).clipShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Back")
+                }
+
                 Button { sheet = true } label: {
                     // `WaffledMenuPill` is the app's "tap to change" trigger — bold text
                     // plus a down chevron — which is exactly what the counter is: the
@@ -260,23 +296,31 @@ struct PlanningShellView: View {
                 // committed to finishing. The words are the sheet's, deliberately: "for
                 // now" is the part that matters, because leaving keeps the session and
                 // everything it has already decided.
+                //
+                // It stays a SEPARATE control from the chevron beside it: back pops this
+                // screen and leaves the session current, so re-opening Planning drops you
+                // straight back in — which is the very thing "leave for now" was added to
+                // fix. Same direction, different promise.
                 Button { model.leave() } label: {
                     Text("Leave for now")
                         .font(.system(size: 13.5, weight: .bold)).foregroundStyle(WF.ink3)
                 }
                 .buttonStyle(.plain)
             }
-            Text(model.current?.title ?? "")
-                .font(WF.serif(24, .bold)).foregroundStyle(WF.ink)
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(model.current?.title ?? "")
+                    .font(WF.serif(22, .bold)).foregroundStyle(WF.ink)
+                Spacer(minLength: 6)
+                Text(model.weekLabel)
+                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(WF.ink3)
+                    .lineLimit(1)
+            }
             Text(model.current?.ask ?? "")
-                .font(.system(size: 14)).foregroundStyle(WF.ink2)
+                .font(.system(size: 13.5)).foregroundStyle(WF.ink2)
                 .fixedSize(horizontal: false, vertical: true)
-            Text(model.weekLabel)
-                .font(.system(size: 12, weight: .semibold)).foregroundStyle(WF.ink3)
-                .padding(.top, 1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 12)
+        .padding(.horizontal, 16).padding(.top, 6).padding(.bottom, 10)
         // The 2px hair — the only progress indicator the design keeps.
         .overlay(alignment: .bottom) {
             ProgressBar(value: model.progress, tint: WF.primary, track: WF.hair, height: 2)
@@ -301,7 +345,10 @@ struct PlanningShellView: View {
             primaryAnswerButton
         }
         .padding(.horizontal, 16).padding(.top, 10)
-        .padding(.bottom, 10 + WF.bottomBarClearance)
+        // `fixedBarClearance`, NOT `bottomBarClearance`. This footer is pinned, not
+        // scrolled, so it wants to sit flush on top of the tab bar; the scrolling figure
+        // left ~46pt of bare canvas between the buttons and the bar. See WF.tabBarHeight.
+        .padding(.bottom, 10 + WF.fixedBarClearance)
         .background(WF.card)
         .overlay(alignment: .top) { Rectangle().fill(WF.hair).frame(height: 1) }
     }
@@ -317,7 +364,13 @@ struct PlanningShellView: View {
                 if model.busy { ProgressView().controlSize(.small).tint(.white) }
                 Text(model.current?.primary ?? "Done")
                     .font(.system(size: 15, weight: .bold)).foregroundStyle(.white)
-                if let next = model.next {
+                    .lineLimit(1)
+                // "· next: <title>" is a KIOSK affordance. On a phone the two together
+                // never fit: the affirmative wrapped onto two lines and the hint truncated
+                // anyway ("Nothing / missing · next: Family ni…"), which cost height AND
+                // read as broken. The agenda pill one row up already answers "what's
+                // next", so the phone drops the hint rather than shrinking the answer.
+                if isKiosk, let next = model.next {
                     Text("· next: \(next.title)")
                         .font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.75))
                         .lineLimit(1)

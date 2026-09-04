@@ -83,12 +83,43 @@ enum WF {
     /// scrolling screen has to leave the space by hand. Forget it and the screen's last
     /// row sits under the bar, unreachable however far you scroll; that is exactly how
     /// the pantry item's **Edit** button became untappable.
-    static let tabBarClearance: CGFloat = 110
+    static var tabBarClearance: CGFloat { tabBarHeight + scrollBreathingRoom }
 
     /// The same clearance, but only on the shell that actually has a bottom bar — the
     /// iPad kiosk has none, so a screen shared by both should ask for this rather than
     /// leave 110pt of dead space on the tablet.
     static var bottomBarClearance: CGFloat { DeviceExperience.current == .planner ? tabBarClearance : 0 }
+
+    // MARK: …and the two numbers it's built from
+    //
+    // `tabBarClearance` above serves a SCROLLING screen: the bar's height plus room so
+    // the last row doesn't hug the bar. A screen with a FIXED footer wants a different
+    // number — flush with the top of the bar, nothing wasted underneath — and taking the
+    // scrolling figure left the planning session's footer floating ~46pt above the bar,
+    // which was half of "the bottom action bar takes up too much room".
+    //
+    // Both are derived from what `WaffledTabBar` actually draws, and the bar draws itself
+    // from these same two constants, so the clearance cannot drift from the bar's height.
+
+    /// The capture FAB's diameter — the tallest child in the bar, so it sets the height.
+    /// Its `-18` offset lifts it visually but does NOT participate in layout.
+    static let captureButtonSize: CGFloat = 54
+    /// The bar's own top padding.
+    static let barTopPadding: CGFloat = 10
+    /// What the bar occupies in layout: its tallest child plus that padding. The bar's
+    /// background bleeds into the bottom safe area, but the CONTENT above it is laid out
+    /// inside the safe area, so this is the whole of what a screen must clear.
+    static var tabBarHeight: CGFloat { captureButtonSize + barTopPadding }
+    /// Slack a scrolling screen leaves beyond the bar itself. Chosen to keep
+    /// `tabBarClearance` at exactly the 110 every screen in the app is already tuned to.
+    static let scrollBreathingRoom: CGFloat = 46
+
+    /// Clearance for a footer PINNED above the tab bar rather than scrolling under it:
+    /// the bar's height and not a point more. Zero on the kiosk, which has no bar.
+    ///
+    /// Do not shave this below `tabBarHeight` to reclaim space — that is precisely how
+    /// the pantry item's **Edit** button ended up under the bar and untappable.
+    static var fixedBarClearance: CGFloat { DeviceExperience.current == .planner ? tabBarHeight : 0 }
 
     // MARK: Type — SF for UI, New York (.serif) for headings, matching --sans/--serif.
     static func serif(_ size: CGFloat, _ weight: Font.Weight = .semibold) -> Font {

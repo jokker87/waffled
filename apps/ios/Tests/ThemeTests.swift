@@ -88,6 +88,38 @@ import Testing
         #expect(alpha(FamilyColor.person1.tint, .dark) < 0.5)
     }
 
+    // MARK: bottom-bar clearance
+
+    // Two different jobs, one source. A SCROLLING screen wants the bar's height plus
+    // breathing room so its last row doesn't hug the bar; a FIXED footer wants to sit
+    // exactly on top of the bar with no dead space under it. Before these were derived,
+    // the planning session's fixed footer used the scroll figure and left ~46pt of blank
+    // canvas above the tab bar — half of "the bottom action bar takes up too much room".
+
+    @Test func theBarsHeightIsWhatTheBarActuallyDraws() {
+        // Not a guess: `WaffledTabBar` frames the capture button at `captureButtonSize`
+        // and pads itself by `barTopPadding`, so this is the same arithmetic the bar does.
+        // The FAB's `-18` offset is cosmetic and does NOT participate in layout, which is
+        // why the tallest CHILD sets the height.
+        #expect(WF.tabBarHeight == WF.captureButtonSize + WF.barTopPadding)
+        #expect(WF.tabBarHeight == 64)
+    }
+
+    @Test func theScrollClearanceIsStillExactlyOneHundredAndTen() {
+        // Every scrolling screen in the app is tuned against this number — deriving it
+        // must not move it. This is the regression guard on the refactor, not a new rule.
+        #expect(WF.tabBarClearance == 110)
+        #expect(WF.tabBarClearance == WF.tabBarHeight + WF.scrollBreathingRoom)
+    }
+
+    @Test func aFixedFooterClearsTheBarWithoutTheBreathingRoom() {
+        // The whole point: strictly less than the scroll clearance, but still at least
+        // the bar's height — anything less puts the footer's controls UNDER the bar,
+        // which is how the pantry Edit button became untappable.
+        #expect(WF.fixedBarClearance < WF.tabBarClearance)
+        #expect(WF.fixedBarClearance >= WF.tabBarHeight || WF.fixedBarClearance == 0)
+    }
+
     // MARK: ThemeStore
 
     private func freshDefaults(_ name: String) -> UserDefaults {
