@@ -67,4 +67,32 @@ import Testing
     @Test func unmeasuredColumnDoesNotShift() {
         #expect(KeyboardState.barShift(columnBottom: 0, keyboardTop: 481) == 0)
     }
+
+    // MARK: whether the phone's tab bar is on screen at all
+    //
+    // "is there any way to hide the bottom main nav (home calendar, meals, etc...) when
+    // I am typing? it takes up so much room" — while a keyboard is docked the tab bar is
+    // 64pt of unreachable chrome between the content and the keys.
+    //
+    // This is ONE rule with TWO readers: `AppRoot` uses it to drop the bar, and any
+    // screen with a pinned bottom bar uses it to stop reserving clearance for a bar that
+    // isn't there. Split across two call sites they would eventually disagree and leave
+    // either a dead gap or a control under the keys.
+
+    @Test func aDockedKeyboardTakesTheBarAway() {
+        #expect(KeyboardState.hidesBottomBar(overlap: 336) == true)
+    }
+
+    @Test func noKeyboardKeepsTheBar() {
+        #expect(KeyboardState.hidesBottomBar(overlap: 0) == false)
+    }
+
+    @Test func theFloatingIpadKeyboardKeepsTheBar() {
+        // `overlap` is already 0 for the floating mini keyboard — it hovers instead of
+        // docking, so it covers nothing and there is nothing to get out of the way of.
+        // Deliberately the same input as "no keyboard": the bar must stay.
+        #expect(KeyboardState.hidesBottomBar(overlap: KeyboardState.overlap(
+            container: CGRect(x: 0, y: 0, width: 834, height: 1194),
+            keyboard: CGRect(x: 40, y: 700, width: 320, height: 300))) == false)
+    }
 }

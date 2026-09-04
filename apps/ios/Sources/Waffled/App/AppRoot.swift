@@ -118,7 +118,12 @@ struct AppRoot: View {
             // App-wide offline / pending-sync strip, pushed below the status bar.
             .safeAreaInset(edge: .top, spacing: 0) { OfflineBanner() }
 
-            WaffledTabBar(tab: $tab, familyBadge: approvalCount,
+            // Gone while a keyboard is docked — see KeyboardState.hidesBottomBar. The
+            // bar (and the capture FAB with it) is unreachable during typing and was
+            // costing 64pt between the content and the keys. `KeyboardState` animates its
+            // own changes, so this appears and disappears with the keyboard.
+            if !KeyboardState.shared.hidesBottomBar {
+                WaffledTabBar(tab: $tab, familyBadge: approvalCount,
                        flexSlot: flexSlot,
                        onCapture: { showCapture = true },
                        onReselect: {
@@ -126,6 +131,7 @@ struct AppRoot: View {
                            if $0 == .flex { mealsPath = []; modulePath = [] }
                            if $0 == .today { todayPath = [] }
                        })
+            }
         }
         .sheet(isPresented: $showCapture) {
             CaptureSheet()

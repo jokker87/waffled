@@ -35,6 +35,21 @@ import UIKit
         return max(0, container.maxY - keyboard.minY)
     }
 
+    /// Whether a docked keyboard should take the phone's tab bar off screen.
+    ///
+    /// The bar is 64pt of chrome you cannot reach while typing, sitting between the
+    /// content and the keys. `AppRoot` reads this to drop the bar; a screen with its own
+    /// pinned bottom bar reads it to stop reserving `WF.fixedBarClearance` for a bar that
+    /// is no longer there. Keeping it in one place is the point — two copies of the rule
+    /// would drift, and the failure is either a dead gap or a control under the keys.
+    ///
+    /// Driven by `overlap`, which is already 0 for the iPad's FLOATING keyboard: that one
+    /// hovers rather than docking, so it hides nothing and the bar stays.
+    nonisolated static func hidesBottomBar(overlap: CGFloat) -> Bool { overlap > 0 }
+
+    /// This state's own answer to `hidesBottomBar(overlap:)`.
+    var hidesBottomBar: Bool { Self.hidesBottomBar(overlap: overlap) }
+
     /// How far a bottom-pinned bar whose (unshifted) bottom edge sits at
     /// `columnBottom` must ride up to clear a keyboard whose top edge is at
     /// `keyboardTop` — both in window coordinates. 0 when there's no keyboard, the
