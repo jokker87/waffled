@@ -70,6 +70,22 @@ the module's config panel, so on the phone the Today card really was the only wa
 lesson generalises past this module — "is it wired up?" is not a question a compiler can
 answer, and the audit for it is a screenshot, not a test.
 
+A third, same shape: **Meals' "✨ Plan the rest" had no screen to bring up.** The web's
+footer control does exactly one thing — `set({ planner: true })` — and the shared "Plan my
+week" planner renders from the step BODY off the same store, which is why `planner` is a
+field there and not a `useState`: the button and the planner are two sibling trees. The
+port replaced that click with a direct headless fill, so the step's one AI action drafted a
+week nobody had seen (or, on a week with nothing empty, did nothing at all). It now opens
+the real planner — narrowed to the empty nights and to dinners — and the approved cards go
+to the step's own fill endpoint, which is the only path that refuses a night somebody
+already decided and hands back the receipt the undo checks. `plannerOpen` lives on
+`PlanningMealsModel` for the web's stated reason, and `PlanWeekSheet` grew the `onApply`
+hook it was missing (supplying it REPLACES the per-slot `SyncManager.setMealPlan` writes
+rather than running alongside them). The lesson is narrower than the tile's but worth the
+line: **when a port drops a screen, it stops being the same feature** — a headless
+equivalent of an interactive step is a different promise, and the tester read it as broken
+before anyone read it as a divergence.
+
 **It was built the way the web steps were, and for the same reason.** A registry naming all
 ten keys, with all ten step files existing as walk-past-able stubs, on day one — so writing
 a step means editing that step's own files and never coming back to register anything. Six
@@ -110,11 +126,21 @@ port properly rather than transliterating:**
 the planning month grid is a documented copy of that 42-cell grid. Two copies will drift;
 extracting one shared grid is the fix.
 
-### Changes outside the step seams that iOS parity must mirror
+**Known debt found beside it (pre-existing, not the port's):** iOS's `RecipePickerSheet` —
+the Meals tab's own night picker, and the planner's manual pick — supplies no `onPickMeal`,
+because those slots write through `SyncManager.setMealPlan(recipeId:)`, which cannot take a
+plate. So on iOS that picker shows neither saved plates nor **＋ New meal**, while the web's
+equivalent (`Meals.tsx`'s `onPickMeal={pickMeal}`) shows both. The planning step already has
+the answer — a plate goes through `POST /api/meals/:id/schedule`, not `/api/meals/plan`,
+which is why it needs its own `planNightAsPlate` — so closing this is a matter of teaching
+that one sheet the same two-way pick.
+
+### Changes outside the step seams, carried to both clients
 
 A step is allowed to want something from a component it doesn't own. When that happens the
 change lands in the shared component, not in a copy — and it has to be carried to iOS too,
-so it is written down here rather than discovered during the parity pass:
+which is why it was written down here rather than discovered during the parity pass. Both
+are now on both clients; each bullet records the web shape first and then how iOS differs.
 
 - **`ChoreModal` offers a one-off's day on edit, not just on create** (and the Tasks step's
   inline date picker is gone — the day chip opens that same editor). `PATCH /api/chores/:id`
@@ -136,6 +162,20 @@ so it is written down here rather than discovered during the parity pass:
   anybody changes their mind a real, saved, empty "New meal" is already in the library —
   the picker holds the id `onIdChange` reports and removes it on close. Verified against
   the live library, not a mock, because a mock cannot show you a leak.
+
+  **On iOS** the ＋ in `RecipesLibraryView`'s bar becomes a two-item menu under the same
+  gate (`LibraryNewOffer`, which is also what the browse pill reads, so the two cannot
+  drift), and it hosts the real `MealBuilderView` — no wrapper/body split is needed because
+  that screen is presented rather than routed. `onUse` is the same render contract and
+  takes Schedule and Add-plate-to-list off the bar for the same reason. **The leak is
+  closed from the other side, deliberately:** rather than creating the plate `isSaved:
+  true` and deleting it on cancel, iOS creates it one-off — invisible to a library that
+  lists `where is_saved` — and flips it to saved at the moment it is USED
+  (`MealBuilderModel.saveForUse`). Same end state, same copy-on-schedule guarantee (`POST
+  /api/meals/:id/schedule` copies a saved plate and schedules an unsaved one directly), and
+  a plate abandoned mid-build cannot leak because there is nothing to clean up. It was
+  found by a tester on the planning step's night picker: "I clicked the + and it made a new
+  recipe, but I should also be able to make a meal."
 
 ## Schema (0099)
 
@@ -392,7 +432,11 @@ Ten items, and the two worth keeping as rules rather than as fixes:
 Also settled: the parked-note banner now borrows the step's own verb ("Make a task",
 "Make an event") and opens that step's EXISTING composer via `useHandoffAction` — a step
 with no composer lends nothing and keeps "Handled", because a button promising an action
-it does not perform is worse than the plain one. And Connection's acknowledgement became
+it does not perform is worse than the plain one. (Goals has since grown a composer — "＋ New
+goal for this week", which opens the goals module's own editor over the session, fixed to
+the group whose tab you're on — but still lends the banner nothing: that verb would also
+have to seed the goal's title from the note, which is a separate piece of work rather than
+a rename of this one.) And Connection's acknowledgement became
 a real **link** (which event answers this pairing), persisted through the step's own
 record at its current status — an id is a pointer, not a copy, so it sits beside the
 counts without breaching the "crumbs are counts, never module data" rule.

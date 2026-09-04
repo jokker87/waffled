@@ -85,14 +85,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   separate from the standing weekly event in Settings, so you can have one, the other, or
   both.
 
-- **The recipe picker can build a whole meal, not just write a new recipe.** Anywhere you
-  pick a dish for a night — the meal planner, and Weekly Planning's Meals step — there's now
-  a **＋ New meal** button beside ＋ New recipe. It opens the real Meal Builder over the
-  picker, so you can name a plate, add a main and its sides, set servings and assign a cook
-  per dish, then put the finished plate straight on the night you were filling. The plate is
-  saved to your library on the way past, so it's there to pick again next month. Previously a
-  plate could only be built on the Meal Builder screen, which meant abandoning the night you
-  were planning to go and make one.
+- **The recipe picker can build a whole meal, not just write a new recipe.** Wherever you
+  pick a dish for a night and that night can hold a whole meal — the meal planner on the
+  web, Weekly Planning's Meals step on web and in the app — there's now a **＋ New meal**
+  button beside ＋ New recipe. It opens the real Meal Builder over the picker, so you can
+  name a plate, add a main and its sides, set servings and assign a cook per dish, then put
+  the finished plate straight on the night you were filling. The plate is saved to your
+  library on the way past, so it's there to pick again next month. Previously a plate could
+  only be built on the Meal Builder screen, which meant abandoning the night you were
+  planning to go and make one.
 
 - **A new Weekly Planning module (opt-in) that walks the family through deciding the week
   ahead.** Turn it on in Settings → Modules and a **Planning** page appears: pick a day and
@@ -192,6 +193,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   out in columns and scrolls once it's a few rows deep, so the month keeps its size however
   much you park. The note explaining the difference between adding an event and parking a
   note has been rewritten, too.
+
+- **Everything sent to a planning step now turns up in the same box at the top of it.**
+  Notes you parked for a step appeared in a box at the top; things you routed to it from
+  **Loose ends** were drawn in a separate list at the bottom, below the week — so where to
+  look for something you'd sent ahead depended on which of two mechanisms had carried it.
+  They now arrive together at the top, still labelled apart, because what you can do with
+  them differs: a note you typed can be marked handled or dropped, while a routed chore is
+  still genuinely open and only offers the step's own action. A note that was BOTH parked
+  and routed used to appear twice; it now appears once.
+
+- **"Plan the rest with AI" in the planning Meals step actually opens the planner.** The
+  button did nothing visible: on iPhone and iPad it asked the server to fill the empty
+  nights straight away, with no screen and nothing to approve, so a week you hadn't seen
+  could be rewritten — and once every night was planned the button did nothing at all. It
+  now opens the same "Plan my week" review the meal planner uses, narrowed to the nights
+  still open, and only writes the nights you approve.
+
+- **You can hand a planning task over by dragging it.** The Tasks step's cards can be
+  dragged by their grip onto a person, or back onto the up-for-grabs strip; tapping a face
+  still does exactly the same thing. Dropping a card back where it already was does
+  nothing, rather than counting as a hand-over in the recap.
+
+- **Goals on iPhone and iPad: you can make a new goal from inside the planning session.**
+  The step asks each goal group what its focus for the week is, but only offered the goals
+  that already existed — so a group with nothing worth the week was a dead end, and the
+  only way out was to leave the session for the Goals screen, which lost your place.
+  **＋ New goal for this week** now opens the app's real goal editor over the session,
+  fixed to the group whose tab you're on and starting on the Pinned tier, so the goal you
+  make comes straight back as that group's suggested focus — waiting for you to confirm
+  it, since making a goal isn't the same as deciding it. (The web has worked this way all
+  along.) Adding to a group that isn't just you still needs permission to manage goals,
+  and the button says so instead of failing when you press it.
 
 - **Kids: your own answer now looks like an answer.** Typing something under "＋ Something
   else" saved it, but the chip kept the dashed grey styling of the empty prompt, so it read
