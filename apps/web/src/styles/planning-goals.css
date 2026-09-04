@@ -79,6 +79,8 @@
 .wpg-opt:disabled { opacity: 0.55; cursor: default; }
 /* Chosen = the week's focus. Coral is the app's one primary accent. */
 .wpg-opt.on { border-color: var(--primary); background: var(--primary-t); }
+/* `:hover:not(:disabled)` outscores `.on` — see the horizon tags. */
+.wpg-opt.on:hover:not(:disabled) { border-color: var(--primary); }
 
 .wpg-opt-e { font-size: 22px; line-height: 1; flex: none; }
 .wpg-opt-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }

@@ -116,6 +116,9 @@
 .wpk-opt:hover:not(:disabled) { border-color: var(--line); }
 .wpk-opt:disabled { opacity: 0.55; cursor: default; }
 .wpk-opt.on { border-color: var(--primary); background: var(--primary-t); }
+/* `:hover:not(:disabled)` outscores `.on`, so without this the chosen option loses its
+   border the moment the cursor crosses it. */
+.wpk-opt.on:hover:not(:disabled) { border-color: var(--primary); }
 /* The escape hatch. Deliberately the quietest thing in the list and deliberately last:
    the whole design is that a kid recognises their week rather than invents it. */
 .wpk-opt.more { background: transparent; border-style: dashed; color: var(--ink-3); font-weight: 700; justify-content: center; }
@@ -150,6 +153,7 @@
 .wpk-fchip:hover:not(:disabled) { border-color: var(--line); }
 .wpk-fchip:disabled { opacity: 0.55; cursor: default; }
 .wpk-fchip.on { border-color: var(--primary); background: var(--primary-t); }
+.wpk-fchip.on:hover:not(:disabled) { border-color: var(--primary); }
 .wpk-fchip.more { background: transparent; border-style: dashed; color: var(--ink-3); }
 .wpk-fchip.wpk-fchip-own { font-weight: 700; }
 .wpk-fchip-n { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

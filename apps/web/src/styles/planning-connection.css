@@ -128,6 +128,9 @@
    pairing. */
 .wpn-link { font-weight: 700; }
 .wpn-link.on { background: var(--success-t); border-color: var(--success); color: var(--success); }
+/* Same specificity trap as the horizon tags: `.wpn-slot:hover` sets a colour, and it
+   outscores every `.on` below it. A chosen chip holds its green under the cursor. */
+.wpn-slot.on:hover:not(:disabled) { border-color: var(--success); color: var(--success); background: var(--success-t); }
 /* Its own line under the row. `.wpn-row` is a flex row, so the list has to claim the
    full width or it would sit in among the chips it was opened from. */
 .wpn-link-list {
