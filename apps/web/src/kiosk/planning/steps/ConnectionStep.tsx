@@ -242,30 +242,6 @@ function Body({ step, sessionId, weekStart, setDecisionData, refresh, busy }: St
   const alive = useRef(true)
   useEffect(() => () => { alive.current = false }, [])
 
-  const settle = useCallback(async (was: number) => {
-    for (let i = 0; i <= CATCHUP_MS.length; i++) {
-      try {
-        const b = await planningConnectionApi.board(weekStart)
-        if (!alive.current) return
-        setBoard(b)
-        setError(false)
-        if (credited(b) > was) return
-      } catch {
-        if (alive.current) setError(true)
-        return
-      }
-      const wait = CATCHUP_MS[i]
-      if (wait === undefined) return
-      await new Promise((r) => setTimeout(r, wait))
-      if (!alive.current) return
-    }
-  }, [weekStart])
-
-  useEffect(() => {
-    if (!board) return
-    setDecisionData({ added, alreadyCounted: Object.keys(links).length, links })
-  }, [board, added, links, setDecisionData])
-
   // Written through the step's own MID-STEP route, which merges the map onto the step's
   // row and leaves `status` and `decided_at` alone — linking a time is not answering the
   // step, and `decideStep` would have stamped it as decided on every link.
@@ -299,6 +275,30 @@ function Body({ step, sessionId, weekStart, setDecisionData, refresh, busy }: St
     [remember]
   )
 
+  const settle = useCallback(async (was: number) => {
+    for (let i = 0; i <= CATCHUP_MS.length; i++) {
+      try {
+        const b = await planningConnectionApi.board(weekStart)
+        if (!alive.current) return
+        setBoard(b)
+        setError(false)
+        if (credited(b) > was) return
+      } catch {
+        if (alive.current) setError(true)
+        return
+      }
+      const wait = CATCHUP_MS[i]
+      if (wait === undefined) return
+      await new Promise((r) => setTimeout(r, wait))
+      if (!alive.current) return
+    }
+  }, [weekStart])
+
+  useEffect(() => {
+    if (!board) return
+    setDecisionData({ added, alreadyCounted: Object.keys(links).length, links })
+  }, [board, added, links, setDecisionData])
+
   const byId = useMemo(() => new Map(persons.map((p) => [p.id, p])), [persons])
 
   function onSaved() {
@@ -322,9 +322,15 @@ function Body({ step, sessionId, weekStart, setDecisionData, refresh, busy }: St
         const key = p.personIds.join('-')
         const people = p.personIds.map((id) => byId.get(id)).filter(Boolean) as Person[]
         const linkedId = links[key] ?? null
-        const acknowledged = linkedId !== null
-        const credit = p.alreadyThisWeek[0]
         const candidates = bothOnIt(p)
+        // THE ANSWER, and the one-tap offer, are two different things — and conflating
+        // them is what put two chips on this row reading as chosen at once ("why does it
+        // show both?"). `answer` is the event somebody actually picked. `oneTap` is what
+        // a single chip can honestly stand for: the answer if there is one, otherwise the
+        // single obvious candidate — and NOT `alreadyThisWeek[0]`, which is just the
+        // first of several and was showing a different event from the sentence beside it.
+        const answer = linkedId ? candidates.find((e) => e.id === linkedId) ?? null : null
+        const oneTap = answer ?? (candidates.length === 1 ? candidates[0]! : null)
         return (
           <div className="wpn-row" key={key} data-testid={`wpn-pair-${key}`}>
             <div className="wpn-faces" role="img" aria-label={p.who}>
@@ -340,17 +346,22 @@ function Body({ step, sessionId, weekStart, setDecisionData, refresh, busy }: St
               {/* Time that already exists, first and muted. It offers nothing new —
                   it lets you say the week already answers this, which is a real
                   answer to "who gets time with whom" and the only one that doesn't
-                  cost anybody an evening. */}
-              {credit && (
+                  cost anybody an evening.
+                  IT NAMES THE EVENT. It used to read "Tue 8:00 PM counts", which is not
+                  something anybody can match against a week they just added to: "I dont
+                  see the event I just made (at least not by its title)" and "Why dont we
+                  show the event name?". A day and an hour identify nothing on a row that
+                  can have three credited evenings on it. */}
+              {oneTap && (
                 <button
                   type="button"
-                  className={`wpn-slot wpn-counts${acknowledged ? ' on' : ''}`}
-                  aria-pressed={acknowledged}
-                  aria-label={`${credit.title} on ${credit.when} already counts`}
+                  className={`wpn-slot wpn-counts${answer ? ' on' : ''}`}
+                  aria-pressed={answer !== null}
+                  aria-label={`${oneTap.title} on ${oneTap.when} ${answer ? 'is your time together' : 'already counts'}`}
                   disabled={busy}
-                  onClick={() => link(key, credit.id)}
+                  onClick={() => link(key, oneTap.id)}
                 >
-                  {credit.day.slice(0, 3)} {credit.time ?? 'all day'} counts
+                  {answer ? '✓ ' : ''}{oneTap.title} · {oneTap.day.slice(0, 3)}
                 </button>
               )}
 
@@ -360,16 +371,19 @@ function Body({ step, sessionId, weekStart, setDecisionData, refresh, busy }: St
                   The candidates are every event this week with both of them on it, which
                   is the two lists the board already sends; nothing is written to the
                   calendar, and nobody's event is edited. Offered only when there is more
-                  to choose from than the one-tap chip beside it already covers. */}
-              {candidates.length > (credit ? 1 : 0) && (
+                  to choose from than the one-tap chip beside it already covers — and
+                  NEVER in the chosen state: exactly one chip on this row says "this is
+                  the answer", and it is the one naming the event. */}
+              {candidates.length > (oneTap ? 1 : 0) && (
                 <button
                   type="button"
-                  className={`wpn-slot wpn-link${acknowledged ? ' on' : ''}`}
+                  className="wpn-slot wpn-link"
                   aria-expanded={picking === key}
+                  aria-label={`${answer ? 'Change the time' : 'Link a time'} for ${p.who}`}
                   disabled={busy}
                   onClick={() => setPicking((cur) => (cur === key ? null : key))}
                 >
-                  Link a time
+                  {answer ? 'Change' : 'Link a time'}
                 </button>
               )}
 

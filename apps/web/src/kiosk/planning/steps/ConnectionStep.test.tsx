@@ -298,8 +298,14 @@ describe('Weekly planning · step 5 · Connection', () => {
     await nameItAndSave(await eventModal(), 'Date night')
     await waitFor(() => expect(posts).toHaveLength(1))
 
-    // The row tells the truth without anybody leaving the step and coming back.
-    expect(await within(await row('p1-p2')).findByText(/Date night/, {}, { timeout: 5000 })).toBeInTheDocument()
+    // The row tells the truth without anybody leaving the step and coming back — and it
+    // says which event, by NAME. "I dont see the event I just made (at least not by its
+    // title)": a day and an hour identify nothing on a row that can carry three credited
+    // evenings.
+    await waitFor(
+      async () => expect((await row('p1-p2')).textContent).toMatch(/Date night/),
+      { timeout: 5000 }
+    )
   }, 15000)
 
   it('links a time that already has both of them on it', async () => {
@@ -491,8 +497,8 @@ describe('Connection · a pairing with time on it is never hidden', () => {
     mockApi(withCredit)
     renderStep()
     expect(await row('p3-p4')).toBeTruthy()
-    // And it says why it is there.
-    expect((await row('p3-p4')).textContent).toMatch(/counts/i)
+    // And it says why it is there — by naming the event, not by reciting a clock time.
+    expect((await row('p3-p4')).textContent).toMatch(/Just us/)
   })
 
   it('still caps the pairings it is only SUGGESTING at three', async () => {
