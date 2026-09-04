@@ -22,7 +22,7 @@
 //      second visit reads it back from the table that owns it. This is the wave-1 lesson
 //      (the Meals step's shopping trip) applied.
 import { query } from '../../../platform/db'
-import { resolveSteps } from '../weeklyPlanning'
+import { resolveSteps, STEPS } from '../weeklyPlanning'
 
 // ---------------------------------------------------------------------------
 // The tags
@@ -42,16 +42,43 @@ import { resolveSteps } from '../weeklyPlanning'
 // tag row at all; it contradicts the column's stated semantics, and the v4 mock settles
 // it. Nothing reads 'horizon' today.)
 //
-// The three the bar offers, in the order it shows them. "No tag" is the ABSENCE of one
-// and so is not a row here — it is the client sending no `stepKey` at all.
-const HORIZON_TAGS: { stepKey: string; hint: string; primary?: true }[] = [
-  // Tasks is `primary` for the same reason step 1's `DESTINATIONS.parked` marks it so:
-  // most of what a month provokes is something somebody has to DO before the date
-  // arrives. The bar opens there; "No tag" is one tap away.
-  { stepKey: 'tasks', hint: 'Someone owns it this week', primary: true },
-  { stepKey: 'meals', hint: 'It changes what we eat' },
-  { stepKey: 'calendar', hint: 'A date to look, or a deadline' },
-]
+// ONLY THE STEPS STILL AHEAD, and that is why the list is derived rather than written
+// down. A tag names the step that will LOOK at the note, so a step this session has
+// already walked past cannot be one: tagging Calendar from the Horizon scan addresses
+// step 2 while you are standing on step 3, and the note could only resurface in a LATER
+// session. Reported exactly that way — "I think its weird that I can add a parking lot
+// note here and it would show on the previous step I already did? ... It could be a
+// task, meal, goal, connection, or kid item but no previous/current step."
+//
+// The old list was three hand-kept keys (tasks/meals/calendar), correct back when only
+// steps 1, 3 and 10 read `planning_parked_items` at all. The shell now raises a handoff
+// banner on ANY step holding a parked note, so every step after this one is a genuine
+// destination and the hand-kept list is what is holding the bar back.
+//
+// Derived from `STEPS` order: a step added to the catalog needs nothing done here, and
+// the chips read down the session in the order you will actually meet them. A step
+// earns its place by having a HINT — that is the editorial opt-in, and it is what keeps
+// `recap` out, which reports the session and settles nothing.
+//
+// "No tag" is the ABSENCE of a tag and so is never a row here — it is the client
+// sending no `stepKey` at all.
+const TAG_HINTS: Record<string, string> = {
+  familyNight: 'It belongs to the gathering',
+  connection: 'It’s time with someone',
+  goals: 'Somebody’s working on it',
+  meals: 'It changes what we eat',
+  tasks: 'Someone owns it this week',
+  kids: 'It’s about one of the kids',
+}
+
+// The tag the bar opens on, for the same reason step 1's `DESTINATIONS.parked` marks it
+// so: most of what a month provokes is something somebody has to DO before the date
+// arrives. The bar opens there; "No tag" is one tap away.
+const PRIMARY_TAG = 'tasks'
+
+// The bar's own position in the session. Everything after it is a candidate; everything
+// at or before it is addressed to a step you are already past.
+const BAR_STEP = 'horizon'
 
 export interface HorizonTag {
   stepKey: string
@@ -95,9 +122,11 @@ interface NoteRow {
 export async function getHorizon(householdId: string, sessionId: string | null): Promise<HorizonView> {
   const steps = await resolveSteps(householdId, null)
   const live = new Map(steps.filter((s) => s.available).map((s) => [s.key, s.title]))
-  const tags: HorizonTag[] = HORIZON_TAGS.flatMap((t) => {
-    const label = live.get(t.stepKey)
-    return label ? [{ stepKey: t.stepKey, label, hint: t.hint, ...(t.primary ? { primary: true } : {}) }] : []
+  const after = STEPS.slice(STEPS.findIndex((s) => s.key === BAR_STEP) + 1)
+  const tags: HorizonTag[] = after.flatMap((s) => {
+    const hint = TAG_HINTS[s.key]
+    const label = live.get(s.key)
+    return hint && label ? [{ stepKey: s.key, label, hint, ...(s.key === PRIMARY_TAG ? { primary: true } : {}) }] : []
   })
 
   if (!sessionId || !UUID_RE.test(sessionId)) return { tags, parked: [] }

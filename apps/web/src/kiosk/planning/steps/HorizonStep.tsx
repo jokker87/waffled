@@ -240,40 +240,62 @@ function Body({ weekStart, sessionId, setDecisionData, refresh, busy }: StepBody
           aria-label="Park a note"
         />
         {note.trim() ? (
-          <>
-            {/* The tag only matters once there is something to tag, which is why the
-                bar reads as a plain capture line until you type. */}
-            <div className="wph-tags" role="group" aria-label="Which step should look at this?">
-              {tags.map((t) => (
-                <button
-                  key={t.stepKey}
-                  type="button"
-                  className={`wph-tag${chosen === t.stepKey ? ' on' : ''}`}
-                  title={t.hint}
-                  disabled={disabled}
-                  onClick={() => setTag(t.stepKey)}
-                >
-                  {t.label}
-                </button>
-              ))}
-              <button
-                type="button"
-                className={`wph-tag${chosen === null ? ' on' : ''}`}
-                title="Nobody has said yet"
-                disabled={disabled}
-                onClick={() => setTag(null)}
-              >
-                No tag
-              </button>
-            </div>
-            <button type="submit" className="btn btn-primary wph-park-go" disabled={disabled || !note.trim()}>
-              Park it
-            </button>
-          </>
+          <button type="submit" className="btn btn-primary wph-park-go" disabled={disabled || !note.trim()}>
+            Park it
+          </button>
         ) : (
           <span className="wph-park-hint">a note, not a calendar entry</span>
         )}
       </form>
+
+      {/* BELOW the pill, not inside it. The tag list is now every step still ahead of
+          this one rather than three hand-picked names, and five-to-seven chips plus a
+          button turned the capture line into a cramped scroll. Out here they get a row
+          of their own — and, more to the point, room for the sentence under them. */}
+      {note.trim() && (
+        <div className="wph-park-tagrow">
+          <div className="wph-tags" role="group" aria-label="Which step should look at this?">
+            {tags.map((t) => (
+              <button
+                key={t.stepKey}
+                type="button"
+                className={`wph-tag${chosen === t.stepKey ? ' on' : ''}`}
+                title={t.hint}
+                disabled={disabled}
+                onClick={() => setTag(t.stepKey)}
+              >
+                {t.label}
+              </button>
+            ))}
+            <button
+              type="button"
+              className={`wph-tag${chosen === null ? ' on' : ''}`}
+              disabled={disabled}
+              onClick={() => setTag(null)}
+            >
+              No tag
+            </button>
+          </div>
+          {/* "What does no tag do? where does it put it?" — a question a `title`
+              attribute was never going to answer. Both outcomes are stated, and both
+              are true: a tag is a DESTINATION, so the note is raised by that step's
+              handoff banner when the session gets there; with no tag no step raises it
+              at all, and it simply stays on the board. */}
+          <p className="wph-park-says" data-testid="wph-park-says">
+            {chosen ? (
+              <>
+                Comes back at <b>{tags.find((t) => t.stepKey === chosen)?.label}</b>, later in this
+                session.
+              </>
+            ) : (
+              <>
+                <b>No step will raise it.</b> It stays on the board — in tonight&rsquo;s recap, and
+                waiting at Loose ends next session.
+              </>
+            )}
+          </p>
+        </div>
+      )}
 
       {error && (
         <p className="wph-err" role="alert">
@@ -284,7 +306,8 @@ function Body({ weekStart, sessionId, setDecisionData, refresh, busy }: StepBody
       <p className="wph-note">
         <b>Know the day it lands?</b> Tap that day on the month above and add it — you get a real
         calendar event. <b>Only know it&rsquo;s coming?</b> Park it in the bar: it stays off the
-        calendar, and comes back at whichever step you tag it for.
+        calendar, and comes back at whichever step you tag it for &mdash; all of them still ahead
+        of you tonight.
       </p>
 
       {parked.length > 0 && (

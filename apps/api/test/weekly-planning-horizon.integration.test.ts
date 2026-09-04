@@ -139,11 +139,16 @@ describe('weekly planning · step 3 · horizon', () => {
 })
 
 describe('horizon · the tags a note can carry', () => {
-  it('offers the destination steps, in the order the bar shows them', async () => {
+  it('offers only the steps still AHEAD of the bar, in the order they will come up', async () => {
     const view = json(await horizon(sessionId))
-    // Tasks / Meals / Calendar — "No tag" is the ABSENCE of one and so is never a row
-    // here; it is the client rendering `stepKey: null`.
-    expect(keys(view.tags)).toEqual(['tasks', 'meals', 'calendar'])
+    // A tag names the step that will LOOK at this note, so a step the session has
+    // already walked past cannot be one: tagging Calendar from the Horizon scan
+    // addresses the note to step 2 while you are standing on step 3, and it would only
+    // ever resurface in a LATER session. Reported exactly that way — "I think its weird
+    // that I can add a parking lot note here and it would show on the previous step I
+    // already did? ... It could be a task, meal, goal, connection, or kid item but no
+    // previous/current step."
+    expect(keys(view.tags)).toEqual(['connection', 'goals', 'meals', 'tasks', 'kids'])
     expect(view.tags.every((t: Tag) => t.label && t.hint)).toBe(true)
     // The label is the catalog's own title for that step, so the bar and the agenda
     // sheet can never call the same step two different things.
@@ -154,19 +159,38 @@ describe('horizon · the tags a note can carry', () => {
     expect(view.tags.filter((t: Tag) => t.primary).map((t: Tag) => t.stepKey)).toEqual(['tasks'])
   })
 
+  it('never offers a step at or before the bar, whatever is switched on', async () => {
+    // The three that are structurally impossible as destinations: the two steps behind
+    // this one, and this one. `recap` is excluded too — it REPORTS what the session
+    // decided and settles nothing, so a note addressed there is a note nobody acts on.
+    const ks = keys(json(await horizon(sessionId)).tags)
+    for (const behind of ['looseEnds', 'calendar', 'horizon', 'recap']) {
+      expect(ks).not.toContain(behind)
+    }
+  })
+
+  it('picks the destinations up from the step order, so a switched-on module joins them', async () => {
+    // Family night is off by default; turning it on puts it in the list WHERE IT FALLS
+    // in the session, not at the end. The list is derived from the step catalog rather
+    // than hand-kept, so a step added to the catalog needs nothing done here.
+    await setModules({ familyNight: true })
+    expect(keys(json(await horizon(sessionId)).tags)).toEqual(['familyNight', 'connection', 'goals', 'meals', 'tasks', 'kids'])
+    await setModules({ familyNight: false })
+  })
+
   it('drops a tag whose step this household does not run', async () => {
     // A tag naming a step the session skips over addresses the note to nobody — the
     // same rule step 1 applies to its routing destinations.
     await setModules({ meals: false })
-    expect(keys(json(await horizon(sessionId)).tags)).toEqual(['tasks', 'calendar'])
+    expect(keys(json(await horizon(sessionId)).tags)).toEqual(['connection', 'goals', 'tasks', 'kids'])
     await setModules({ chores: false })
     const noTasks = json(await horizon(sessionId)).tags
-    expect(keys(noTasks)).toEqual(['calendar'])
+    expect(keys(noTasks)).toEqual(['connection', 'goals', 'kids'])
     // …and with Tasks gone there is no primary to fall back on, so the bar opens on no
     // tag rather than on whatever happens to be first.
     expect(noTasks.filter((t: Tag) => t.primary)).toEqual([])
     await setModules({ meals: true, chores: true })
-    expect(keys(json(await horizon(sessionId)).tags)).toEqual(['tasks', 'meals', 'calendar'])
+    expect(keys(json(await horizon(sessionId)).tags)).toEqual(['connection', 'goals', 'meals', 'tasks', 'kids'])
   })
 })
 
@@ -243,7 +267,7 @@ describe('horizon · parking a note', () => {
     const view = json(await horizon())
     expect(view.parked).toEqual([])
     // The tags still come back: the bar is renderable before a session exists.
-    expect(keys(view.tags)).toEqual(['tasks', 'meals', 'calendar'])
+    expect(keys(view.tags)).toEqual(['connection', 'goals', 'meals', 'tasks', 'kids'])
   })
 
   it('drops a note off the board once step 1 settles it', async () => {

@@ -373,6 +373,26 @@ describe('Horizon scan · the park bar', () => {
     expect(parkPosts[0].stepKey).toBeUndefined()
   })
 
+  it('says where the note is going to end up — including when it is going nowhere', async () => {
+    // "What does no tag do? where does it put it?" — asked of a chip whose only
+    // explanation was a `title` attribute nobody hovers. Both answers are now on screen,
+    // and both are true: a tagged note is raised by that step's handoff banner when the
+    // session reaches it, and an untagged one is raised by no step at all — it shows in
+    // the recap and is still sitting on the Loose ends board next session.
+    mockApi()
+    renderStep()
+
+    await type('We need to pack')
+    fireEvent.click(screen.getByRole('button', { name: 'Tasks' }))
+    expect(await screen.findByTestId('wph-park-says')).toHaveTextContent(/comes back.*Tasks/i)
+
+    fireEvent.click(screen.getByRole('button', { name: 'No tag' }))
+    const says = screen.getByTestId('wph-park-says')
+    expect(says).toHaveTextContent(/no step/i)
+    expect(says).toHaveTextContent(/recap/i)
+    expect(says).toHaveTextContent(/loose ends/i)
+  })
+
   it('offers only the tags the server sent — a step this household skips is not a home', async () => {
     // The server filters to the steps that actually run; the bar renders what it is
     // given rather than hardcoding three names of its own.

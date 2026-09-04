@@ -112,6 +112,18 @@
 .wph-park-go { flex: none; padding: 9px 18px; font-size: 13.5px; }
 .wph-park-go:disabled { opacity: 0.5; cursor: default; }
 
+/* The chips and their sentence, on their own row UNDER the pill. They used to sit
+   inside it, which worked while there were three of them; the list is now every step
+   still ahead of the bar, and five-to-seven chips plus a submit button left the capture
+   line with nowhere to put the one thing somebody actually asked for — what the choice
+   is going to DO with the note. */
+.wph-park-tagrow {
+  flex: none; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  margin: 8px 4px 0; padding: 0 10px;
+}
+.wph-park-says { margin: 0; font-size: 12.5px; font-weight: 650; color: var(--ink-2); }
+.wph-park-says b { color: var(--ink); font-weight: 800; }
+
 /* The tag names the step that will LOOK at the note, so these read as destinations
    rather than as categories. Rendered from the server's list, which is filtered to the
    steps this household runs. */
