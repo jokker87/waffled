@@ -185,7 +185,9 @@ struct KioskShell: View {
         case .family:   familyPath = []
         case .settings: settingsPath = []
         case .meals:    mealsPath = []
-        case .today, .calendar, .tasks, .lists, .pantry, .rhythms, .photos, .more: navReset &+= 1
+        // Planning joins the "bump navReset" group: its page has no path of its own, and
+        // re-tapping the rail should put the session back to its own root.
+        case .today, .calendar, .tasks, .lists, .pantry, .rhythms, .photos, .planning, .more: navReset &+= 1
         }
     }
 
@@ -352,6 +354,11 @@ struct KioskShell: View {
                 RhythmsView()
             }
             .id(navReset)
+        case .planning:
+            NavigationStack {
+                PlanningShellView()
+            }
+            .id(navReset)
         case .photos:
             NavigationStack {
                 PhotosView()
@@ -370,6 +377,10 @@ struct KioskShell: View {
 /// user-customizable per device — see `KioskRail`.
 enum KioskNav: String, CaseIterable, Identifiable {
     case today, calendar, tasks, rewards, goals, family, meals, lists, pantry, rhythms, photos, more, settings
+    // The full ten-step session on the display. Family Night deliberately has NO rail
+    // page — it is only a Today card — but planning is a sit-down the family does at the
+    // kiosk, which is the surface it was designed on.
+    case planning
     var id: String { rawValue }
 
     var label: String {
@@ -384,6 +395,7 @@ enum KioskNav: String, CaseIterable, Identifiable {
         case .lists: return "Lists"
         case .pantry: return "Pantry"
         case .rhythms: return "Rhythms"
+        case .planning: return "Planning"
         case .photos: return "Photos"
         case .more: return "More"
         case .settings: return "Settings"
@@ -402,6 +414,7 @@ enum KioskNav: String, CaseIterable, Identifiable {
         case .lists: return "list.bullet"
         case .pantry: return "shippingbox.fill"
         case .rhythms: return "arrow.triangle.2.circlepath"
+        case .planning: return "calendar.badge.clock"
         case .photos: return "photo"
         case .more: return "square.grid.2x2"
         case .settings: return "gearshape.fill"

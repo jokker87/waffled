@@ -433,6 +433,7 @@ struct TodayView: View {
         "agenda": "Agenda", "countdowns": "Countdowns", "tonight": "Tonight's dinner",
         "chores": "Chores", "grocery": "Grocery", "lists": "Lists", "goals": "Goals",
         "pantry": "Pantry", "familyNight": "Family Night", "rhythms": "Rhythms",
+        "weeklyPlanning": "Weekly planning",
     ]
     private static let smallCards: Set<String> = ["chores", "grocery"]
 
@@ -457,6 +458,7 @@ struct TodayView: View {
         case "pantry": return sync.module(.pantry)
         case "rhythms": return sync.module(.rhythms)
         case "familyNight": return sync.module(.familyNight)
+        case "weeklyPlanning": return sync.module(.weeklyPlanning)
         default: return true
         }
     }
@@ -487,6 +489,7 @@ struct TodayView: View {
         case "pantry": PantryTodayCard { path.append(.pantry) }
         case "rhythms": RhythmsTodayCard(model: rhythms) { path.append(.rhythms) }
         case "familyNight": FamilyNightCard()
+        case "weeklyPlanning": PlanningTodayCard { path.append(.weeklyPlanning) }
         case "goals": goalsCard
         default: EmptyView()
         }
@@ -514,6 +517,14 @@ struct TodayView: View {
         // costs a quiet card at worst.
         if !order.contains("rhythms"), !resp.resolved.hidden.contains("rhythms") {
             order.append("rhythms")
+        }
+        // Same for Weekly Planning. THIS FALLBACK IS NOT OPTIONAL: the card order comes
+        // from the server (`GET /api/today-layout/mobile`), so a server that has never
+        // heard of this key renders nothing at all however well the card is wired — which
+        // looks exactly like a broken card. It hides itself unless a session is due, open
+        // or freshly decided, so appending it costs nothing on a quiet week.
+        if !order.contains("weeklyPlanning"), !resp.resolved.hidden.contains("weeklyPlanning") {
+            order.append("weeklyPlanning")
         }
         cardOrder = order
         hiddenCards = Set(resp.resolved.hidden)

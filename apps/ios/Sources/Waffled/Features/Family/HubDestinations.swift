@@ -5,6 +5,10 @@ import SwiftUI
 /// placeholders until their screens land.
 enum HubRoute: Hashable {
     case chores, goals, rewards, lists, photos, settings, pantry, rhythms
+    // Weekly Planning's session. There is no room for a fifth tab (the bar is four plus
+    // the capture FAB), so the phone reaches the session by pushing this — from the Today
+    // card and from the Family hub.
+    case weeklyPlanning
     case list(WaffledAPI.ListSummary)   // a specific list pushed from the Lists index
     case goal(WaffledAPI.Goal)          // a specific goal pushed from the Goals screen
     case person(String)              // a person spotlight pushed from the people row
@@ -25,6 +29,7 @@ enum HubRoute: Hashable {
     case settingsMeals               // Settings → Meals (calendar)
     case settingsPantry              // Settings → Pantry (thresholds + Today card)
     case settingsFamilyNight         // Settings → Family Night (agenda, day/time, calendar)
+    case settingsWeeklyPlanning      // Settings → Weekly Planning (day/time, which steps run)
     case settingsDisplay             // Settings → Display & Kiosk (family-display screensaver)
     case settingsNotifications       // Settings → Notifications (local event reminders)
     case settingsAppearance          // Settings → Appearance (light / dark / match system, per-device)
@@ -73,6 +78,7 @@ struct HubDestination: View {
         case .chores:           ChoresView()
         case .pantry:           PantryView()
         case .rhythms:          RhythmsView()
+        case .weeklyPlanning:   PlanningShellView()
         case .goals:            GoalsView(path: $path)
         case let .goal(goal):   GoalDetailView(goal: goal, path: $path)
         case let .person(id):   PersonView(personId: id, path: $path)
@@ -90,6 +96,7 @@ struct HubDestination: View {
         case .settingsMeals: MealsSettingsView()
         case .settingsPantry: PantrySettingsView()
         case .settingsFamilyNight: FamilyNightSettingsView()
+        case .settingsWeeklyPlanning: PlanningSettingsView()
         case .settingsDisplay: DisplayKioskSettingsView()
         case .settingsNotifications: NotificationsSettingsView()
         case .settingsAppearance: AppearanceSettingsView()

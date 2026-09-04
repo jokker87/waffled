@@ -315,6 +315,12 @@ struct KioskDashboard: View {
                 tonightCard
                 weekDinnersCard
                 if sync.module(.familyNight) { FamilyNightCard(kiosk: true) }
+                // The card, not the session: tapping it goes to the rail's Planning page.
+                // NOTE the column this sits in is a fixed-height `GeometryReader` with an
+                // unbounded `VStack` — an oversized card is CLIPPED with no scroll to
+                // reach it, which is why this card keeps itself small and hides entirely
+                // unless a session is due, open or freshly decided.
+                if sync.module(.weeklyPlanning) { PlanningTodayCard(kiosk: true) }
             }
             .padding(.bottom, 8)
         }
