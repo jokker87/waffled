@@ -56,10 +56,19 @@ multi-device presence later without rewriting the schema; nothing realtime ships
 
 ### The iOS port: what it cost, and the three defects it found
 
-**Shipped.** The shell plus all ten steps, reachable from a Today card, the Family hub,
-Settings, and the iPad display's own **Planning** rail page. The phone's bottom bar is four
-tabs plus the capture FAB with no fifth slot, so there is no planning tab and there was
-never going to be one.
+**Shipped.** The shell plus all ten steps, reachable from the **Weekly Planning** tile in
+the Family tab, a Today card, and the iPad display's own **Planning** rail page. The phone's
+bottom bar is four tabs plus the capture FAB with no fifth slot, so there is no planning tab
+and there was never going to be one.
+
+Two corrections to what this section first claimed, both found by a tester rather than by
+the build. **The Family tile did not exist** — `HubRoute.weeklyPlanning` and its
+`HubDestination` arm did, so the module was reachable in principle and everything compiled,
+but nothing in `FamilyView` ever navigated there. A destination with nothing leading to it
+is invisible and green. And **Settings is not an entry point to a session**: that row opens
+the module's config panel, so on the phone the Today card really was the only way in. The
+lesson generalises past this module — "is it wired up?" is not a question a compiler can
+answer, and the audit for it is a screenshot, not a test.
 
 **It was built the way the web steps were, and for the same reason.** A registry naming all
 ten keys, with all ten step files existing as walk-past-able stubs, on day one — so writing

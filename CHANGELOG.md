@@ -17,16 +17,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Weekly Planning is on iPhone and iPad.** The whole guided session — the lobby, all ten
   steps, the agenda sheet, the parked-note handoff, the recap and the saved record — now
-  runs in the app, not just in the browser. On the phone it opens from a Today card, from
-  Family → Weekly Planning, or from Settings; on the family display it has its own
-  **Planning** page in the rail. Leaving a session part-way keeps it exactly where it was
-  on that device, and another device can still pick it up.
+  runs in the app, not just in the browser. On the phone it opens from a **Weekly
+  Planning** tile in the Family tab or from a Today card; on the family display it has its
+  own **Planning** page in the rail. (Settings → Weekly Planning configures the session —
+  its day, time and which steps run — rather than starting one.) Leaving a session part-way
+  keeps it exactly where it was on that device, and another device can still pick it up.
 
 - **Habit goals on iPhone now show this period's count, not their lifetime total.** A habit
   resets each period, so a goal with 340 reps against a target of 5 had been reading as
   long-since-done everywhere on iOS — the goals list, the hero card, the Today card and a
   goal's own screen — when the week's honest answer was "2 of 5". Checklist goals likewise
   now read as steps done out of steps total.
+
+- **The planning session no longer spends half the phone on its own chrome.** The header
+  and the bottom action bar together had taken over 45% of even a 17 Pro's screen, so the
+  week you were planning got less room than the furniture around it. The navigation bar is
+  gone (it was rendering a second, redundant title above the step's own name), the header
+  reads as one block — step name and week, then the counter, the way out and the progress
+  bar — and the footer sits flush above the tab bar instead of floating ~46pt above it. The
+  affirmative button no longer wraps onto two lines on a phone.
+
+- **The bottom tab bar now gets out of the way while you're typing.** The bar and the
+  capture button sat between the content and the keyboard, unreachable, on every screen
+  with a text field; they now hide with the keyboard and come back with it. The iPad's
+  floating keyboard is left alone, since it hovers rather than docking.
 
 - **Weekly Planning has a visible way out, and it takes you somewhere useful.** Every step
   shows **Leave for now** in the header, so you can stop part-way without hunting through
