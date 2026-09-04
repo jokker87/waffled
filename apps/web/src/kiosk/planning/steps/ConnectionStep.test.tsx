@@ -126,6 +126,10 @@ const BOARD = {
 function mockApi(board: unknown = BOARD) {
   const posts: Record<string, unknown>[] = []
   const slotCalls: string[] = []
+  const boardReads: number[] = []
+  // A supplier, so a test can serve a board that CHANGES between reads — which is what
+  // the server does while a local-first write is still uploading.
+  const boardNow = () => (typeof board === 'function' ? (board as () => unknown)() : board)
   globalThis.fetch = vi.fn(async (url: string, init?: RequestInit) => {
     const u = String(url)
     const method = init?.method ?? 'GET'
@@ -144,7 +148,10 @@ function mockApi(board: unknown = BOARD) {
         }),
       }
     }
-    if (u.startsWith('/api/weekly-planning/connection')) return { ok: true, json: async () => board }
+    if (u.startsWith('/api/weekly-planning/connection')) {
+      boardReads.push(Date.now())
+      return { ok: true, json: async () => boardNow() }
+    }
     if (u.startsWith('/api/events') && method === 'POST') {
       const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>
       posts.push(body)
@@ -156,7 +163,7 @@ function mockApi(board: unknown = BOARD) {
     if (u.startsWith('/api/calendar/google/status')) return { ok: true, json: async () => ({ calendars: [] }) }
     return { ok: true, json: async () => ({}) }
   }) as unknown as typeof fetch
-  return { posts, slotCalls }
+  return { posts, slotCalls, boardReads }
 }
 
 function renderStep(over: Partial<StepBodyProps> = {}) {
@@ -249,6 +256,38 @@ describe('Weekly planning · step 5 · Connection', () => {
     // The rows and the shell's counter should both agree with what just happened.
     await waitFor(() => expect(refresh).toHaveBeenCalled())
   })
+
+  it('keeps asking until the board has caught up with the event just saved', async () => {
+    // THE WRITE IS LOCAL-FIRST and this board is a SERVER read. `EventModal` saves
+    // through PowerSync (`createEventLocal`) and uploads afterwards, so at the instant
+    // `onSaved` fires the server has not been told yet. Asking once, immediately, asked
+    // too early — and the failure was invisible in the worst way: the event WAS on the
+    // calendar (which renders the local mirror) while the pairing underneath it still
+    // read "Nothing on the calendar with just the two of you".
+    //
+    // Reported twice. The first round blamed the ranking, which was a real but
+    // different bug; this is the one that was actually costing the row.
+    let reads = 0
+    const caughtUp = {
+      ...BOARD,
+      pairings: BOARD.pairings.map((p) =>
+        p.personIds.join(',') === 'p1,p2'
+          ? { ...p, alreadyThisWeek: [evt({ id: 'fresh', title: 'Date night', day: 'Tuesday', when: 'Tuesday 8:30 PM' })] }
+          : p
+      ),
+    }
+    // The first read after the save still predates the upload; the next one has it.
+    const { posts } = mockApi(() => (++reads > 2 ? caughtUp : BOARD))
+
+    renderStep()
+    const kk = await row('p1-p2')
+    fireEvent.click(within(kk).getByRole('button', { name: /Tue after 8:30 PM/ }))
+    await nameItAndSave(await eventModal(), 'Date night')
+    await waitFor(() => expect(posts).toHaveLength(1))
+
+    // The row tells the truth without anybody leaving the step and coming back.
+    expect(await within(await row('p1-p2')).findByText(/Date night/, {}, { timeout: 5000 })).toBeInTheDocument()
+  }, 15000)
 
   it('leaves the time to the modal’s own picker when the whole day is open', async () => {
     mockApi()

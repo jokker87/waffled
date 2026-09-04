@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   usePersons,
   planningConnectionApi,
@@ -160,6 +160,33 @@ function Face({ person }: { person: Person }) {
   )
 }
 
+// How long to keep asking the server after a save, and why there is a ladder at all.
+//
+// THE WRITE IS LOCAL-FIRST; THIS BOARD IS A SERVER READ. `EventModal` saves through
+// PowerSync (`createEventLocal`) and uploads afterwards, so at the instant `onSaved`
+// fires the server has not been told yet. Re-reading once, immediately, reliably asked
+// too early — and the failure looked exactly like a lost save: the event WAS on the
+// calendar (which renders the local mirror, so it is instant there) while the pairing
+// underneath it still read "Nothing on the calendar with just the two of you".
+//
+// Reported twice. The first round blamed the ranking — a real bug, and fixed, but not
+// the one costing the row.
+//
+// So: ask, and if the board hasn't moved, ask again on a widening ladder, stopping the
+// moment the credit count goes UP. That is the board having caught up, and it is
+// usually the first or second try. Roughly seven seconds all told; past that the upload
+// isn't landing on this visit and the next ordinary read is authoritative anyway.
+//
+// Deliberately NOT a second source of truth. Crediting the pairing from the local
+// mirror would put the row's sentence — "Saturday's Yard work", the duration, the
+// household's clock — on the device, and this step's whole contract is that the server
+// composes those (see the module header). This keeps one reader and only fixes WHEN it
+// reads.
+const CATCHUP_MS = [250, 500, 1000, 2000, 3000]
+
+const credited = (b: PlanningConnectionBoard | null) =>
+  (b?.pairings ?? []).reduce((n, p) => n + p.alreadyThisWeek.length, 0)
+
 function Body({ weekStart, setDecisionData, refresh, busy }: StepBodyProps) {
   const { persons } = usePersons()
   const [board, setBoard] = useState<PlanningConnectionBoard | null>(null)
@@ -185,6 +212,29 @@ function Body({ weekStart, setDecisionData, refresh, busy }: StepBodyProps) {
   }, [weekStart])
   useEffect(load, [load])
 
+  // A ladder left running into an unmounted step would setState on nothing.
+  const alive = useRef(true)
+  useEffect(() => () => { alive.current = false }, [])
+
+  const settle = useCallback(async (was: number) => {
+    for (let i = 0; i <= CATCHUP_MS.length; i++) {
+      try {
+        const b = await planningConnectionApi.board(weekStart)
+        if (!alive.current) return
+        setBoard(b)
+        setError(false)
+        if (credited(b) > was) return
+      } catch {
+        if (alive.current) setError(true)
+        return
+      }
+      const wait = CATCHUP_MS[i]
+      if (wait === undefined) return
+      await new Promise((r) => setTimeout(r, wait))
+      if (!alive.current) return
+    }
+  }, [weekStart])
+
   useEffect(() => {
     if (!board) return
     setDecisionData({ added, alreadyCounted: counted.size })
@@ -195,8 +245,9 @@ function Body({ weekStart, setDecisionData, refresh, busy }: StepBodyProps) {
   function onSaved() {
     setAdded((n) => n + 1)
     // Re-read rather than bookkeeping: a pairing's status IS the calendar, so the only
-    // honest way to redraw the rows is to ask again.
-    load()
+    // honest way to redraw the rows is to ask again — and to keep asking until the
+    // answer includes the event that was just written. See `CATCHUP_MS`.
+    void settle(credited(board))
     refresh()
   }
 
