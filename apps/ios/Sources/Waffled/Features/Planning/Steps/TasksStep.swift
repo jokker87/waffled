@@ -36,14 +36,20 @@ import SwiftUI
 ///    demoting those to `.onTapGesture` and fighting the drag for every tap.
 ///  * **The payload is a custom `PlanningTaskDrag`, never a `String`.** A string id is
 ///    offered to every text field in the app and gets pasted in as text.
-///  * **`ScrollView`, not `List`.** `List` silently refuses `.dropDestination`, so the
-///    drop targets would have been dead with no error anywhere.
+///  * **Not a `List`.** `List` silently refuses `.dropDestination`, so the drop targets
+///    would have been dead with no error anywhere. The shell's `ScrollView` around this
+///    body is what the drop targets live in; this step must never become a `List`.
 ///
 /// ONE KNOWN DIVERGENCE FROM THE WEB, deliberate: **the chore editor here cannot delete**
 /// (`canDelete: false`, matching the web). This step asks who does what, not which chores
 /// should exist: removing one reaches far outside the week being planned, and the Meals
 /// step's shopping trip is a real chore on this very board whose identity other steps
 /// resolve by id.
+///
+/// The body is content-sized: the SHELL owns the scroll view, so there is no `ScrollView`
+/// and no `WF.tabBarClearance` here — and no horizontal padding of its own either. The
+/// shell already insets every step by 16, and a second 16 here drew this step's columns
+/// 32pt narrower than the Calendar and Meals steps beside it.
 struct TasksStepView: View {
     let props: PlanningStepProps
 
@@ -70,30 +76,24 @@ struct TasksStepView: View {
     private var canDrop: Bool { canAssign && !frozen }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                if let message = model.errorMessage {
-                    DismissibleErrorBanner(message: message) { model.errorMessage = nil }
-                }
-
-                if let board = model.board {
-                    strip(board)
-                    ForEach(board.people) { person in
-                        personBlock(person, board: board)
-                    }
-                } else if model.loaded {
-                    WaffledEmptyState(
-                        emoji: "🧹",
-                        title: "Couldn't load the chores board",
-                        message: "Try again in a moment — nothing has been changed.")
-                } else {
-                    WaffledLoading()
-                }
+        VStack(alignment: .leading, spacing: 14) {
+            if let message = model.errorMessage {
+                DismissibleErrorBanner(message: message) { model.errorMessage = nil }
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 4)
-            // Modest, not `WF.tabBarClearance`: the shell owns the footer under this step.
-            .padding(.bottom, 24)
+
+            if let board = model.board {
+                strip(board)
+                ForEach(board.people) { person in
+                    personBlock(person, board: board)
+                }
+            } else if model.loaded {
+                WaffledEmptyState(
+                    emoji: "🧹",
+                    title: "Couldn't load the chores board",
+                    message: "Try again in a moment — nothing has been changed.")
+            } else {
+                WaffledLoading()
+            }
         }
         .task(id: props.weekStart) { await model.load(weekStart: props.weekStart) }
         .task { await sync.loadCurrencies() }
@@ -483,8 +483,9 @@ private extension View {
     /// Attached AFTER the surface's own background/clipShape/shadow — modifier order is
     /// load-bearing for drag and drop (see `MealPlanReviewCard`).
     ///
-    /// This works ONLY because the step is a `ScrollView`. `List` silently drops
-    /// `.dropDestination` with no error anywhere — do not restructure the step into one.
+    /// This works ONLY because the step body is NOT a `List` — it is plain content inside
+    /// the shell's own `ScrollView`. `List` silently drops `.dropDestination` with no
+    /// error anywhere, so do not restructure the step into one.
     @ViewBuilder
     func planningTaskDropTarget(_ column: PlanningTaskColumn, enabled: Bool,
                                 hovered: Binding<PlanningTaskColumn?>,

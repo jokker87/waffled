@@ -27,6 +27,13 @@ import SwiftUI
 /// half of the trade anyway — the skip bar's Undo is already in the body, so the action
 /// and the consequence sit together rather than at opposite ends of the screen (which is
 /// exactly what the web's own comment grumbles about).
+///
+/// The body is content-sized: the SHELL owns the scroll view, so there is no `ScrollView`
+/// and no `WF.tabBarClearance` here — and, just as importantly, no horizontal padding of
+/// its own. The shell already insets every step by 16; a second 16 here made this card
+/// 32pt narrower than every other step's ("the family night card is more narrow for some
+/// reason"). The nested scroll view was redundant — the shell's is the one that scrolls —
+/// and was only ever the thing that carried the extra padding.
 struct FamilyNightStepView: View {
     let props: PlanningStepProps
 
@@ -43,30 +50,22 @@ struct FamilyNightStepView: View {
     private var disabled: Bool { props.busy || model.busy }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                if let message = model.errorMessage {
-                    DismissibleErrorBanner(message: message) { model.errorMessage = nil }
-                }
-
-                if let board = model.board {
-                    gathering(board)
-                    if board.isSkipped { skipBar(board) } else { rotationNote; skipThisWeek }
-                } else if model.loaded {
-                    WaffledEmptyState(
-                        emoji: "🏡",
-                        title: "Couldn't read this week's family night",
-                        message: "Reload and try again — nothing has been changed.")
-                } else {
-                    WaffledLoading()
-                }
+        VStack(alignment: .leading, spacing: 14) {
+            if let message = model.errorMessage {
+                DismissibleErrorBanner(message: message) { model.errorMessage = nil }
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 4)
-            // Modest, not `WF.tabBarClearance`: the shell owns the footer under this
-            // step (Skip + the affirmative), so the step contributes only its own
-            // breathing room and lets the shell inset the rest.
-            .padding(.bottom, 24)
+
+            if let board = model.board {
+                gathering(board)
+                if board.isSkipped { skipBar(board) } else { rotationNote; skipThisWeek }
+            } else if model.loaded {
+                WaffledEmptyState(
+                    emoji: "🏡",
+                    title: "Couldn't read this week's family night",
+                    message: "Reload and try again — nothing has been changed.")
+            } else {
+                WaffledLoading()
+            }
         }
         .task(id: props.weekStart) {
             // Drop focus first. The rows keep their identity across a week change (part
