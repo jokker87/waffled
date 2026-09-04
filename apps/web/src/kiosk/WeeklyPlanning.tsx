@@ -478,6 +478,22 @@ export function WeeklyPlanning() {
         <div className="wp-title wf-serif">{current?.title}</div>
         <div className="wp-ask">{current?.ask}</div>
         <div className="wp-week">{weekLabel(view.weekStart)}</div>
+        {/* THE DOOR, in the chrome rather than only inside the agenda sheet.
+            "We do need some sort of exit button without going through the whole thing."
+            There was already a way out — but it lived behind the step counter, in a sheet
+            you have to know opens, which is no use to somebody who has decided to stop
+            halfway. A ten-step surface with no visible exit reads as one you are
+            committed to finishing.
+            The words are the sheet's, deliberately: "for now" is the part that matters,
+            because leaving keeps the session and everything it has already decided. */}
+        <button
+          type="button"
+          className="wp-exit"
+          data-testid="wp-exit"
+          onClick={() => navigate('/')}
+        >
+          Leave for now
+        </button>
         {/* The 2px hair — the only progress indicator v4 keeps. */}
         <div className="wp-prog"><div style={{ width: `${pct}%` }} /></div>
       </div>
@@ -516,7 +532,7 @@ export function WeeklyPlanning() {
 
       {sheet && (
         <div className="modal-overlay" onClick={closeSheet}>
-          <div className="modal-card wp-sheet" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-card wp-sheet" data-testid="wp-sheet" onClick={(e) => e.stopPropagation()}>
             <button type="button" className="modal-close" onClick={closeSheet} aria-label="Close">×</button>
             <div className="wp-sheet-t wf-serif">{planningDayName(view.config.dayOfWeek)}'s session</div>
             <div className="wp-sheet-s">{runnable.length} steps. Jump anywhere, leave whenever the week is decided.</div>

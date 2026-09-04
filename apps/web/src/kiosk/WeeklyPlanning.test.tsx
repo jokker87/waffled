@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Routes, Route, useLocation } from 'react-router'
 import { WeeklyPlanning } from './WeeklyPlanning'
 
@@ -219,10 +219,32 @@ describe('weekly planning · leaving and starting over', () => {
     mockApi(baseView({ session: session() }))
     draw()
     fireEvent.click(await screen.findByRole('button', { name: /2 of 4/ }))
-    fireEvent.click(screen.getByRole('button', { name: /Leave for now/ }))
+    fireEvent.click(within(screen.getByTestId('wp-sheet')).getByRole('button', { name: /Leave for now/ }))
     await waitFor(() => expect(where()).toBe('/'))
     // Leaving is not deleting.
     expect(sent('DELETE', '/session/s1').length).toBe(0)
+  })
+
+  it('puts the door in the session chrome, not only inside the agenda sheet', async () => {
+    // "We do need some sort of exit button without going through the whole thing."
+    //
+    // There WAS a way out, and that is the problem: it lived behind the step counter, in
+    // a sheet you have to know opens. Someone halfway through a session who wants to stop
+    // is not going to go looking for it in a menu — and a decision surface with no visible
+    // way out reads as a surface you are committed to finishing.
+    mockApi(baseView({ session: session() }))
+    draw()
+
+    // On screen without opening anything.
+    const exit = await screen.findByTestId('wp-exit')
+    expect(screen.queryByTestId('wp-sheet')).toBeNull()
+
+    fireEvent.click(exit)
+    await waitFor(() => expect(where()).toBe('/'))
+    // Leaving is not deleting, and it is not answering the step you were standing on.
+    expect(sent('DELETE', '/session/s1').length).toBe(0)
+    expect(sent('POST', '/session/s1/step').length).toBe(0)
+    expect(sent('POST', '/session/s1/complete').length).toBe(0)
   })
 
   it('confirms before throwing a session away', async () => {
