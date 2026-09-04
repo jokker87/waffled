@@ -23,9 +23,18 @@ import SwiftUI
 /// PROGRESS GOES THROUGH `GoalDisplay`, never `totalProgress`: a habit's question is "how
 /// many this period?" and it resets, so a lifetime count of 340 would read as long-since
 /// done where this week's honest answer is "2 of 5".
+///
+/// "＋ NEW GOAL FOR THIS WEEK" OPENS THE GOALS MODULE'S OWN EDITOR AS A SHEET, not a route
+/// away: leaving for the Goals screen abandons the session, and nothing brings the family
+/// back, so a fifteen-second answer ejects them from the whole thing. Presented from here
+/// the group is FIXED to the tab they were standing on (`lockedListId`, so it cannot be
+/// answered for the wrong group by accident) and the goal is pinned on the way in
+/// (`startFeatured`), which is what makes it come back as this week's focus without a
+/// second trip.
 struct GoalsStepView: View {
     let props: PlanningStepProps
 
+    @Environment(SyncManager.self) private var sync
     @State private var model = PlanningGoalsStepModel()
 
     var body: some View {
@@ -68,12 +77,61 @@ struct GoalsStepView: View {
         .onChange(of: model.rev) {
             if let crumb = model.crumb { props.setDecisionData(crumb) }
         }
-        // THIS STEP LENDS THE BANNER NOTHING. It has no composer — the only way to make a
-        // goal from here would be the goals module's own editor, which this step does not
-        // open — and a button reading "Make a goal" that merely ticks the note off promises
-        // an action it does not perform. Withdrawn explicitly, because the verb is the
-        // SHELL's state and would otherwise still be the previous step's.
+        // THIS STEP LENDS THE BANNER NOTHING, even though it now HAS a composer. The
+        // banner's verb hands a parked note's words to a composer that then makes one
+        // thing; this composer is scoped to the group on screen and would have to seed a
+        // title as well, so "Make a goal" from the banner is a real feature and not a
+        // rename of this one — tracked as a follow-up rather than half-done here.
+        // Withdrawn explicitly, because the verb is the SHELL's state and would otherwise
+        // still be the previous step's.
         .onAppear { props.lendVerb(nil) }
+        // The goals module's REAL editor, over the week rather than instead of it —
+        // presented through the goals module's OWN `.goalEditor` modifier, so it behaves
+        // the way that editor behaves everywhere else (a sheet on the phone, a full-screen
+        // cover on the family display) instead of growing a planning-only presentation.
+        .goalEditor(isPresented: newGoalSheet) {
+            if let g = model.newGoalGroup {
+                GoalCreateSheet(
+                    // One list, and it is the tab they were on: the sheet states the
+                    // group instead of offering it, and derives `participantIds` from
+                    // these members.
+                    lists: [g.asGoalList],
+                    defaultListId: g.listId,
+                    // DELIBERATELY EMPTY. `members` only feeds the editor's "New group"
+                    // sheet, which `lockedListId` removes — and handing it `sync.members`
+                    // would make this presentation observe SyncManager and re-lay-out the
+                    // whole editor on every unrelated sync mutation (the thing that hung
+                    // the Chores board's editor; see `TasksStep.editor`).
+                    members: [],
+                    lockedListId: g.listId,
+                    startFeatured: true
+                ) { goalBody, _ in
+                    // The GROUP IS CAPTURED HERE, synchronously, not read back off the
+                    // model inside the task: the editor dismisses itself on submit, which
+                    // clears the sheet flag before the task runs.
+                    let target = g.listId
+                    Task {
+                        let made = await model.submitNewGoal(
+                            sessionId: props.sessionId, listId: target, body: goalBody)
+                        // The goal lives in the goals module, so tell the shell to
+                        // re-read: the agenda sheet and the counter should agree. ONLY ON
+                        // A REAL SAVE — a refresh flips the shell busy and greys the whole
+                        // step out, which over a goal that never saved is a second, false
+                        // failure on top of the banner.
+                        if made { props.refresh() }
+                    }
+                }
+            }
+        }
+    }
+
+    /// The presentation flag, over the model's own state — the model, not the view,
+    /// decides which group is being added to, so a refetch that lands mid-compose cannot
+    /// move it.
+    private var newGoalSheet: Binding<Bool> {
+        Binding(
+            get: { model.newForListId != nil },
+            set: { if !$0 { model.closeNewGoal() } })
     }
 
     // MARK: - Tabs
@@ -137,8 +195,43 @@ struct GoalsStepView: View {
                     .font(.system(size: 12.5, weight: .semibold))
                     .foregroundStyle(g.settled && g.focusGoalId != nil ? WF.ink : WF.ink3)
                     .fixedSize(horizontal: false, vertical: true)
+
+                newGoalButton(g, frozen: frozen)
             }
         }
+    }
+
+    /// The escape hatch, right under the verdict: nothing in this group is worth the
+    /// week, so make the thing that is.
+    ///
+    /// GATED ON THE GOALS MODULE'S OWN RULE, not on nothing: `goal.manage` holders may add
+    /// to any group, everybody else only to a group that is just them. Offering the editor
+    /// for a group the server would refuse is show-then-403, so the button says why.
+    private func newGoalButton(
+        _ g: WaffledAPI.PlanningGoalGroup, frozen: Bool
+    ) -> some View {
+        let allowed = PlanningGoalsStepModel.canTarget(
+            g, canManageGoals: sync.can("goal.manage"), personId: sync.currentPersonId)
+        let off = frozen || !allowed
+
+        return VStack(alignment: .leading, spacing: 4) {
+            Button { model.openNewGoal() } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "plus").font(.system(size: 11, weight: .heavy))
+                    Text("New goal for this week").font(.system(size: 13, weight: .bold))
+                }
+                .foregroundStyle(off ? WF.ink3 : WF.primary)
+            }
+            .buttonStyle(.plain)
+            .disabled(off)
+
+            if !allowed {
+                Text("Adding a goal to \(g.name) needs permission to manage goals")
+                    .font(.system(size: 11.5)).foregroundStyle(WF.ink3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func header(_ g: WaffledAPI.PlanningGoalGroup) -> some View {

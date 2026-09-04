@@ -58,7 +58,14 @@ private enum GoalsFixture {
     /// The whole view: the family list (settled on a goal), Lottie's individual list
     /// (settled on NOTHING — a real answer), and the couple's private list (not settled,
     /// but carrying a lone pre-existing pin the server adopts for display only).
-    static let viewJSON = """
+    static let viewJSON = json(familyExtra: nil)
+
+    /// The same view, optionally with one EXTRA goal at the head of the family group's
+    /// list — which is how the server answers the refetch that follows making a goal in
+    /// that group. (`listGoals` is not filtered by pin state, so a brand-new goal is
+    /// simply there on the next read.)
+    static func json(familyExtra: String?) -> String {
+        """
     {"groups":[
       {"listId":"list-family","name":"Family","emoji":"🏡","colorHex":"#EC6049",
        "isPrivate":false,"sortOrder":0,"isEveryone":true,"settled":true,
@@ -68,6 +75,7 @@ private enum GoalsFixture {
          {"personId":"p-wally","name":"Wally Sites","avatarEmoji":"🧒","colorHex":"#25A368","age":null}
        ],
        "goals":[
+         \(familyExtra.map { "\($0)," } ?? "")
          \(goalJSON(id: "goal-read", title: "Read together", type: "habit", total: 340,
                     habitTarget: "5", habitPeriod: "\"week\"", periodDone: "2",
                     isFeatured: true,
@@ -95,10 +103,21 @@ private enum GoalsFixture {
                            target: "12", isFeatured: true))]}
     ]}
     """
+    }
 
     static func decoded() throws -> WaffledAPI.PlanningGoalsView {
         try WaffledAPI.decoder.decode(
             WaffledAPI.PlanningGoalsView.self, from: Data(viewJSON.utf8))
+    }
+
+    /// The view the server would answer with once a goal called "Sunset walks" exists in
+    /// the family group.
+    static func decodedWithNewFamilyGoal() throws -> WaffledAPI.PlanningGoalsView {
+        let extra = goalJSON(id: "goal-sunset", title: "Sunset walks", type: "count",
+                             total: 0, target: "30", isFeatured: true)
+        return try WaffledAPI.decoder.decode(
+            WaffledAPI.PlanningGoalsView.self,
+            from: Data(json(familyExtra: extra).utf8))
     }
 }
 
@@ -109,8 +128,14 @@ private final class GoalsFeed {
     var snapshot: WaffledAPI.PlanningGoalsView
     var fetchFails = false
     var writeFails = false
+    var createFails = false
     var fetchCount = 0
     var writes: [(listId: String, goalId: String?)] = []
+    /// Every body `POST /api/goals` was called with.
+    var creates: [[String: JSONValue]] = []
+    /// What the NEXT read answers with once a goal has been created — the stand-in for
+    /// the server having actually stored it.
+    var afterCreate: WaffledAPI.PlanningGoalsView?
 
     init(_ snapshot: WaffledAPI.PlanningGoalsView) { self.snapshot = snapshot }
 }
@@ -127,6 +152,11 @@ private func model(_ feed: GoalsFeed) -> PlanningGoalsStepModel {
             feed.writes.append((listId, goalId))
             if feed.writeFails { throw GoalsStepFailure.rejected }
             return feed.snapshot
+        },
+        createGoal: { body in
+            feed.creates.append(body)
+            if feed.createFails { throw GoalsStepFailure.rejected }
+            if let after = feed.afterCreate { feed.snapshot = after }
         })
 }
 
@@ -355,5 +385,253 @@ private func model(_ feed: GoalsFeed) -> PlanningGoalsStepModel {
         // A pin that predates the session shows as the focus but is NOT a decision yet.
         #expect(PlanningGoalsText.verdict(view.groups[2])
                 == "Pinned already · Date night — keep it, or pick another")
+    }
+}
+
+// MARK: - "＋ New goal for this week"
+
+/// The tester's report was "I can't create a new one in the weekly plan", and the reason
+/// the button was left off in the first place is exactly what these tests pin down: a
+/// naive "+ New goal" makes a goal in whichever group list the family was NOT looking at,
+/// and the new goal appears to vanish. Every invariant below is one a "simplification"
+/// would quietly undo — which group it lands in, that it is then ON SCREEN, that making it
+/// is not the same as confirming it, and that a saved goal survives a failed refetch.
+@MainActor
+@Suite struct PlanningGoalsNewGoalTests {
+
+    /// What the goals module's own editor hands back when the step opens it: the Pinned
+    /// tier (it is opened with `startFeatured`, which is what closes the round trip), and
+    /// a `goalListId` the step must not trust.
+    private static let editorBody: [String: JSONValue] = [
+        "title": .string("Sunset walks"),
+        "goalListId": .null,
+        "goalType": .string("count"),
+        "isFeatured": .bool(true),
+        "targetValue": .double(30),
+    ]
+
+    /// Open the composer on whatever tab is showing, then hand back the editor's body —
+    /// the two halves of one gesture. The group is captured from the composer the way the
+    /// view does it (the editor dismisses itself on submit, so the flag is already gone
+    /// by the time the write runs).
+    private func makeGoal(
+        _ model: PlanningGoalsStepModel,
+        body: [String: JSONValue] = PlanningGoalsNewGoalTests.editorBody
+    ) async {
+        model.openNewGoal()
+        guard let target = model.newForListId else {
+            Issue.record("the composer refused to open")
+            return
+        }
+        await model.submitNewGoal(sessionId: "session-1", listId: target, body: body)
+    }
+
+    @Test func theGoalIsMadeInTheGroupWhoseTabIsSelected() async throws {
+        let feed = GoalsFeed(try GoalsFixture.decoded())
+        let model = model(feed)
+        await model.load(sessionId: "session-1")
+        // DELIBERATELY NOT the tab the step lands on (that is `list-couple`, the only
+        // unsettled group) — pick up the default and this test passes for the wrong reason.
+        model.selectTab("list-family")
+
+        // The composer takes the group from the TAB, never an argument — that is the whole
+        // reason the goal cannot land in a list nobody was looking at.
+        model.openNewGoal()
+        #expect(model.newForListId == "list-family")
+        let made = await model.submitNewGoal(
+            sessionId: "session-1", listId: "list-family", body: Self.editorBody)
+
+        #expect(made)
+        #expect(feed.creates.count == 1)
+        // The group is the HOST's answer, never the form's — a body that arrives with a
+        // null (or with another group) must still land where the family was looking.
+        #expect(feed.creates[0]["goalListId"] == .string("list-family"))
+        // Pinned on the way in: that is what lets the server adopt it as the group's
+        // focus on the way back (see `getGoalsStepView`) without a second trip.
+        #expect(feed.creates[0]["isFeatured"] == .bool(true))
+        // Everything else the editor said is passed through untouched.
+        #expect(feed.creates[0]["title"] == .string("Sunset walks"))
+        #expect(feed.creates[0]["targetValue"] == .double(30))
+    }
+
+    @Test func theGroupIsTheOnlyThingTheStepOverrules() {
+        // The tier is the family's answer in the editor, not the step's — overriding it
+        // would quietly undo an explicit choice. Only `goalListId` is the step's to
+        // decide, because only the step asked whose focus this week is.
+        let out = PlanningGoalsStepModel.newGoalBody(
+            [
+                "title": .string("Sunset walks"),
+                // A body that names ANOTHER group is the failure mode this exists for.
+                "goalListId": .string("list-lottie"),
+                "isFeatured": .bool(false),
+                "isSpotlight": .bool(true),
+                "participantIds": .array([.string("p-kevin")]),
+            ],
+            listId: "list-family")
+
+        #expect(out["goalListId"] == .string("list-family"))
+        #expect(out["isFeatured"] == .bool(false))
+        #expect(out["isSpotlight"] == .bool(true))
+        #expect(out["title"] == .string("Sunset walks"))
+        #expect(out["participantIds"] == .array([.string("p-kevin")]))
+        #expect(out.count == 5)
+    }
+
+    @Test func theNewGoalShowsUpInThatGroupsListRatherThanVanishing() async throws {
+        let feed = GoalsFeed(try GoalsFixture.decoded())
+        feed.afterCreate = try GoalsFixture.decodedWithNewFamilyGoal()
+        let model = model(feed)
+        await model.load(sessionId: "session-1")
+        model.selectTab("list-family")
+
+        await makeGoal(model)
+
+        // A refetch happened…
+        #expect(feed.fetchCount == 2)
+        // …the family tab is still the one on screen…
+        #expect(model.active?.listId == "list-family")
+        // …and the goal they just made is in it, pickable as the week's focus.
+        let onScreen = model.active?.goals.map(\.goal.id) ?? []
+        #expect(onScreen.contains("goal-sunset"))
+        // The sheet flag is cleared, so the composer doesn't reopen itself.
+        #expect(model.newForListId == nil)
+        #expect(model.creating == false)
+    }
+
+    @Test func makingAGoalIsNotTheSameAsConfirmingItForTheWeek() async throws {
+        // Creating a goal is not the family deciding it — the tab stays unstarred until
+        // they say so, so this must NOT call `/goals/focus`.
+        let feed = GoalsFeed(try GoalsFixture.decoded())
+        let model = model(feed)
+        await model.load(sessionId: "session-1")
+        model.selectTab("list-couple")
+
+        await makeGoal(model)
+
+        #expect(feed.creates.count == 1)
+        #expect(feed.writes.isEmpty)
+        let couple = model.groups.first(where: { $0.listId == "list-couple" })
+        #expect(couple?.settled == false)
+        #expect(model.settledCount == 2)
+    }
+
+    @Test func aRefetchThatFailsAfterTheGoalWasSavedKeepsTheLastGoodGroups() async throws {
+        // The goal IS saved by this point. Blanking the step — or pushing a crumb built
+        // on nothing — would be a far worse failure than simply not seeing it yet.
+        let feed = GoalsFeed(try GoalsFixture.decoded())
+        let model = model(feed)
+        await model.load(sessionId: "session-1")
+        let revBefore = model.rev
+        feed.fetchFails = true
+
+        await makeGoal(model)
+
+        #expect(feed.creates.count == 1)
+        #expect(model.groups.count == 3)
+        #expect(model.groups[0].focusGoalId == "goal-read")
+        // No bump means no crumb is pushed off a read that never landed.
+        #expect(model.rev == revBefore)
+        // A saved goal must not leave a stuck sheet flag behind.
+        #expect(model.newForListId == nil)
+        #expect(model.creating == false)
+    }
+
+    @Test func aCreateThatFailsSaysSoAndChangesNothing() async throws {
+        let feed = GoalsFeed(try GoalsFixture.decoded())
+        feed.createFails = true
+        let model = model(feed)
+        await model.load(sessionId: "session-1")
+
+        model.openNewGoal()
+        let made = await model.submitNewGoal(
+            sessionId: "session-1", listId: "list-couple", body: Self.editorBody)
+
+        // The view gates `props.refresh()` on this: refreshing over a goal that never
+        // saved flips the shell busy and greys the step out, which is a second, false
+        // failure on top of the banner.
+        #expect(made == false)
+        #expect(model.errorMessage != nil)
+        // No refetch after a failed write — the last good answer stays on screen.
+        #expect(feed.fetchCount == 1)
+        #expect(model.newForListId == nil)
+        // And the step is usable again rather than frozen for good.
+        #expect(model.isFrozen(shellBusy: false) == false)
+    }
+
+    @Test func aSubmitNamingAGroupTheStepDoesNotHaveCreatesNothing() async throws {
+        // The group is captured when the editor opens, so a refetch that dropped that
+        // list (deleted, or made private) mid-compose must not create a goal into it —
+        // that goal would exist somewhere the family cannot see, which is the same
+        // "it vanished" failure by another route.
+        let feed = GoalsFeed(try GoalsFixture.decoded())
+        let model = model(feed)
+        await model.load(sessionId: "session-1")
+
+        let made = await model.submitNewGoal(
+            sessionId: "session-1", listId: "list-that-went-away", body: Self.editorBody)
+
+        #expect(made == false)
+        #expect(feed.creates.isEmpty)
+        #expect(model.creating == false)
+    }
+
+    @Test func thereIsNothingToOpenWhenTheStepHasNoGroups() async throws {
+        // A read that failed (or a household with no goal lists) has no group to create
+        // in — the composer must refuse to open rather than open group-less.
+        let feed = GoalsFeed(try GoalsFixture.decoded())
+        feed.fetchFails = true
+        let model = model(feed)
+        await model.load(sessionId: "session-1")
+
+        model.openNewGoal()
+
+        #expect(model.newForListId == nil)
+        #expect(model.newGoalGroup == nil)
+    }
+
+    // MARK: whose group you may add to
+
+    @Test func aManagerMayAddToAnyGroupAndEveryoneElseOnlyToTheirOwn() throws {
+        let groups = try GoalsFixture.decoded().groups
+        let family = groups[0], lottie = groups[1], couple = groups[2]
+
+        // `goal.manage` — the goals module's own rule — opens every group.
+        for g in groups {
+            #expect(PlanningGoalsStepModel.canTarget(
+                g, canManageGoals: true, personId: "p-lottie"))
+        }
+
+        // Without it, only a group that is just you. Offering the editor for a group the
+        // server would refuse is show-then-403.
+        #expect(PlanningGoalsStepModel.canTarget(
+            lottie, canManageGoals: false, personId: "p-lottie"))
+        #expect(PlanningGoalsStepModel.canTarget(
+            family, canManageGoals: false, personId: "p-lottie") == false)
+        // Two people is not "just you", even when you are one of the two.
+        #expect(PlanningGoalsStepModel.canTarget(
+            couple, canManageGoals: false, personId: "p-kevin") == false)
+        // Somebody else's individual list is not yours either.
+        #expect(PlanningGoalsStepModel.canTarget(
+            lottie, canManageGoals: false, personId: "p-kevin") == false)
+        #expect(PlanningGoalsStepModel.canTarget(
+            lottie, canManageGoals: false, personId: nil) == false)
+    }
+
+    // MARK: the group, in the shape the goals editor speaks
+
+    @Test func theGroupHandedToTheEditorCarriesItsPeopleSoParticipantsFollowTheList() throws {
+        // `GoalCreateSheet.submit()` derives `participantIds` from the list's members, so
+        // dropping them here would create a goal nobody is a participant in.
+        let couple = try GoalsFixture.decoded().groups[2]
+        let list = couple.asGoalList
+
+        #expect(list.id == "list-couple")
+        #expect(list.name == "Us")
+        #expect(list.emoji == "💛")
+        #expect(list.goalCount == 1)
+        #expect(list.members.map(\.personId) == ["p-kevin", "p-kelly"])
+        #expect(list.members[1].name == "Kelly Sites")
+        #expect(list.members[0].avatarEmoji == "🧔")
+        #expect(list.members[1].colorHex == "#8A5CF0")
     }
 }

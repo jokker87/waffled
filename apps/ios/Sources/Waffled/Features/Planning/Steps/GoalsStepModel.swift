@@ -18,6 +18,9 @@ final class PlanningGoalsStepModel {
     typealias SetFocus = (
         _ sessionId: String, _ listId: String, _ goalId: String?
     ) async throws -> WaffledAPI.PlanningGoalsView
+    /// `POST /api/goals` — the goals module's own create, unchanged. This step does not
+    /// have (and must not grow) a planning-only goal endpoint.
+    typealias CreateGoal = (_ body: [String: JSONValue]) async throws -> Void
 
     private(set) var view: WaffledAPI.PlanningGoalsView?
     private(set) var loaded = false
@@ -33,9 +36,19 @@ final class PlanningGoalsStepModel {
     /// A failed write never bumps it, which is what keeps a half-applied answer out of the
     /// session record.
     private(set) var rev = 0
+    /// The group the "＋ New goal for this week" composer is open for, or nil.
+    ///
+    /// THE LIST ID, NOT THE GROUP: a refetch replaces every group object, and holding one
+    /// would leave the composer pointing at a stale copy of the tab it was opened from.
+    private(set) var newForListId: String?
+    /// A create is in flight. Separate from `savingListId` because it is not an answer to
+    /// a group — it must freeze the options (the list is about to change under them)
+    /// without reading as "this group is being settled".
+    private(set) var creating = false
 
     private let fetchGoals: FetchGoals
     private let setFocus: SetFocus
+    private let createGoal: CreateGoal
 
     init(
         fetchGoals: @escaping FetchGoals = { sessionId in
@@ -44,10 +57,14 @@ final class PlanningGoalsStepModel {
         setFocus: @escaping SetFocus = { sessionId, listId, goalId in
             try await WaffledAPI().planningGoalsSetFocus(
                 sessionId: sessionId, listId: listId, goalId: goalId)
+        },
+        createGoal: @escaping CreateGoal = { body in
+            try await WaffledAPI().createGoal(body)
         }
     ) {
         self.fetchGoals = fetchGoals
         self.setFocus = setFocus
+        self.createGoal = createGoal
     }
 
     var groups: [WaffledAPI.PlanningGoalGroup] { view?.groups ?? [] }
@@ -59,8 +76,16 @@ final class PlanningGoalsStepModel {
         groups.first { $0.listId == tabId } ?? groups.first
     }
 
+    /// The group the composer is open for, resolved against what actually came back.
+    var newGoalGroup: WaffledAPI.PlanningGoalGroup? {
+        guard let newForListId else { return nil }
+        return groups.first { $0.listId == newForListId }
+    }
+
     /// Nothing may be answered while a write is in flight or the shell is busy.
-    func isFrozen(shellBusy: Bool) -> Bool { shellBusy || savingListId != nil }
+    func isFrozen(shellBusy: Bool) -> Bool {
+        shellBusy || savingListId != nil || creating
+    }
 
     /// The crumb to hand the shell after every fresh read AND every write — see
     /// `PlanningGoalsCrumb` for why it mirrors rather than summarises.
@@ -100,6 +125,103 @@ final class PlanningGoalsStepModel {
         } catch {
             errorMessage = "That didn’t take — try again."
         }
+    }
+
+    // MARK: - "＋ New goal for this week"
+
+    /// Open the goals module's own editor for the group ON SCREEN.
+    ///
+    /// THE WHOLE REASON THIS TAKES NO ARGUMENT. The step's question is per-group, so a
+    /// composer that let the group be chosen (or defaulted to one) would create a goal in
+    /// a list the family was not looking at — and since only one group is ever on screen,
+    /// the goal would appear to vanish. It refuses to open at all when there is no group,
+    /// rather than opening group-less.
+    func openNewGoal() {
+        guard !creating, let listId = active?.listId else { return }
+        errorMessage = nil
+        newForListId = listId
+    }
+
+    func closeNewGoal() { newForListId = nil }
+
+    /// Take the editor's body and make the goal, then re-read so it is ON SCREEN in the
+    /// group it joined and can be picked as the week's focus.
+    ///
+    /// CREATING IS NOT CONFIRMING. This deliberately does not call `/goals/focus`: making
+    /// a goal is not the family settling the group, so the tab stays unstarred until they
+    /// say so. The goal arrives PINNED (the editor is opened with `startFeatured`), which
+    /// is how the server adopts it as the group's current focus on the way back —
+    /// `getGoalsStepView` adopts a list's LONE `is_featured` goal — so the family lands
+    /// back here with it already selected, waiting to be confirmed. In a group that
+    /// already had a pin there are then two, which is ambiguous and the server adopts
+    /// neither; the goal is still there in the list and one tap from being the focus.
+    /// `listId` IS PASSED IN RATHER THAN READ OFF `newForListId`, and that is not
+    /// belt-and-braces: `GoalCreateSheet` dismisses itself the instant it submits, which
+    /// flips the sheet binding and clears the flag — possibly BEFORE this task even
+    /// starts. Reading the flag here dropped the create on the floor. The caller captures
+    /// the group it built the editor for and hands it over.
+    /// Answers whether a goal was really made, so the caller only asks the shell to
+    /// re-read when there is something new to read: a `refresh()` on the failure path
+    /// would flip the shell busy and grey out every option on top of the error banner,
+    /// over a goal that was never saved.
+    @discardableResult
+    func submitNewGoal(
+        sessionId: String, listId: String, body: [String: JSONValue]
+    ) async -> Bool {
+        // A group this step has never heard of is not a target — refusing beats creating
+        // a goal somewhere the family cannot see it.
+        guard !creating, groups.contains(where: { $0.listId == listId }) else { return false }
+        creating = true
+        errorMessage = nil
+        // The editor is already gone, so the flag goes with it — success or failure.
+        // Leaving it set would reopen a sheet nobody asked for.
+        newForListId = nil
+        defer { creating = false }
+        do {
+            try await createGoal(Self.newGoalBody(body, listId: listId))
+        } catch {
+            errorMessage = "That goal didn’t save — try again."
+            return false
+        }
+        // A failed refetch keeps the last good groups and does NOT bump `rev`, so no
+        // crumb is pushed off a read that never landed. The goal itself is saved either
+        // way; the worse failure would be blanking the step over it.
+        if let latest = try? await fetchGoals(sessionId) {
+            apply(latest)
+            // Land back on the group the goal joined even if `tabId` was still nil
+            // (`active` falls back to the first group).
+            if latest.groups.contains(where: { $0.listId == listId }) { tabId = listId }
+        }
+        return true
+    }
+
+    /// The ONE thing the step decides about a goal made from here, whatever the editor
+    /// says: which group it joins.
+    ///
+    /// `goalListId` is overwritten rather than trusted because the STEP, not the form, is
+    /// what asked "whose focus this week?" — and a goal that silently landed in another
+    /// group is the exact bug this button was held back over. Everything else, the tier
+    /// included, is the family's answer in the editor and is passed through untouched.
+    static func newGoalBody(
+        _ body: [String: JSONValue], listId: String
+    ) -> [String: JSONValue] {
+        var out = body
+        out["goalListId"] = .string(listId)
+        return out
+    }
+
+    /// Whose goals this viewer may actually add to — the GOALS MODULE's own rule:
+    /// `goal.manage` holders for any group, everybody else only a group that is just
+    /// them. Offering the editor for a group the server would refuse is show-then-403, so
+    /// the button says why instead.
+    nonisolated static func canTarget(
+        _ g: WaffledAPI.PlanningGoalGroup,
+        canManageGoals: Bool,
+        personId: String?
+    ) -> Bool {
+        if canManageGoals { return true }
+        guard let personId, g.members.count == 1 else { return false }
+        return g.members[0].personId == personId
     }
 
     private func apply(_ latest: WaffledAPI.PlanningGoalsView) {

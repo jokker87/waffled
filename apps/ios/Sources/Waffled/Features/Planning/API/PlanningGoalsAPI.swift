@@ -126,6 +126,33 @@ extension WaffledAPI {
     }
 }
 
+extension WaffledAPI.PlanningGoalGroup {
+
+    /// This group in the shape the goals module's OWN editor speaks, so "＋ New goal for
+    /// this week" can hand `GoalCreateSheet` the real thing rather than a second,
+    /// planning-only form that would drift from it.
+    ///
+    /// THE MEMBERS ARE THE POINT, not decoration: `GoalCreateSheet.submit()` derives
+    /// `participantIds` from the chosen list's members, so a conversion that dropped them
+    /// would create a goal with nobody on it. `goalCount` is only ever a label in that
+    /// sheet, so the goals this step already has is an honest value for it.
+    var asGoalList: WaffledAPI.GoalList {
+        WaffledAPI.GoalList(
+            id: listId,
+            name: name,
+            emoji: emoji,
+            colorHex: colorHex,
+            goalCount: goals.count,
+            members: members.map {
+                WaffledAPI.GoalList.Member(
+                    personId: $0.personId,
+                    name: $0.name,
+                    avatarEmoji: $0.avatarEmoji,
+                    colorHex: $0.colorHex)
+            })
+    }
+}
+
 /// The crumb this step hands the session record: which group settled on what.
 ///
 /// IT MUST MIRROR THE SERVER'S OWN MAP. `/goals/focus` merges `{ focus: { <listId>:
