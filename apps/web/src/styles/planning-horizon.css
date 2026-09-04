@@ -52,7 +52,22 @@
 /* `flex: 1` takes the space nothing else claimed; the floor is what stops a long board
    (or a short viewport) from compressing six week rows into a strip. The board's own
    `max-height` is the other half of that guarantee. */
-.wph-cal { flex: 1; display: flex; min-height: 420px; }
+.wph-cal { flex: 1; display: flex; min-height: 716px; }
+/* THE CHIPS WERE SQUASHED, not merely clipped — "the events still look too smushed,
+   they should have a minimum height". `.cal-cell` is a flex COLUMN, so every child
+   shrinks by default; at ~70px a row the day number and all three chips compressed
+   below their natural height at once and the label sat on the chip's own edge. There is
+   no `min-height` to add to the chip, because the chip was never the thing with the
+   wrong height — the row's budget was. `flex: none` IS that minimum: a chip is its
+   content's height or it is not drawn at all, and the cell's existing `overflow:
+   hidden` then clips one whole chip cleanly instead of shaving every chip.
+   The floor below is what a row costs when nothing is squeezed: 6px+6px of cell
+   padding, a 14px day number (~17px), three ~20px chips, the 11px "+N more" (~13px)
+   and the four 3px gaps between them ≈ 114px. Six rows plus the day-of-week header is
+   the 716px above. On a short viewport `.wp-body` scrolls, which is the same answer the
+   board got — a definite size and a scroll, rather than compressing what's on screen. */
+.wph-cal .cal-cell > * { flex: none; }
+.wph-cal .cal-grid { grid-auto-rows: minmax(116px, 1fr); }
 .wph-cal > .cal-month { flex: 1; min-width: 0; }
 /* `.cal` is `height: 100%` with `grid-auto-rows: 1fr`, so its six rows are supposed to
    compress into whatever height it's given. They didn't: `.cal` is a GRID ITEM of
