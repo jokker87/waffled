@@ -373,6 +373,20 @@ describe('Horizon scan · the park bar', () => {
     expect(parkPosts[0].stepKey).toBeUndefined()
   })
 
+  it('puts the cursor back in the bar, so a second note needs no second click', async () => {
+    // "when I add a parking note, it should refocus me". Parking is a BURST — somebody
+    // reads the month and empties their head into the bar — and a capture line that
+    // makes you re-aim at it between notes is a capture line that gets used once.
+    mockApi()
+    renderStep()
+
+    await type('First thing')
+    fireEvent.click(parkIt())
+
+    await waitFor(() => expect(parkInput()).toHaveValue(''))
+    expect(parkInput()).toHaveFocus()
+  })
+
   it('says where the note is going to end up — including when it is going nowhere', async () => {
     // "What does no tag do? where does it put it?" — asked of a chip whose only
     // explanation was a `title` attribute nobody hovers. Both answers are now on screen,

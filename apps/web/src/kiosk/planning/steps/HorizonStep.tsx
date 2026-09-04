@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import {
   horizonApi,
   looseEndsApi,
@@ -124,6 +124,10 @@ function Body({ weekStart, sessionId, setDecisionData, refresh, busy }: StepBody
   const [parking, setParking] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [added, setAdded] = useState(0)
+  // Parking is a BURST — somebody reads the month and empties their head into the bar —
+  // so the cursor goes back after each note rather than making you re-aim at the input.
+  const inputRef = useRef<HTMLInputElement>(null)
+  const wantFocus = useRef(false)
 
   // The crumb: two counts, and only counts. The recap reads through to the calendar and
   // to the parked table, so copying either onto the session record would give the two
@@ -162,6 +166,7 @@ function Body({ weekStart, sessionId, setDecisionData, refresh, busy }: StepBody
         ])
         setNote('')
         setTag(undefined)
+        wantFocus.current = true
         refresh()
       })
       // KEEP THE SENTENCE. `parkItem` caps a note at 500 characters, so a refusal is
@@ -178,6 +183,16 @@ function Body({ weekStart, sessionId, setDecisionData, refresh, busy }: StepBody
   }
 
   const disabled = busy || parking
+
+  // Restored in an EFFECT rather than in the `.then`, because the bar is still
+  // `disabled` while the write is in flight and `focus()` on a disabled input does
+  // nothing at all — silently, which is how this passed a first reading. Waits for the
+  // re-enable, then puts the cursor back exactly once.
+  useEffect(() => {
+    if (!wantFocus.current || disabled) return
+    wantFocus.current = false
+    inputRef.current?.focus()
+  }, [disabled])
 
   return (
     <div className="wph">
@@ -229,6 +244,7 @@ function Body({ weekStart, sessionId, setDecisionData, refresh, busy }: StepBody
           📌
         </span>
         <input
+          ref={inputRef}
           className="wph-park-in"
           value={note}
           onChange={(e) => setNote(e.target.value)}
