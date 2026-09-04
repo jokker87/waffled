@@ -57,6 +57,13 @@ struct FamilyView: View {
                 // Module-gated tiles drop out when a household turns that feature off
                 // (Settings → Modules). Photos + Settings are core and never gated.
                 LazyVGrid(columns: cols, spacing: 12) {
+                    // First, because it is the weekly ritual that FEEDS the rest of this
+                    // grid — the session hands out chores, fills the meal plan and books
+                    // the events the other tiles then show. It was also the tile a tester
+                    // came to this screen looking for and didn't find.
+                    if sync.module(.weeklyPlanning) {
+                        tile("🗓️", "Weekly Planning", "Plan the week ahead", FamilyColor.person2.tint, .weeklyPlanning)
+                    }
                     if sync.module(.chores) { tile("✅", "Chores", hub.choresSubtitle, FamilyColor.person3.tint, .chores, badge: choreApprovals) }
                     if sync.module(.goals) { tile("🎯", "Goals", hub.goalsSubtitle, WF.successT, .goals) }
                     if sync.rewardsOn { tile("⭐", "Rewards", hub.rewardsSubtitle, WF.warnT, .rewards, badge: rewardApprovals) }
@@ -78,8 +85,12 @@ struct FamilyView: View {
         .onAppear(perform: runDemoHooksIfSet)
     }
 
-    private static func route(for name: String) -> HubRoute? {
+    /// `WAFFLED_OPEN_HUB`'s names. Internal rather than private so the mapping can be
+    /// tested — see FamilyHubRouteTests, and the note there about why a green build
+    /// proved nothing about whether anything actually reached Weekly Planning.
+    static func route(for name: String) -> HubRoute? {
         switch name {
+        case "planning": return .weeklyPlanning
         case "chores": return .chores
         case "goals": return .goals
         case "rewards": return .rewards
