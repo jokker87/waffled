@@ -38,7 +38,28 @@ struct PlanningTodayCard: View {
     var body: some View {
         Group {
             if prompt == .quiet {
-                EmptyView()
+                // A ZERO-SIZE REAL VIEW, NOT `EmptyView`, AND THAT IS THE WHOLE BUG THIS
+                // FIXES.
+                //
+                // `prompt` is `.quiet` until the first fetch lands, so on mount this
+                // branch is the one taken. With `EmptyView` here SwiftUI materialises no
+                // view at all, and a `.task` has nothing to attach to — so the fetch never
+                // ran, `prompt` stayed `.quiet` for ever, and the card could not appear on
+                // any device. It needed data to become visible and only loaded data once
+                // visible. A green build and 1042 green tests both missed it; what caught
+                // it was that the server logged no `GET /api/weekly-planning` at all while
+                // the Family Night card beside it logged its own read.
+                //
+                // `FamilyNightCard` never hits this because it ALWAYS renders a real card
+                // and decides its contents inside. This card is allowed to disappear —
+                // an untouched Wednesday has no business carrying a planning card, and the
+                // kiosk column clips anything oversized — so it needs a host that occupies
+                // nothing but exists.
+                //
+                // Zero width AND height so it paints nothing. It does still take the
+                // stack's spacing, which is why this card is appended LAST on Today: a
+                // trailing gap ahead of the tab-bar clearance is invisible.
+                Color.clear.frame(width: 0, height: 0)
             } else {
                 Button(action: onOpen) {
                     Group {
@@ -49,6 +70,8 @@ struct PlanningTodayCard: View {
             }
         }
         // Keyed on the refresh signal, not a bare `.task` — see SyncManager.refreshRev.
+        // It must stay attached in BOTH branches: a session started on another device has
+        // to be able to make a quiet card appear.
         .task(id: sync.refreshRev) { await model.load() }
     }
 
