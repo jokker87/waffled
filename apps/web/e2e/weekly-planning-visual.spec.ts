@@ -291,6 +291,98 @@ test('the month’s event chips keep their own height on a busy day', async ({ p
   expect(overflow).toBeLessThanOrEqual(0)
 })
 
+test('the parked board stays on screen, and a chosen tag stays readable under the cursor', async ({ page }) => {
+  // Two things a unit test cannot see, both reported off the same screen.
+  //
+  // THE BOARD. "the parked notes sit below the line so I dont know where they are
+  // going/are when I come on the page, I am ok with the calendar being a little shorter
+  // just not the events being squished." So the month gave height back by drawing one
+  // chip FEWER per day, never by making a chip smaller.
+  //
+  // THE TAG. "hovering makes the text black on a black selection?" —
+  // `:hover:not(:disabled)` scores (0,3,0) against `.on`'s (0,2,0), so the hover rule
+  // repainted the chosen chip's text to `--ink` on its `--ink` fill.
+  await mockApi(page)
+  await page.route('**/api/weekly-planning/horizon**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        tags: [
+          { stepKey: 'tasks', label: 'Tasks', hint: 'Someone owns it this week', primary: true },
+          { stepKey: 'meals', label: 'Meals', hint: 'It changes what we eat' },
+          { stepKey: 'kids', label: 'Kids', hint: "It's about one of the kids" },
+        ],
+        parked: [
+          { id: 'pk1', note: 'we are going camping', stepKey: 'tasks', stepLabel: 'Tasks', createdAt: '2026-09-01T10:00:00.000Z' },
+          { id: 'pk2', note: 'school photos', stepKey: null, stepLabel: null, createdAt: '2026-09-01T10:01:00.000Z' },
+        ],
+      }),
+    })
+  })
+
+  await signIn(page)
+  await page.goto('/planning/horizon')
+  await expect(page.locator('.wp-title')).toHaveText('Horizon scan')
+
+  const board = page.locator('.wph-board')
+  await expect(board).toBeVisible()
+
+  // ON A KIOSK — the screen this step is actually for — the month gets all six of its
+  // rows AND the board keeps its place. `.wph-cal` is `flex: 1`, so it takes whatever is
+  // left once the bar, the note and the board have theirs.
+  await page.setViewportSize({ width: 1280, height: 1000 })
+  await expect(board).toBeVisible()
+  expect(await withinViewport(page, '.wph-board')).toBe(true)
+  await page.screenshot({ path: 'test-results/weekly-planning-horizon-board.png' })
+
+  const grid = await page.evaluate(() => {
+    const el = document.querySelector('.wph-cal .cal-grid') as HTMLElement | null
+    const cells = document.querySelectorAll('.wph-cal .cal-cell').length
+    return el ? { scrollH: el.scrollHeight, clientH: el.clientHeight, cells } : null
+  })
+  expect(grid).not.toBeNull()
+  expect(grid!.cells).toBe(42)
+  // The month USES the room it is given rather than sitting at its floor: five of the six
+  // week rows are on screen at kiosk height, and the sixth is a short scroll away. Not an
+  // assertion that nothing scrolls — six unsquashed rows cost ~552px and there are 491
+  // here, so demanding the whole month back would only be demanding the squash back.
+  expect(grid!.clientH).toBeGreaterThanOrEqual(92 * 5)
+
+  // ON A SHORT SCREEN the month gives way instead of the board — it scrolls inside
+  // itself, and its rows still never compress (that is what the floor is for).
+  await page.setViewportSize({ width: 1280, height: 720 })
+  expect(await withinViewport(page, '.wph-board')).toBe(true)
+  const heights = await page.locator('.wph-cal .ev').evaluateAll((els) =>
+    els.map((el) => el.getBoundingClientRect().height)
+  )
+  for (const h of heights) expect(h).toBeGreaterThanOrEqual(18)
+
+  await page.setViewportSize({ width: 1280, height: 1000 })
+
+  // Chips only exist once there is something to tag.
+  await page.getByLabel('Park a note').fill('test')
+  const chosen = page.locator('.wph-tag.on')
+  await expect(chosen).toHaveText('Tasks')
+
+  const readable = async () =>
+    chosen.evaluate((el) => {
+      const cs = getComputedStyle(el)
+      // Both as "r, g, b" — a chip whose text matches its own fill says nothing at all.
+      return { color: cs.color, background: cs.backgroundColor }
+    })
+
+  const before = await readable()
+  expect(before.color).not.toBe(before.background)
+
+  await chosen.hover()
+  const after = await readable()
+  expect(after.color).not.toBe(after.background)
+  // …and the selected look is the SAME under the cursor, not merely non-identical.
+  expect(after.color).toBe(before.color)
+  expect(after.background).toBe(before.background)
+})
+
 test('a parked note is handed to its step, above the body and on screen', async ({ page }) => {
   await mockApi(page, handoffView)
   await signIn(page)

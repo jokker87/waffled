@@ -327,7 +327,10 @@ describe('Weekly planning · step 3 · Horizon scan', () => {
     })
     const { container } = renderStep()
 
-    fireEvent.click(await within(await waitFor(() => cell(container, '2026-09-23'))).findByText('+1 more'))
+    // TWO chips a day here, not three: the parked board underneath has to stay on
+    // screen, and the month gives height back by drawing one fewer chip rather than by
+    // shrinking them. So four events collapse two, not one.
+    fireEvent.click(await within(await waitFor(() => cell(container, '2026-09-23'))).findByText('+2 more'))
     await waitFor(() => expect(within(panel()).getByText('Wednesday, September 23')).toBeInTheDocument())
     expect(panel().querySelectorAll('.ag-row').length).toBe(4)
   })

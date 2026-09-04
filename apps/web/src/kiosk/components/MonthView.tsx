@@ -30,6 +30,7 @@ export function MonthView({
   onCreateOnDay,
   onMore,
   firstDay,
+  maxChips,
 }: {
   year: number
   month: number
@@ -45,7 +46,14 @@ export function MonthView({
   /// Which day starts the week (0 = Sunday, 1 = Monday) — passed from Calendar so the
   /// grid and the fetched range are always cut the same way.
   firstDay: number
+  /// How many event chips a day cell draws before it collapses the rest into "+N more".
+  /// Three on the Calendar page, where the month owns the screen. Weekly Planning's
+  /// Horizon scan passes 2: it has a parked-notes board under the grid that has to stay
+  /// on screen, and a chip is never allowed to shrink to make room (that is the squash
+  /// this was reported as), so the only honest saving is drawing one fewer of them.
+  maxChips?: number
 }) {
+  const chipCap = maxChips ?? 3
   const colorOf = useEventColor()
   const cells = useMemo(() => monthGrid(year, month, firstDay), [year, month, firstDay])
   const dowLabels = useMemo(() => dowFrom(DOW, firstDay), [firstDay])
@@ -90,7 +98,7 @@ export function MonthView({
                   {cds.length > 1 && <span className="cal-cd-n">+{cds.length - 1}</span>}
                 </div>
               )}
-              {dayEvents.slice(0, 3).map((e) => {
+              {dayEvents.slice(0, chipCap).map((e) => {
                 const color = colorOf(e)
                 const isMeal = e.origin === 'meal_plan'
                 return (
@@ -116,7 +124,7 @@ export function MonthView({
                   </div>
                 )
               })}
-              {dayEvents.length > 3 && (
+              {dayEvents.length > chipCap && (
                 <div
                   className="ev-more"
                   style={{ cursor: 'pointer' }}
@@ -125,7 +133,7 @@ export function MonthView({
                     onMore(key)
                   }}
                 >
-                  +{dayEvents.length - 3} more
+                  +{dayEvents.length - chipCap} more
                 </div>
               )}
             </div>

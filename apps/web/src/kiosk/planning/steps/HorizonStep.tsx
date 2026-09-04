@@ -224,6 +224,10 @@ function Body({ weekStart, sessionId, setDecisionData, refresh, busy }: StepBody
           year={year}
           month={month}
           firstDay={firstDay}
+          // Two, not three. The parked board underneath has to stay on screen, and a chip
+          // is never allowed to shrink to make room — that squash is what this step was
+          // reported for, twice. Drawing one fewer is the only honest saving.
+          maxChips={2}
           events={events}
           tz={tz}
           countdownsByDate={countdownsByDate}
