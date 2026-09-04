@@ -46,6 +46,9 @@
 /* ── A pairing row ───────────────────────────────────────────────────────────── */
 .wpn-row {
   display: flex;
+  /* Wraps only when the "Link a time" list is open — it is the one child that claims a
+     full row of its own; everything else still sits on one line. */
+  flex-wrap: wrap;
   align-items: center;
   gap: 16px;
   padding: 14px 16px;
@@ -117,6 +120,32 @@
   font-weight: 600;
 }
 .wpn-counts:hover:not(:disabled) { border-color: var(--hair-2); color: var(--ink-2); }
+
+/* LINKING A TIME THEY ALREADY SHARE. The chip opens a list of every event this week
+   with both of them on it — including the ones with somebody else there too, which the
+   row could previously only describe ("but it's not that") and never let you choose.
+   Nothing here writes to the calendar; picking one records which event answers the
+   pairing. */
+.wpn-link { font-weight: 700; }
+.wpn-link.on { background: var(--success-t); border-color: var(--success); color: var(--success); }
+/* Its own line under the row. `.wpn-row` is a flex row, so the list has to claim the
+   full width or it would sit in among the chips it was opened from. */
+.wpn-link-list {
+  flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 8px;
+  margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--hair);
+}
+.wpn-link-opt {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  font: inherit; text-align: left; cursor: pointer;
+  padding: 8px 14px; border-radius: var(--r-md);
+  border: 1px solid var(--hair); background: var(--card-2); color: var(--ink-2);
+}
+.wpn-link-opt b { font-size: 13.5px; font-weight: 750; color: var(--ink); }
+.wpn-link-opt span { font-size: 11.5px; font-weight: 650; }
+.wpn-link-opt:hover:not(:disabled) { border-color: var(--person-3); }
+.wpn-link-opt:disabled { cursor: default; opacity: 0.5; }
+.wpn-link-opt.on { background: var(--success-t); border-color: var(--success); }
+.wpn-link-opt.on b, .wpn-link-opt.on span { color: var(--success); }
 .wpn-counts.on {
   background: var(--success-t);
   border-color: var(--success);

@@ -103,7 +103,10 @@ const BOARD = {
       lastTogetherOn: null,
       lastTogetherTitle: null,
       alreadyThisWeek: [],
-      togetherThisWeek: [evt({ id: 'd1', title: 'Dance', day: 'Tuesday' }), evt({ id: 'd2', title: 'Dance', day: 'Thursday' })],
+      togetherThisWeek: [
+        evt({ id: 'd1', title: 'Dance', day: 'Tuesday', when: 'Tuesday 4:30 PM', time: '4:30 PM' }),
+        evt({ id: 'd2', title: 'Dance', day: 'Thursday', when: 'Thursday 4:30 PM', time: '4:30 PM' }),
+      ],
       slots: [slot({ date: '2026-09-10', kind: 'open', startsAt: null, afterTitle: null, label: 'Thu · free all day' })],
     },
     {
@@ -127,6 +130,7 @@ function mockApi(board: unknown = BOARD) {
   const posts: Record<string, unknown>[] = []
   const slotCalls: string[] = []
   const boardReads: number[] = []
+  const steps: Record<string, unknown>[] = []
   // A supplier, so a test can serve a board that CHANGES between reads — which is what
   // the server does while a local-first write is still uploading.
   const boardNow = () => (typeof board === 'function' ? (board as () => unknown)() : board)
@@ -136,6 +140,10 @@ function mockApi(board: unknown = BOARD) {
     if (u.startsWith('/api/persons')) return { ok: true, json: async () => ({ persons: PERSONS }) }
     if (u.startsWith('/api/household')) return { ok: true, json: async () => ({ household: null, person: null }) }
     // Order matters: /connection/slots is a prefix match away from /connection.
+    if (u.includes('/api/weekly-planning/session/') && u.endsWith('/step') && method === 'POST') {
+      steps.push(JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>)
+      return { ok: true, json: async () => ({ steps: [] }) }
+    }
     if (u.startsWith('/api/weekly-planning/connection/slots')) {
       slotCalls.push(u)
       return {
@@ -163,7 +171,7 @@ function mockApi(board: unknown = BOARD) {
     if (u.startsWith('/api/calendar/google/status')) return { ok: true, json: async () => ({ calendars: [] }) }
     return { ok: true, json: async () => ({}) }
   }) as unknown as typeof fetch
-  return { posts, slotCalls, boardReads }
+  return { posts, slotCalls, boardReads, steps }
 }
 
 function renderStep(over: Partial<StepBodyProps> = {}) {
@@ -235,7 +243,12 @@ describe('Weekly planning · step 5 · Connection', () => {
 
     expect(await within(kw).findByText(/Nothing new — Saturday’s Yard work already is it, and you said so out loud/)).toBeInTheDocument()
     // A crumb is a hint for the recap, never storage — so counts, never module data.
-    expect(setDecisionData).toHaveBeenLastCalledWith({ added: 0, alreadyCounted: 1 })
+    // `links` is the one thing beside them, and it is not a breach of that: it records
+    // WHICH event answers a pairing, which is a pointer, not a copy of the event. The
+    // rule exists so the recap and the calendar can't disagree about an event's title
+    // or hour; an id can't drift from itself. Without it, picking a time is forgotten
+    // the moment you leave the step.
+    expect(setDecisionData).toHaveBeenLastCalledWith({ added: 0, alreadyCounted: 1, links: { 'p1-p3': 'e1' } })
   })
 
   it('picks a slot by opening the app’s own event modal with those two people and that time', async () => {
@@ -288,6 +301,54 @@ describe('Weekly planning · step 5 · Connection', () => {
     // The row tells the truth without anybody leaving the step and coming back.
     expect(await within(await row('p1-p2')).findByText(/Date night/, {}, { timeout: 5000 })).toBeInTheDocument()
   }, 15000)
+
+  it('links a time that already has both of them on it', async () => {
+    // "I also cant link an existing time." The step credited a pairing automatically
+    // when an event's people were EXACTLY those two, and let you acknowledge that one
+    // event — but an evening where the two of them are both there ALONGSIDE somebody
+    // else was only ever a sentence ("you're both there, and it still isn't that").
+    // There was no way to point at it and say that IS our time.
+    //
+    // The candidates are exactly the events with both people on them, which is the two
+    // lists the board already sends. Nothing is written to the calendar: picking one
+    // does not edit anybody's event, it records that this pairing is answered by it.
+    mockApi()
+    renderStep()
+
+    // Kelly and Lottie: nothing with just the two of them, two Dances with both of them.
+    const kl = await row('p2-p4')
+    fireEvent.click(within(kl).getByRole('button', { name: /Link a time/i }))
+
+    const picker = await screen.findByTestId('wpn-link-p2-p4')
+    // Both candidates, each nameable by when it is — two Dances need telling apart.
+    expect(within(picker).getByRole('button', { name: /Dance.*Tuesday/i })).toBeInTheDocument()
+    expect(within(picker).getByRole('button', { name: /Dance.*Thursday/i })).toBeInTheDocument()
+
+    fireEvent.click(within(picker).getByRole('button', { name: /Dance.*Thursday/i }))
+
+    // The row now reads as answered, by that event.
+    await waitFor(() => expect(within(kl).getByText(/Thursday/)).toBeInTheDocument())
+  })
+
+  it('remembers a linked time, rather than losing it on the next visit', async () => {
+    // The acknowledgement used to be deliberately local — it "changes a sentence,
+    // nothing else". A LINK is not a sentence: it is the answer to this pairing, and a
+    // step that forgets it the moment you walk away is the complaint this module has
+    // already collected twice.
+    const { steps } = mockApi()
+    renderStep()
+    const kl = await row('p2-p4')
+    fireEvent.click(within(kl).getByRole('button', { name: /Link a time/i }))
+    const picker = await screen.findByTestId('wpn-link-p2-p4')
+    fireEvent.click(within(picker).getByRole('button', { name: /Dance.*Thursday/i }))
+
+    await waitFor(() => expect(steps.length).toBeGreaterThan(0))
+    const last = steps[steps.length - 1]
+    expect(last).toMatchObject({ stepKey: 'connection' })
+    expect((last.data as { links: Record<string, string> }).links).toMatchObject({ 'p2-p4': 'd2' })
+    // Written WITHOUT settling the step — linking a time is not answering the step.
+    expect(last.status).toBe('pending')
+  })
 
   it('leaves the time to the modal’s own picker when the whole day is open', async () => {
     mockApi()
@@ -380,26 +441,26 @@ describe('pairingSentence', () => {
   const base = { personIds: ['p1', 'p2'], who: 'A and B', lastTogetherOn: null, lastTogetherTitle: null, alreadyThisWeek: [], togetherThisWeek: [], slots: [] }
 
   it('leads with the time that already exists', () => {
-    expect(pairingSentence({ ...base, alreadyThisWeek: [evt()] }, false)).toMatch(
+    expect(pairingSentence({ ...base, alreadyThisWeek: [evt()] }, null)).toMatch(
       /^Saturday’s Yard work is the two of you for 2 hours/
     )
   })
 
   it('changes once somebody says out loud that it counts', () => {
-    expect(pairingSentence({ ...base, alreadyThisWeek: [evt()] }, true)).toBe(
+    expect(pairingSentence({ ...base, alreadyThisWeek: [evt()] }, 'e1')).toBe(
       'Nothing new — Saturday’s Yard work already is it, and you said so out loud.'
     )
   })
 
   it('counts the times the week throws them together without it being that', () => {
     const twice = [evt({ day: 'Tuesday', title: 'Dance' }), evt({ day: 'Thursday', title: 'Dance' })]
-    expect(pairingSentence({ ...base, togetherThisWeek: twice }, false)).toBe(
+    expect(pairingSentence({ ...base, togetherThisWeek: twice }, null)).toBe(
       'Nothing on the calendar with just the two of you. You’re both at 2 things this week, but none of them is that.'
     )
   })
 
   it('never claims a date it does not have', () => {
-    expect(pairingSentence(base, false)).toBe('Nothing on the calendar with just the two of you.')
+    expect(pairingSentence(base, null)).toBe('Nothing on the calendar with just the two of you.')
   })
 })
 

@@ -2,8 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   usePersons,
   planningConnectionApi,
+  weeklyPlanningApi,
   type Person,
   type PlanningConnectionBoard,
+  type PlanningConnectionEvent,
   type PlanningConnectionPairing,
   type PlanningConnectionSlot,
 } from '../../../lib/api'
@@ -123,10 +125,25 @@ function localTime(iso: string): string {
  * isn't ("Friday's dinner at the Hales is you both, but it's not that") — a near miss
  * is the most useful thing a row can say, and it is also the honest one.
  */
-export function pairingSentence(p: PlanningConnectionPairing, acknowledged: boolean): string {
+/**
+ * EVERY event this week with both of them on it — the two lists the board sends, in the
+ * order they deserve: time that is already just the two of them first, then the evenings
+ * where they are both there alongside somebody else.
+ *
+ * This is the candidate list for "Link a time", and the reason no new read was needed:
+ * "an event with both people on it" is precisely `alreadyThisWeek ∪ togetherThisWeek`.
+ */
+export const bothOnIt = (p: PlanningConnectionPairing): PlanningConnectionEvent[] =>
+  [...p.alreadyThisWeek, ...p.togetherThisWeek]
+
+export function pairingSentence(p: PlanningConnectionPairing, linkedId: string | null): string {
+  // A LINKED event answers the pairing whatever else the week says — including an
+  // evening that has somebody else on it too, which is the whole point of being able to
+  // pick one. Looked up across both lists rather than assumed to be `alreadyThisWeek[0]`.
+  const linked = linkedId ? bothOnIt(p).find((e) => e.id === linkedId) : undefined
+  if (linked) return `Nothing new — ${linked.day}’s ${linked.title} already is it, and you said so out loud.`
   const credit = p.alreadyThisWeek[0]
   if (credit) {
-    if (acknowledged) return `Nothing new — ${credit.day}’s ${credit.title} already is it, and you said so out loud.`
     const len = credit.minutes ? ` for ${durationWords(credit.minutes)}` : ''
     return `${credit.day}’s ${credit.title} is the two of you${len} — that may already be it.`
   }
@@ -187,20 +204,30 @@ const CATCHUP_MS = [250, 500, 1000, 2000, 3000]
 const credited = (b: PlanningConnectionBoard | null) =>
   (b?.pairings ?? []).reduce((n, p) => n + p.alreadyThisWeek.length, 0)
 
-function Body({ weekStart, setDecisionData, refresh, busy }: StepBodyProps) {
+function Body({ step, sessionId, weekStart, setDecisionData, refresh, busy }: StepBodyProps) {
   const { persons } = usePersons()
   const [board, setBoard] = useState<PlanningConnectionBoard | null>(null)
   const [error, setError] = useState(false)
   // What this sitting put on the calendar, and how many pairings somebody said were
-  // already covered. COUNTS ONLY: the crumb is a hint for the recap, never storage —
+  // already covered. COUNTS, plus the one pointer that has to survive: the crumb is a
+  // hint for the recap, never storage —
   // the recap reads through to the calendar, so copying event data here would only give
   // the two something to disagree about. (setDecisionData also doesn't reach the server
   // until the step is answered, so nothing may depend on it being there.)
   const [added, setAdded] = useState(0)
-  // Pairings somebody said out loud are already covered by time the week has. Keyed by
-  // the pairing's people. Deliberately local: it changes a sentence, nothing else, and
-  // the row still reads correctly from the query alone on the next visit.
-  const [counted, setCounted] = useState<Set<string>>(() => new Set())
+  // WHICH EVENT ANSWERS EACH PAIRING, keyed by the pairing's people → event id.
+  //
+  // This started life as a `Set` of pairings somebody had acknowledged, and was
+  // deliberately local on the grounds that it "changes a sentence, nothing else". That
+  // stopped being true the moment you could CHOOSE which event it was: a link is the
+  // answer to the pairing, not a turn of phrase, and a step that forgets it the moment
+  // you walk away is the complaint this module has already collected twice. It is
+  // seeded from the step's own record and written back on every change.
+  const [links, setLinks] = useState<Record<string, string>>(
+    () => ((step.data as { links?: Record<string, string> } | null)?.links ?? {})
+  )
+  // Which pairing's picker is open, if any.
+  const [picking, setPicking] = useState<string | null>(null)
   // The event modal, when one is open, and what it was opened with.
   const [compose, setCompose] = useState<Compose | null>(null)
 
@@ -237,8 +264,37 @@ function Body({ weekStart, setDecisionData, refresh, busy }: StepBodyProps) {
 
   useEffect(() => {
     if (!board) return
-    setDecisionData({ added, alreadyCounted: counted.size })
-  }, [board, added, counted, setDecisionData])
+    setDecisionData({ added, alreadyCounted: Object.keys(links).length, links })
+  }, [board, added, links, setDecisionData])
+
+  // Written through the step's OWN record, at its CURRENT status — linking a time is
+  // not answering the step, so this must not settle it. `setDecisionData` alone would
+  // not do: it only reaches the server when the step is answered, and somebody who
+  // links a time and then walks off has answered nothing.
+  const remember = useCallback(
+    (next: Record<string, string>) => {
+      weeklyPlanningApi
+        .decideStep(sessionId, 'connection', step.status, { added, alreadyCounted: Object.keys(next).length, links: next })
+        // The link is already on screen; a failed write costs the memory of it, not the
+        // sitting. The next ordinary read is authoritative.
+        .catch(() => {})
+    },
+    [sessionId, step.status, added]
+  )
+
+  const link = useCallback(
+    (key: string, eventId: string | null) => {
+      setLinks((cur) => {
+        const next = { ...cur }
+        if (eventId === null || next[key] === eventId) delete next[key]
+        else next[key] = eventId
+        remember(next)
+        return next
+      })
+      setPicking(null)
+    },
+    [remember]
+  )
 
   const byId = useMemo(() => new Map(persons.map((p) => [p.id, p])), [persons])
 
@@ -262,8 +318,10 @@ function Body({ weekStart, setDecisionData, refresh, busy }: StepBodyProps) {
       {visible(board.pairings).map((p) => {
         const key = p.personIds.join('-')
         const people = p.personIds.map((id) => byId.get(id)).filter(Boolean) as Person[]
-        const acknowledged = counted.has(key)
+        const linkedId = links[key] ?? null
+        const acknowledged = linkedId !== null
         const credit = p.alreadyThisWeek[0]
+        const candidates = bothOnIt(p)
         return (
           <div className="wpn-row" key={key} data-testid={`wpn-pair-${key}`}>
             <div className="wpn-faces" role="img" aria-label={p.who}>
@@ -272,7 +330,7 @@ function Body({ weekStart, setDecisionData, refresh, busy }: StepBodyProps) {
 
             <div className="wpn-main">
               <div className="wpn-who">{p.who}</div>
-              <p className="wpn-stat">{pairingSentence(p, acknowledged)}</p>
+              <p className="wpn-stat">{pairingSentence(p, linkedId)}</p>
             </div>
 
             <div className="wpn-slots">
@@ -287,15 +345,28 @@ function Body({ weekStart, setDecisionData, refresh, busy }: StepBodyProps) {
                   aria-pressed={acknowledged}
                   aria-label={`${credit.title} on ${credit.when} already counts`}
                   disabled={busy}
-                  onClick={() =>
-                    setCounted((cur) => {
-                      const next = new Set(cur)
-                      if (!next.delete(key)) next.add(key)
-                      return next
-                    })
-                  }
+                  onClick={() => link(key, credit.id)}
                 >
                   {credit.day.slice(0, 3)} {credit.time ?? 'all day'} counts
+                </button>
+              )}
+
+              {/* "I also cant link an existing time." An evening where the two of them
+                  are both there ALONGSIDE somebody else was only ever a sentence — "but
+                  it's not that" — with no way to point at it and say that IS our time.
+                  The candidates are every event this week with both of them on it, which
+                  is the two lists the board already sends; nothing is written to the
+                  calendar, and nobody's event is edited. Offered only when there is more
+                  to choose from than the one-tap chip beside it already covers. */}
+              {candidates.length > (credit ? 1 : 0) && (
+                <button
+                  type="button"
+                  className={`wpn-slot wpn-link${acknowledged ? ' on' : ''}`}
+                  aria-expanded={picking === key}
+                  disabled={busy}
+                  onClick={() => setPicking((cur) => (cur === key ? null : key))}
+                >
+                  Link a time
                 </button>
               )}
 
@@ -321,6 +392,27 @@ function Body({ weekStart, setDecisionData, refresh, busy }: StepBodyProps) {
                 <span aria-hidden>＋</span> Another time
               </button>
             </div>
+
+            {/* The candidates, named by WHEN they are — two Dances in one week need
+                telling apart, and the day is the only thing that does it. Picking the
+                one already linked unlinks it: the answer stays undoable. */}
+            {picking === key && (
+              <div className="wpn-link-list" data-testid={`wpn-link-${key}`} role="group" aria-label={`Time ${p.who} already share`}>
+                {candidates.map((e) => (
+                  <button
+                    key={e.id}
+                    type="button"
+                    className={`wpn-link-opt${linkedId === e.id ? ' on' : ''}`}
+                    aria-pressed={linkedId === e.id}
+                    disabled={busy}
+                    onClick={() => link(key, e.id)}
+                  >
+                    <b>{e.title}</b>
+                    <span>{e.when}</span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         )
       })}
