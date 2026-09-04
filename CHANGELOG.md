@@ -15,6 +15,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Connection can point at time you already share.** A pairing used to count only an
+  event that was *exactly* those two people; an evening where you're both there alongside
+  everyone else could only be described ("you're both there, and it still isn't that").
+  Now **Link a time** lists every event on the week with both of you on it and lets you
+  say that one *is* your time together. Nothing is written to the calendar — nobody's
+  event is edited — and the choice is remembered rather than forgotten when you move on.
+
+- **A parked note can be turned into the thing it was asking for.** The banner that hands
+  a note back to the step it was tagged for now offers that step's own verb — **Make a
+  task** on Tasks, **Make an event** on Calendar — which opens the same composer the step
+  already uses, with the note's words filled in. Cancel and the note stays put; only a
+  real save ticks it off.
+
 - **A kid's "one thing" from planning night now shows on their profile.** Whatever they
   picked at Weekly Planning's Kids step — a goal they're behind on, an overdue chore, or
   something in their own words — appears on their Family profile as **This week's one
@@ -160,6 +173,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   database indefinitely — a working credential for an account you had explicitly disconnected.
   It's now wiped as part of the disconnect. Events already imported still stay on your family
   calendar, as before.
+
+### Fixed
+
+- **Weekly Planning's month grid no longer squashes the day's events.** On a busy week the
+  event chips were being compressed until their labels sat on the chip edges; each chip now
+  keeps its own height and a week row has the room for it.
+
+- **Connection now shows an event the moment you add one.** Adding a time saved it to the
+  calendar but the pairing underneath went on saying there was nothing there, which looked
+  exactly like a failed save. The step now waits for the event to reach the server before
+  it believes the answer.
+
+- **A note parked during the Horizon scan can only be tagged for a step still ahead of
+  you.** It used to offer Calendar — a step you'd already walked past — so the note
+  couldn't come back until a later session. The tags are now the steps still to come, and
+  the bar says in words where an untagged note ends up.
+
+- **The Loose ends receipt says what it did.** Sending an item onward showed a title, an
+  arrow and a step name; it now says that the item will come up at that step later in the
+  same sitting.
+
+- **Small things in Weekly Planning:** the park bar puts the cursor back after each note so
+  you can empty your head in one go; a kid's typed-out "something else" survives changing
+  their mind and picking an existing option; and a free day's Connection chip reads "free
+  all day" rather than "open".
 
 ## [0.14.1] - 2026-09-01
 

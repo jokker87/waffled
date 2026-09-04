@@ -309,6 +309,38 @@ Two things about it worth keeping:
 The card is presence-gated: module off, no session covering this week, and nobody answered
 all collapse to `null`, because all three mean "nothing to say" to a reader.
 
+### What the second validation pass changed, and the two rules it settled
+
+Ten items, and the two worth keeping as rules rather than as fixes:
+
+- **A tag is a DESTINATION, so it can only name a step still ahead.** The Horizon bar
+  offered Calendar — step 2, from step 3 — which addressed a note to a step you had
+  already walked past; it could only resurface in a LATER session. The list is now derived
+  from `STEPS` order rather than hand-kept, so a step added to the catalog needs nothing
+  done, and a step opts in by having a hint (which is what keeps `recap` out: it reports
+  the session and settles nothing). The old three-key list was correct when only steps 1,
+  3 and 10 read `planning_parked_items`; the shell's handoff banner is what made every
+  later step a real destination.
+
+- **A local-first write and a server read are not the same clock.** `EventModal` saves
+  through PowerSync and uploads afterwards, so a step that re-reads the SERVER at
+  `onSaved` asks before the server has been told. Connection did exactly that, and the
+  failure was the worst shape available: the event appeared on the calendar (which renders
+  the local mirror) while the pairing underneath went on saying nothing was there. It now
+  re-reads on a widening ladder until the credit count moves. **Any step that writes an
+  event through the shared modal and then reads the server has this problem** — the fix is
+  the timing, not a second source of truth; crediting from the local mirror would move the
+  row's sentence (title, duration, the household's clock) onto the device, which is the
+  thing this module composes server-side on purpose.
+
+Also settled: the parked-note banner now borrows the step's own verb ("Make a task",
+"Make an event") and opens that step's EXISTING composer via `useHandoffAction` — a step
+with no composer lends nothing and keeps "Handled", because a button promising an action
+it does not perform is worse than the plain one. And Connection's acknowledgement became
+a real **link** (which event answers this pairing), persisted through the step's own
+record at its current status — an id is a pointer, not a copy, so it sits beside the
+counts without breaching the "crumbs are counts, never module data" rule.
+
 ### What wave 2 found, and what is still open
 
 Building a step against a shipped module is also an audit of it. Three findings survived:
