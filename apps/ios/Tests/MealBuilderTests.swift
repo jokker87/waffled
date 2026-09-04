@@ -434,3 +434,79 @@ private actor Gate {
         waiters = []
     }
 }
+
+// MARK: - a plate built from inside a picker
+
+/// **The gap these were written for:** the recipe picker's ＋ wrote a RECIPE and nothing
+/// else — "I clicked the + and it made a new recipe, but I should also be able to make a
+/// meal". The picker can now host the real Meal Builder, and two things about that plate
+/// are load-bearing rather than cosmetic:
+///
+///  1. **It has to be SAVED by the time it is handed to the slot.** `POST /api/meals/:id/
+///     schedule` COPIES a saved plate and schedules an unsaved one directly
+///     (`meals.routes.ts`: `meal.is_saved ? await copyMeal(...) : meal`), so an unsaved
+///     plate means editing it later silently rewrites the night it was planned on.
+///  2. **Nothing may be written to the library by a plate nobody used.** The web creates
+///     the plate saved and DELETES it on cancel; iOS gets the same end state from the
+///     other side — the plate is created one-off (invisible to the library, which lists
+///     `where is_saved`) and only becomes saved at the moment it is used. A plate
+///     abandoned mid-build therefore cannot leak, with no delete to get wrong.
+@Suite struct PlateUsedFromAPickerTests {
+
+    @MainActor @Test func usingAPlateSavesItSoSchedulingWillCopyIt() async {
+        let server = FakePlateServer()
+        let m = MealBuilderModel(api: server.api())
+        await m.addRecipe("chicken", role: PlateRoles.main)
+        #expect(!m.isSaved)
+
+        let ready = await m.saveForUse()
+
+        #expect(ready)
+        #expect(m.isSaved)
+        // Exactly one write, and it says isSaved — not a rename, not a re-serve.
+        #expect(server.updates.count == 1)
+        #expect(server.updates[0].isSaved == true)
+        #expect(server.updates[0].name == nil)
+        #expect(server.updates[0].servings == nil)
+    }
+
+    /// Already in the library ⇒ nothing to write. A second PATCH would be a wasted round
+    /// trip on the one tap that is standing between the family and a planned night.
+    @MainActor @Test func aPlateAlreadyInTheLibraryIsHandedOverWithNoWriteAtAll() async {
+        let server = FakePlateServer()
+        let m = MealBuilderModel(api: server.api(), existing: plateFixture(isSaved: true,
+                                                                          dishes: [plateDish("chicken", "Chicken", role: "main")]))
+        let ready = await m.saveForUse()
+
+        #expect(ready)
+        #expect(server.updates.isEmpty)
+    }
+
+    /// An EMPTY plate is not a meal. Handing one to the slot would plan a night with a
+    /// dishless "New meal" on it, which is worse than not planning it.
+    @MainActor @Test func anEmptyPlateCannotBeUsed() async {
+        let server = FakePlateServer()
+        let m = MealBuilderModel(api: server.api())
+
+        let ready = await m.saveForUse()
+
+        #expect(!ready)
+        #expect(server.creates == 0)
+        #expect(m.message != nil)
+    }
+
+    /// A failed save must not report a usable plate: the caller would schedule an unsaved
+    /// plate, and then the copy-on-schedule guarantee is quietly gone.
+    @MainActor @Test func aFailedSaveReportsFailureRatherThanHandingThePlateOver() async {
+        let server = FakePlateServer()
+        let m = MealBuilderModel(api: server.api())
+        await m.addRecipe("chicken", role: PlateRoles.main)
+        server.failing = true
+
+        let ready = await m.saveForUse()
+
+        #expect(!ready)
+        #expect(!m.isSaved)
+        #expect(m.message != nil)
+    }
+}

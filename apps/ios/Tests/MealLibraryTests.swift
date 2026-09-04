@@ -122,3 +122,34 @@ private func libRecipe(_ id: String, _ title: String, cuisine: String? = nil,
         #expect(list.dropFirst().allSatisfy { $0.isMeal })
     }
 }
+
+// MARK: - what the library's ＋ offers
+
+/// "I clicked the + and it made a new recipe, but I should also be able to make a meal."
+///
+/// The rule is the same one that already governs whether PLATE CARDS are shown: offer a
+/// plate only to a caller that can take one back. Browsing can always make either; a
+/// picker whose host has nowhere to put a plate (the meal planner's single-recipe slot)
+/// must not offer to build one — that is the "control that does nothing when tapped" the
+/// grid already avoids by hiding plate cards there.
+@Suite struct LibraryNewOfferTests {
+
+    @Test func browsingOffersBoth() {
+        #expect(LibraryNewOffer.of(canPickMeal: true) == .recipeAndMeal)
+    }
+
+    /// The planning step's night picker and the Meal Builder's "add a side" both supply
+    /// `onPickMeal`, so both get "＋ New meal".
+    @Test func aPickerThatCanTakeAPlateOffersToBuildOne() {
+        #expect(LibraryNewOffer.of(canPickMeal: true).offersMeal)
+    }
+
+    @Test func aPickerThatCannotTakeAPlateOffersOnlyARecipe() {
+        let offer = LibraryNewOffer.of(canPickMeal: false)
+        #expect(offer == .recipeOnly)
+        #expect(!offer.offersMeal)
+        // A recipe is always on the table — that is what the ＋ did before, and it must
+        // keep doing it.
+        #expect(offer.offersRecipe)
+    }
+}

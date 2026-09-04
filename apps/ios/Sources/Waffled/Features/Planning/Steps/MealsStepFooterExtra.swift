@@ -10,13 +10,19 @@ import SwiftUI
 /// comment for why a module-scoped, session+week-keyed slot is the right shape (the web's
 /// `MealsStep.tsx` does the same thing for the same reason).
 ///
-/// THE FILL IS HEADLESS HERE. The web opens the shared "Plan my week" planner and hands
-/// the approved cards to the fill endpoint; iOS omits `cards` entirely, which is the
-/// endpoint's documented other half — "the headless fill, which is what iOS parity and any
-/// non-interactive caller needs" (`apps/api/.../steps/meals.ts`). The server drafts only
-/// the empty nights, refuses one somebody already decided, and hands back the same receipt
-/// the undo checks, so both guarantees survive. Wiring iOS's `PlanWeekSheet` up instead
-/// would need a hook that sheet does not have — raised, not made.
+/// THIS BUTTON WRITES NOTHING. It opens the shared "Plan my week" planner — the same
+/// screen the Meals tab uses, narrowed to the empty nights — and the approved week is
+/// applied from there through the step's own fill endpoint. It does NOT draft a week
+/// silently, and that is a fix rather than a preference: the port had it fire the headless
+/// fill, so the one AI action on the step had no screen and reported as "plan the rest AI
+/// didn't bring up the screen".
+///
+/// THE PLANNER IS PRESENTED BY THE BODY, NOT FROM HERE. `plannerOpen` is on the shared
+/// model for the same reason the rest of this step's state is: the shell builds the body
+/// and this footer as two sibling trees, so a `.sheet` hung off this view would be a
+/// presentation attached to a control that legitimately disappears the moment the fill
+/// lands (this body renders NOTHING until the week is read, and swaps to the undo after).
+/// The web says the same thing about the same field.
 struct MealsStepFooterExtra: View {
     let props: PlanningStepProps
 
@@ -43,9 +49,9 @@ struct MealsStepFooterExtra: View {
     private var fillButton: some View {
         let empties = model.emptyDates.count
         return Button {
-            Task {
-                if await model.planTheRest(weekStart: props.weekStart) { props.refresh() }
-            }
+            // ONE THING ONLY: raise the planner. The write happens when the family
+            // approves a week in it (`MealsStepView` presents it; `applyPlan` sends it).
+            model.openPlanner()
         } label: {
             HStack(spacing: 5) {
                 if model.busy {

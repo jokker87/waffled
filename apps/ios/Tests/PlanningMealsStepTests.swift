@@ -903,3 +903,200 @@ private func model(_ feed: MealsFeed) -> PlanningMealsModel {
             == "s-1|2026-09-06")
     }
 }
+
+// MARK: - "Plan the rest" brings up the planner
+//
+// THE BUG THESE WERE WRITTEN FOR. The web's footer control does exactly one thing —
+// `set({ planner: true })` — and the shared "Plan my week" planner renders from the step
+// BODY, off the same store, because "the button that opens it is in FooterExtra and the
+// planner renders from Body — two sibling trees". The iOS port replaced that click with a
+// direct headless fill, so the step's one AI action had no screen to bring up: "plan the
+// rest AI didn't bring up the screen/work".
+//
+// The presentation flag therefore has to live on the MODEL (the thing both trees share),
+// which is also the only place a test can reach it — a footer button is a View.
+
+@MainActor
+@Suite struct PlanningMealsPlannerTests {
+
+    @Test func theControlOpensThePlannerAndWritesNothingByItself() async throws {
+        let feed = try MealsFeed()
+        let model = model(feed)
+        await model.load(weekStart: "2026-09-06", seed: [])
+
+        #expect(!model.plannerOpen)
+        model.openPlanner()
+
+        #expect(model.plannerOpen)
+        // THE REGRESSION GUARD: tapping the control must not draft a week nobody has seen.
+        // The port fired the fill from here, which is why there was never a screen.
+        #expect(feed.fillBodies.isEmpty)
+        #expect(model.filled.isEmpty)
+    }
+
+    /// Every night planned ⇒ there is nothing for the planner to draft, and the control is
+    /// disabled with a title saying so (the web does the same). Belt on the model, so the
+    /// flag can't be flipped from somewhere that forgot to check.
+    @Test func aFullWeekCannotOpenThePlanner() async throws {
+        let feed = try MealsFeed()
+        feed.view = try WaffledAPI.decoder.decode(
+            WaffledAPI.PlanningMealsView.self,
+            from: Data("""
+            { "weekStart": "2026-09-06", "nights": [], "emptyDates": [],
+              "groceries": null, "choresOn": false, "shopping": null }
+            """.utf8))
+        let model = model(feed)
+        await model.load(weekStart: "2026-09-06", seed: [])
+
+        model.openPlanner()
+        #expect(!model.plannerOpen)
+    }
+
+    /// The planner is a presentation, so the sheet must be able to close it from the
+    /// inside — `dismiss()` writes back through the binding.
+    @Test func theSheetCanCloseItself() async throws {
+        let feed = try MealsFeed()
+        let model = model(feed)
+        await model.load(weekStart: "2026-09-06", seed: [])
+        model.openPlanner()
+
+        model.setPlanner(false)
+        #expect(!model.plannerOpen)
+    }
+
+    /// The whole point of routing the approved week through the step's OWN fill endpoint:
+    /// it refuses a night somebody already decided and hands back the receipt the undo
+    /// checks. So the cards must travel as a PRESENT ARRAY (the other half of the
+    /// three-way rule asserted above), and the planner must close.
+    @Test func theApprovedWeekTravelsAsARealArrayAndClosesThePlanner() async throws {
+        let feed = try MealsFeed()
+        let model = model(feed)
+        await model.load(weekStart: "2026-09-06", seed: [])
+        model.openPlanner()
+
+        let approved = [
+            planCard("2026-09-09", title: "Sheet-pan chicken", recipeId: "r-sheet"),
+            planCard("2026-09-11", title: "Chili", recipeId: nil),
+            planCard("2026-09-12", title: "Ramen", recipeId: "r-ramen"),
+        ]
+        let landed = await model.applyPlan(weekStart: "2026-09-06", approved: approved)
+
+        #expect(landed)
+        #expect(!model.plannerOpen)
+        #expect(feed.fillBodies.count == 1)
+        guard case let .array(sent)? = feed.fillBodies[0]["cards"] else {
+            Issue.record("the approved week must travel as a present array")
+            return
+        }
+        #expect(sent.count == 3)
+        // …and the receipt from the fill is what makes the undo live.
+        #expect(model.filled.map(\.date) == ["2026-09-09", "2026-09-11", "2026-09-12"])
+    }
+
+    /// A week that narrows to nothing must NOT be sent. `cards: []` is "present but not a
+    /// usable list", which the server answers 200 to while writing nothing — so firing it
+    /// would report a week that was never planned. Say so instead.
+    @Test func anApprovedWeekThatNarrowsToNothingIsNeverSent() async throws {
+        let feed = try MealsFeed()
+        let model = model(feed)
+        await model.load(weekStart: "2026-09-06", seed: [])
+        model.openPlanner()
+
+        // Sunday and Monday are already decided — nothing here lands on an empty night.
+        let landed = await model.applyPlan(
+            weekStart: "2026-09-06",
+            approved: [planCard("2026-09-06", title: "Nope", recipeId: nil),
+                       planCard("2026-09-07", title: "Also nope", recipeId: nil)])
+
+        #expect(!landed)
+        #expect(feed.fillBodies.isEmpty)
+        #expect(!model.plannerOpen)
+        #expect(model.errorMessage != nil)
+    }
+}
+
+// MARK: - Narrowing the shared planner to this step's promise
+
+@Suite struct PlanningMealsPlanNarrowingTests {
+
+    /// "The only day chips are the EMPTY nights" — and they must round-trip through the
+    /// planner's own key, which is `yyyy-MM-dd` in the HOUSEHOLD's zone. Get the zone (or
+    /// the hour) wrong and no chip is selected, so "✨ Plan my week" is disabled and the
+    /// control is a silent no-op all over again.
+    @Test func theEmptyNightsBecomeDatesThatRoundTripInTheHouseholdZone() {
+        let tz = TimeZone(identifier: "America/Los_Angeles")!
+        let days = PlanningMealsPlan.plannerDays(["2026-09-09", "2026-09-11", "2026-09-12"], tz: tz)
+
+        #expect(days.count == 3)
+        #expect(days.map { DateFmt.string($0, "yyyy-MM-dd", tz) }
+            == ["2026-09-09", "2026-09-11", "2026-09-12"])
+        // NOON, not midnight: a day pinned at midnight is one DST transition away from
+        // being the day before, and the planner reads the weekday back off this Date.
+        #expect(days.map { Cal.gregorian(tz).component(.hour, from: $0) } == [12, 12, 12])
+    }
+
+    /// East of Greenwich too — the failure is asymmetric, so one zone proves nothing.
+    @Test func andInAZoneAheadOfUTC() {
+        let tz = TimeZone(identifier: "Australia/Sydney")!
+        let days = PlanningMealsPlan.plannerDays(["2026-09-09"], tz: tz)
+        #expect(days.map { DateFmt.string($0, "yyyy-MM-dd", tz) } == ["2026-09-09"])
+    }
+
+    @Test func rubbishInIsDroppedRatherThanBecomingSomeOtherDay() {
+        let tz = TimeZone(identifier: "UTC")!
+        #expect(PlanningMealsPlan.plannerDays(["not-a-day", ""], tz: tz).isEmpty)
+    }
+
+    /// The approved cards, narrowed to what this step promised: DINNERS, on the nights
+    /// that are still empty. The server enforces both, but a client that sent more would
+    /// report a count nobody wrote.
+    @Test func onlyDinnersOnStillEmptyNightsTravel() {
+        let cards = PlanningMealsPlan.cards(
+            from: [
+                planCard("2026-09-09", title: "Sheet-pan chicken", recipeId: "r-sheet"),
+                planCard("2026-09-07", title: "Already decided", recipeId: nil),
+                planCard("2026-09-11", title: "Lunchtime soup", recipeId: nil, mealType: "lunch"),
+                planCard("2026-09-12", title: "Ramen", recipeId: "r-ramen"),
+            ],
+            emptyDates: ["2026-09-09", "2026-09-11", "2026-09-12"])
+
+        #expect(cards.map(\.date) == ["2026-09-09", "2026-09-12"])
+        #expect(cards.allSatisfy { $0.mealType == "dinner" })
+        #expect(cards[0].recipeId == "r-sheet")
+        #expect(cards[0].title == "Sheet-pan chicken")
+        // A recipe-less card keeps its title — that is how "Leftovers" gets planned.
+        let bare = PlanningMealsPlan.cards(
+            from: [planCard("2026-09-11", title: "Chili", recipeId: nil)],
+            emptyDates: ["2026-09-11"])
+        #expect(bare.count == 1)
+        #expect(bare[0].recipeId == nil)
+        #expect(bare[0].title == "Chili")
+    }
+
+    /// A card with neither a recipe nor a title is nothing at all: the fill would skip it
+    /// server-side, and counting it here would overstate what was planned.
+    @Test func aCardWithNothingOnItIsDropped() {
+        let cards = PlanningMealsPlan.cards(
+            from: [planCard("2026-09-09", title: "   ", recipeId: nil)],
+            emptyDates: ["2026-09-09"])
+        #expect(cards.isEmpty)
+    }
+
+    /// The one-line note the step puts above the planner's guardrails, so the narrowing is
+    /// stated rather than merely implied by which chips are there.
+    @Test func theNoteNamesHowManyNightsAreInPlayAndWhatIsLeftAlone() {
+        #expect(PlanningMealsText.plannerNote(3)
+            == "Planning the three empty nights — the rest stay as they are.")
+        #expect(PlanningMealsText.plannerNote(1)
+            == "Planning the one empty night — the rest stay as they are.")
+    }
+}
+
+/// One AI-drafted card off `POST /api/meals/plan-week`, as the planner hands it back.
+private func planCard(
+    _ date: String, title: String, recipeId: String?, mealType: String = "dinner"
+) -> WaffledAPI.PlanCardDTO {
+    WaffledAPI.PlanCardDTO(
+        date: date, mealType: mealType, title: title, recipeId: recipeId,
+        emoji: nil, minutes: nil, servings: nil, note: nil)
+}

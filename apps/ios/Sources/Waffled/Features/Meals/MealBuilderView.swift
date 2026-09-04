@@ -19,6 +19,14 @@ struct MealBuilderView: View {
     /// The library the picker browses (owned by the Meals tab, or made here when the
     /// builder is presented modally from a recipe).
     let recipes: RecipesModel
+    /// Set when the builder was opened from INSIDE a picker ("＋ New meal"), which means
+    /// the destination is already decided by the slot you came from.
+    ///
+    /// It is a RENDER CONTRACT as much as a callback: supplying it takes **Schedule** and
+    /// **Add plate to list** off the bar and puts one "Use this meal" there instead.
+    /// Leaving them would let somebody schedule the plate here and then have the slot
+    /// schedule it again — the same plate planned onto two nights from one build.
+    let onUse: ((WaffledAPI.MealDTO) -> Void)?
     @Environment(\.dismiss) private var dismiss
     @Environment(SyncManager.self) private var sync
     @State private var model: MealBuilderModel
@@ -27,9 +35,11 @@ struct MealBuilderView: View {
     @State private var seeded = false
     @FocusState private var nameFocused: Bool
 
-    init(start: MealBuilderStart, recipes: RecipesModel) {
+    init(start: MealBuilderStart, recipes: RecipesModel,
+         onUse: ((WaffledAPI.MealDTO) -> Void)? = nil) {
         self.start = start
         self.recipes = recipes
+        self.onUse = onUse
         _model = State(initialValue: MealBuilderModel(existing: start.existingPlate))
     }
 
@@ -217,8 +227,21 @@ struct MealBuilderView: View {
                 Spacer(minLength: 0)
             }
             HStack(spacing: 10) {
-                barButton("Add plate to list", filled: false) { Task { await model.addToGrocery() } }
-                barButton("Schedule", filled: true) { scheduling = true }
+                if let onUse {
+                    // ONE ACTION, because the destination is already decided by the slot
+                    // this builder was opened from. Saving first is what makes scheduling
+                    // COPY the plate — see `MealBuilderModel.saveForUse`.
+                    barButton("Use this meal", filled: true) {
+                        Task {
+                            guard await model.saveForUse(), let plate = model.meal else { return }
+                            onUse(plate)
+                            dismiss()
+                        }
+                    }
+                } else {
+                    barButton("Add plate to list", filled: false) { Task { await model.addToGrocery() } }
+                    barButton("Schedule", filled: true) { scheduling = true }
+                }
             }
         }
         .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 10)

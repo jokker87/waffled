@@ -117,6 +117,16 @@ enum PlanningMealsText {
             : "Fills the \(countWord(empties)) empty nights"
     }
 
+    /// The line above the shared planner's guardrails, which is the only place the
+    /// NARROWING is stated out loud. The day chips being the empty nights implies it; a
+    /// family that is about to hand seven nights to an AI deserves to be told which of
+    /// them are in play and that the rest are safe. Mirrors the web's planner head.
+    static func plannerNote(_ empties: Int) -> String {
+        let one = empties == 1
+        return "Planning the \(countWord(empties)) empty \(one ? "night" : "nights")"
+            + " — the rest stay as they are."
+    }
+
     // Formatters are `static let` per the project's performance rule — `dow` alone is read
     // seven times a load, and once more per kept night.
     private static let isoDay: DateFormatter = {
@@ -153,6 +163,57 @@ enum PlanningMealsText {
         return f
     }()
     private static let isoInstantNoFraction = ISO8601DateFormatter()
+}
+
+// MARK: - Narrowing the shared planner to this step's promise
+
+/// The two pure translations between this step and the app's own "Plan my week" planner.
+///
+/// The step reuses that planner rather than growing a second, worse one — and narrows it
+/// to what the step promised in exactly two places: **the only nights it may touch are the
+/// empty ones**, and **the approved week is applied through the step's fill endpoint**.
+/// Both are shaped here so they can be asserted without a running app.
+enum PlanningMealsPlan {
+
+    /// The empty nights as `Date`s for the planner's day chips.
+    ///
+    /// **NOON, in the HOUSEHOLD's zone.** The planner keys its chips with
+    /// `DateFmt.string(d, "yyyy-MM-dd", householdTz)` and reads the weekday off the same
+    /// `Date`, so a day pinned at midnight is one DST transition away from being the day
+    /// before — and a key that doesn't match `initialDays` selects no chips at all, which
+    /// leaves "✨ Plan my week" disabled and the control a silent no-op all over again.
+    /// (The web parses at noon for the same reason: a bare `YYYY-MM-DD` is UTC there.)
+    static func plannerDays(_ dates: [String], tz: TimeZone) -> [Date] {
+        dates.compactMap { DateFmt.date($0 + " 12:00", "yyyy-MM-dd HH:mm", tz) }
+    }
+
+    /// The cards the family approved, narrowed to what the fill is allowed to write.
+    ///
+    /// Dinners only (this step plans dinners; the server DROPS another meal rather than
+    /// rewriting it), on nights that are still empty, one card per night, and never a card
+    /// carrying neither a recipe nor a title — the fill would skip that one server-side,
+    /// so counting it here would overstate what was planned.
+    static func cards(
+        from approved: [WaffledAPI.PlanCardDTO], emptyDates: [String]
+    ) -> [WaffledAPI.PlanningMealsCard] {
+        let open = Set(emptyDates)
+        var taken = Set<String>()
+        var out: [WaffledAPI.PlanningMealsCard] = []
+        for card in approved {
+            guard open.contains(card.date),
+                  card.mealType == PlanningMealsModel.mealType,
+                  !taken.contains(card.date)
+            else { continue }
+            let title = card.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard card.recipeId != nil || !title.isEmpty else { continue }
+            taken.insert(card.date)
+            out.append(
+                WaffledAPI.PlanningMealsCard(
+                    date: card.date, mealType: PlanningMealsModel.mealType,
+                    title: title, recipeId: card.recipeId))
+        }
+        return out.sorted { $0.date < $1.date }
+    }
 }
 
 // MARK: - Rows
@@ -228,6 +289,17 @@ final class PlanningMealsModel {
     /// before the fill against the count after.
     private(set) var groceryAdded: Int?
 
+    /// Whether the shared "Plan my week" planner is up over the step.
+    ///
+    /// IT LIVES HERE, NOT IN A VIEW'S `@State`, and that is the whole reason this model is
+    /// in a store: the button that OPENS the planner is in the footer
+    /// (`MealsStepFooterExtra`) and the planner is PRESENTED by the body
+    /// (`MealsStepView`) — two sibling trees the shell builds from separate calls, exactly
+    /// as `MealsStep.tsx` says of its own `planner` field. A flag in either view is
+    /// invisible to the other, which is how the port ended up with a footer control that
+    /// had no screen to bring up.
+    private(set) var plannerOpen = false
+
     /// Every string the seven tiles need, rebuilt on each applied view and on every change
     /// to the ✨ set. Never recomputed in the render path.
     private(set) var rows: [PlanningMealsNightRow] = []
@@ -281,7 +353,10 @@ final class PlanningMealsModel {
 
     /// The step plans DINNERS. Breakfast and lunch belong to the Meals screen — a session
     /// step that asked about twenty-one slots would be a spreadsheet, not a decision.
-    static let mealType = "dinner"
+    ///
+    /// `nonisolated` so the pure narrowing in `PlanningMealsPlan` (and its tests) can spell
+    /// the constant rather than a second copy of the string.
+    nonisolated static let mealType = "dinner"
 
     // MARK: Derived
 
@@ -343,18 +418,61 @@ final class PlanningMealsModel {
         if let fresh = try? await fetchView(weekStart, choreHint) { apply(fresh) }
     }
 
-    // MARK: The two writes the footer drives
+    // MARK: The planner the footer opens
 
-    /// "Plan the rest for me". Returns true when something was actually written, so the
-    /// caller knows whether to tell the shell.
+    /// "✨ Plan the rest" — which OPENS THE PLANNER and writes nothing at all.
     ///
-    /// THE CARDS ARE ABSENT ON iOS, and that is the endpoint's documented headless path —
-    /// the server drafts the empty nights itself. The web hands over a week the family
-    /// approved in the shared "Plan my week" planner; that planner (`PlanWeekSheet`)
-    /// applies its own cards through `SyncManager.setMealPlan` and has no hook to hand
-    /// them here, so wiring it up would mean editing a file this step does not own. Note
-    /// the three-way rule in `PlanningMealsWire.fillBody`: `nil` here means the KEY IS
-    /// ABSENT, never a null.
+    /// The one AI action on this step is the app's existing "Plan my week" planner
+    /// (guardrails, the preferences box, reshuffle, swap, lock, a manual pick per night),
+    /// narrowed to the empty nights. Drafting a week silently instead is what the port
+    /// did, and it is the bug: the control appeared to do nothing because there was
+    /// nothing to see, and a week nobody approved is not a decision the family made.
+    func openPlanner() {
+        // Belt for the footer's own `disabled`: no week read yet, a write in flight, or
+        // nothing left to plan are all "there is no planner to open".
+        guard view != nil, !busy, !emptyDates.isEmpty else { return }
+        plannerOpen = true
+    }
+
+    /// Set by the sheet's binding too — `dismiss()` inside the planner writes `false` back
+    /// through it, so Cancel and a swipe-down land in the same place as a code path.
+    func setPlanner(_ open: Bool) { plannerOpen = open }
+
+    /// The week the family approved in the planner, applied.
+    ///
+    /// It goes through THIS STEP's fill endpoint rather than the planner's usual per-slot
+    /// writes for the two things only that endpoint can do: refuse a night somebody
+    /// already decided, and hand back the receipt the undo checks. The cards are narrowed
+    /// first — dinners, on nights that are still empty — because the server enforces both
+    /// and a client that sent more would report a count nobody wrote.
+    @discardableResult
+    func applyPlan(weekStart: String, approved: [WaffledAPI.PlanCardDTO]) async -> Bool {
+        let cards = PlanningMealsPlan.cards(from: approved, emptyDates: emptyDates)
+        // The planner closes as soon as this resolves either way, so anything to say has
+        // to be said on the step behind it rather than swallowed.
+        plannerOpen = false
+        // NEVER `cards: []`. An empty-but-present array is "not a usable list" to the
+        // route, which answers 200 having written nothing — so firing it would report a
+        // week that was never planned (the exact failure `fillBody`'s three-way rule
+        // exists to prevent).
+        guard !cards.isEmpty else {
+            errorMessage = "Nothing in that plan landed on an empty night — the week was left as it is."
+            return false
+        }
+        return await planTheRest(weekStart: weekStart, cards: cards)
+    }
+
+    // MARK: The two writes the planner and the footer drive
+
+    /// Apply a week to the empty nights. Returns true when something was actually
+    /// written, so the caller knows whether to tell the shell.
+    ///
+    /// `cards` IS THREE-WAY (see `PlanningMealsWire.fillBody`) and `nil` here means the
+    /// KEY IS ABSENT, never a null — the endpoint's documented headless path, where the
+    /// server drafts the empty nights itself. Nothing in the app takes that path today:
+    /// the step opens the planner and hands over the week the family approved, exactly as
+    /// the web does. It is kept because it is the API's other half, and because a
+    /// non-interactive caller (a future automation) is what it was written for.
     @discardableResult
     func planTheRest(weekStart: String, cards: [WaffledAPI.PlanningMealsCard]? = nil) async -> Bool {
         // Bailing out quietly would report a week that was never written. Another write in

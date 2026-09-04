@@ -390,6 +390,39 @@ final class MealBuilderModel {
         }
     }
 
+    /// The plate is about to fill a slot the caller already decided (built from inside a
+    /// picker — "＋ New meal"). Get it into the library first, and report whether it is
+    /// really usable.
+    ///
+    /// **BEING SAVED IS LOAD-BEARING, NOT COSMETIC.** `POST /api/meals/:id/schedule` COPIES
+    /// a saved plate and schedules an unsaved one directly (`meal.is_saved ? copyMeal(…) :
+    /// meal`), so handing over an unsaved plate means editing it later silently rewrites
+    /// the night it was planned on.
+    ///
+    /// **AND IT IS DONE HERE, NOT AT CREATE.** The web creates a picker's plate saved and
+    /// DELETES it if you back out; doing it at the moment of use reaches the same end state
+    /// from the other side — the plate is one-off (invisible to a library that lists `where
+    /// is_saved`) right up until somebody uses it, so a plate abandoned mid-build cannot
+    /// leak and there is no delete to get wrong.
+    @discardableResult
+    func saveForUse() async -> Bool {
+        // An EMPTY plate is not a meal: filling a slot with a dishless "New meal" is worse
+        // than not filling it. This is also why nothing is created here — a plate with no
+        // dishes has never been POSTed and must not be.
+        guard mealId != nil, !isEmpty else {
+            message = "Add a dish first."
+            return false
+        }
+        guard !isSaved else { return true }
+        let previous = isSaved
+        isSaved = true
+        // A FAILED SAVE MUST REPORT FAILURE. Handing the plate over anyway would schedule
+        // an unsaved one, quietly losing the copy-on-schedule guarantee above.
+        return await run(rollback: { [weak self] in self?.isSaved = previous }) { api, id in
+            try await api.update(id, nil, nil, true)
+        }
+    }
+
     /// Commit the inline name edit (on submit / focus loss). Creates the plate if this
     /// is the first thing that happened on the screen.
     func commitRename() async {

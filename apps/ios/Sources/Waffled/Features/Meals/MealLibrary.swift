@@ -142,3 +142,25 @@ enum LibraryFilter {
         }
     }
 }
+
+/// What the library's "make something new" control offers.
+///
+/// The ＋ used to write a RECIPE and nothing else — "I clicked the + and it made a new
+/// recipe, but I should also be able to make a meal". A plate is offered under exactly the
+/// rule that already governs whether plate CARDS are shown: only to a caller that can take
+/// one back. Browsing always can (it opens the plate); a picker whose host has nowhere to
+/// put a plate — the meal planner's single-recipe slot — must not offer to build one, or
+/// the ＋ leaves you holding something the screen you came from cannot accept.
+enum LibraryNewOffer: Equatable, Sendable {
+    case recipeOnly
+    case recipeAndMeal
+
+    static func of(canPickMeal: Bool) -> LibraryNewOffer {
+        canPickMeal ? .recipeAndMeal : .recipeOnly
+    }
+
+    /// A recipe is always on the table — that is what the ＋ did before it grew a second
+    /// answer, and it has to keep doing it.
+    var offersRecipe: Bool { true }
+    var offersMeal: Bool { self == .recipeAndMeal }
+}

@@ -5,7 +5,10 @@ import SwiftUI
 /// per-night cards you curate the way the web kiosk does: **lock** a night you like,
 /// **swap** to let the AI re-roll one night, manually **pick** a recipe, or
 /// **reshuffle** every unlocked night. Nothing is saved until you tap Add; then each
-/// card is applied via `SyncManager.setMealPlan` and the grocery list is rebuilt.
+/// card is applied via `SyncManager.setMealPlan` and the grocery list is rebuilt — or,
+/// when a host supplies `onApply`, handed to that host's own endpoint instead (Weekly
+/// Planning's Meals step, which needs the fill's refuse-a-decided-night guarantee and its
+/// undo receipt). See the narrowing props below.
 struct PlanWeekSheet: View {
     let start: String
     let weekLabel: String
@@ -18,6 +21,44 @@ struct PlanWeekSheet: View {
     /// Pantry "use up soon" names to pre-seed the use-up list (from Cook-from-pantry's
     /// "Plan my week"). Empty by default; applied once on appear.
     var seedUseUp: [String] = []
+
+    // MARK: …and the three a NARROWED host supplies
+    //
+    // A caller may reuse this planner for part of a week rather than growing a second,
+    // worse one. Weekly Planning's Meals step does exactly that: dinners only, on the
+    // empty nights only, applied through its own fill endpoint. All three default to
+    // today's behaviour, so the Meals tab and Cook-from-pantry are untouched.
+
+    /// Which meals may be planned. One entry ⇒ the choice is already made and the picker
+    /// isn't drawn — a segmented control with a single segment is a dead affordance.
+    var mealTypes: [String] = ["breakfast", "lunch", "dinner"]
+    /// The nights to arrive pre-selected, as `yyyy-MM-dd` in the HOUSEHOLD's zone (the
+    /// same key `weekDays` renders through). `nil` keeps the default of Mon–Fri.
+    ///
+    /// These MUST agree with `weekDays` or no chip is selected and "✨ Plan my week" sits
+    /// disabled — see `PlanningMealsPlan.plannerDays`.
+    var initialDays: [String]? = nil
+    /// A line above the guardrails saying what this run is narrowed to ("Planning the
+    /// three empty nights — the rest stay as they are").
+    var note: String? = nil
+    /// Where an approved week goes INSTEAD of the per-slot writes below.
+    ///
+    /// Supplying this REPLACES the apply path; it does not run alongside it. A host that
+    /// owns its own endpoint (the planning step's fill, which refuses a night somebody
+    /// already decided and hands back the receipt its undo checks) must not also have
+    /// `SyncManager.setMealPlan` write every card behind its back. Returns whether the
+    /// week landed; the sheet closes either way, because the host reports the failure on
+    /// the screen underneath.
+    ///
+    /// `@MainActor` on the closure TYPE, not just where it happens to be written: a host's
+    /// hook lands in an `@Observable` model and then tells the shell to refetch, and a
+    /// closure whose isolation was left to inference could run that off the main actor.
+    ///
+    /// The three carry an explicit `= nil` rather than leaning on the implicit one: what
+    /// matters here is that the SYNTHESIZED MEMBERWISE INIT gives them default arguments,
+    /// so the two existing call sites keep compiling with `onApplied` as their trailing
+    /// closure.
+    var onApply: (@MainActor ([WaffledAPI.PlanCardDTO]) async -> Bool)? = nil
     /// Called after suggestions are applied, so the planner reloads.
     let onApplied: () -> Void
 
@@ -25,7 +66,6 @@ struct PlanWeekSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     private enum Phase { case config, loading, review, empty, failed }
-    private let mealTypes = ["breakfast", "lunch", "dinner"]
 
     @State private var phase: Phase = .config
     @State private var mealType = "dinner"
@@ -117,10 +157,18 @@ struct PlanWeekSheet: View {
         }
     }
 
-    /// Default to weekdays (Mon–Fri), matching the web kiosk.
+    /// Default to weekdays (Mon–Fri), matching the web kiosk — unless the host named the
+    /// nights, in which case those are the run and every one of them starts selected.
     private func seedDaysIfNeeded() {
         if useUp.isEmpty, !seedUseUp.isEmpty { useUp = Array(seedUseUp.prefix(12)) }
+        // A host that narrowed the meals may have narrowed away the default: planning
+        // "dinner" when only lunch is on offer would draft the wrong meal silently.
+        if !mealTypes.contains(mealType), let only = mealTypes.first { mealType = only }
         guard selectedDays.isEmpty else { return }
+        if let initialDays {
+            selectedDays = Set(initialDays)
+            return
+        }
         for d in weekDays where (2...6).contains(cal.component(.weekday, from: d)) {
             selectedDays.insert(ymd(d))
         }
@@ -132,30 +180,47 @@ struct PlanWeekSheet: View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
+                    // The host's own narrowing, said out loud. Which nights are in play is
+                    // otherwise only implied by which chips exist, and this planner is
+                    // about to draft a week for a family that wants to know what it will
+                    // and won't touch.
+                    if let note {
+                        Text(note)
+                            .font(.system(size: 13, weight: .semibold)).foregroundStyle(WF.aiD)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, 12).padding(.vertical, 9)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(WF.ai.opacity(0.10))
+                            .clipShape(RoundedRectangle(cornerRadius: WF.rSM, style: .continuous))
+                    }
+
                     Text("Tell Waffled the guardrails — it drafts the meals and the grocery list in one go.")
                         .font(.system(size: 14)).foregroundStyle(WF.ink3)
                         .fixedSize(horizontal: false, vertical: true)
 
-                    // Plan which meal?
-                    WaffledFieldCard(title: "Plan which meal?") {
-                        HStack(spacing: 0) {
-                            ForEach(mealTypes, id: \.self) { m in
-                                Button { mealType = m } label: {
-                                    Text(m.capitalized)
-                                        .font(.system(size: 14, weight: mealType == m ? .bold : .medium))
-                                        .foregroundStyle(mealType == m ? WF.ink : WF.ink3)
-                                        .frame(maxWidth: .infinity).padding(.vertical, 9)
-                                        .background(
-                                            mealType == m
-                                                ? AnyView(RoundedRectangle(cornerRadius: WF.rSM, style: .continuous).fill(WF.card)
-                                                    .shadow(color: .black.opacity(0.06), radius: 3, y: 1))
-                                                : AnyView(Color.clear))
+                    // Plan which meal? — only when there is a choice. One option is not a
+                    // control, it is a claim the picker can't act on.
+                    if mealTypes.count > 1 {
+                        WaffledFieldCard(title: "Plan which meal?") {
+                            HStack(spacing: 0) {
+                                ForEach(mealTypes, id: \.self) { m in
+                                    Button { mealType = m } label: {
+                                        Text(m.capitalized)
+                                            .font(.system(size: 14, weight: mealType == m ? .bold : .medium))
+                                            .foregroundStyle(mealType == m ? WF.ink : WF.ink3)
+                                            .frame(maxWidth: .infinity).padding(.vertical, 9)
+                                            .background(
+                                                mealType == m
+                                                    ? AnyView(RoundedRectangle(cornerRadius: WF.rSM, style: .continuous).fill(WF.card)
+                                                        .shadow(color: .black.opacity(0.06), radius: 3, y: 1))
+                                                    : AnyView(Color.clear))
+                                    }
+                                    .buttonStyle(.plain)
                                 }
-                                .buttonStyle(.plain)
                             }
+                            .padding(3).background(WF.panel)
+                            .clipShape(RoundedRectangle(cornerRadius: WF.rMD, style: .continuous))
                         }
-                        .padding(3).background(WF.panel)
-                        .clipShape(RoundedRectangle(cornerRadius: WF.rMD, style: .continuous))
                     }
 
                     // Which days?
@@ -316,7 +381,9 @@ struct PlanWeekSheet: View {
         var tags: [String] = []
         if let m = card.minutes { tags.append("🕐 \(m)m") }
         tags.append(card.recipeId != nil ? "📖 From library" : "✨ New dish")
-        let note = card.note.flatMap { $0.isEmpty ? nil : $0 }
+        // `cardNote`, not `note` — this sheet now has a `note` PROPERTY (the host's
+        // narrowing line), and a local of the same name would shadow it silently.
+        let cardNote = card.note.flatMap { $0.isEmpty ? nil : $0 }
         return MealPlanReviewCard(
             card: card,
             dayLabel: MealPlanText.weekday(card.date, sync.householdTz),
@@ -324,7 +391,7 @@ struct PlanWeekSheet: View {
             isBusy: draftingDates.contains(card.date),
             isDragTarget: dragOverDate == card.date,
             metaTags: tags,
-            belowTitleNote: note,
+            belowTitleNote: cardNote,
             titleMultilineLeading: true,
             onOpen: { open(card) },
             onSwap: { Task { await swap(card) } },
@@ -487,6 +554,18 @@ struct PlanWeekSheet: View {
 
     private func apply() async {
         applying = true
+        if let onApply {
+            // THE HOST OWNS THE WRITE, and the per-slot path below is deliberately NOT
+            // also run: those writes are exactly what a host endpoint like the planning
+            // step's fill exists to replace (it refuses a night somebody already decided
+            // and hands back the receipt its undo checks), so doing both would plan every
+            // night twice and defeat the guarantee. It also sidesteps
+            // `sync.householdWeekStart` being nil while PowerSync is disconnected.
+            _ = await onApply(suggestions)
+            applying = false
+            dismiss()
+            return
+        }
         // Decided and tested in MealPlanApply — including the case that bit us: a week off
         // the planner grid is cut on the DEVICE's first day while the grocery list is keyed
         // by the HOUSEHOLD's, so a Sun–Sat grid can straddle two household weeks and both

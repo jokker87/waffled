@@ -89,6 +89,9 @@ struct RecipesLibraryView: View {
     /// A recipe just written from inside the picker, held until the editor's cover has
     /// finished dismissing — then handed to `onPick`.
     @State private var createdForPick: WaffledAPI.RecipeSummary?
+    /// The same trick for a PLATE built from inside the picker — held until the builder's
+    /// cover has finished dismissing, then handed to `onPickMeal`.
+    @State private var createdMealForPick: WaffledAPI.MealDTO?
     /// Non-nil ⇒ the Meal Builder is up. Presented (not pushed) because this screen is
     /// hosted by four different navigation stacks, only one of which knows MealsRoute.
     @State private var building: MealBuilderStart?
@@ -134,19 +137,20 @@ struct RecipesLibraryView: View {
             content
         }
         .background(WF.canvas)
-        // Picking, and the recipe you want isn't written yet: write it here and it fills
-        // the slot you opened. This lives in the nav bar rather than beside the filter
-        // chips — a fourth chip overflowed the row on a phone and wrapped its label mid-
-        // word, and "+" in the bar is where iOS puts "make a new one" anyway. Both hosts
-        // (the planner's picker sheet and the Meal Builder's add-a-dish sheet) use only
-        // `.cancellationAction`, so this can't collide. Only a recipe — a plate inside a
-        // plate isn't something the picker's callers can take.
+        // Picking, and the thing you want isn't written yet: make it here and it fills the
+        // slot you opened. This lives in the nav bar rather than beside the filter chips —
+        // a fourth chip overflowed the row on a phone and wrapped its label mid-word, and
+        // "+" in the bar is where iOS puts "make a new one" anyway. Both hosts (the
+        // planner's picker sheet and the Meal Builder's add-a-dish sheet) use only
+        // `.cancellationAction`, so this can't collide.
+        //
+        // IT OFFERS A PLATE TOO, whenever the caller can take one — "I clicked the + and
+        // it made a new recipe, but I should also be able to make a meal". The gate is
+        // `onPickMeal`, the same one that decides whether plate CARDS are shown: a picker
+        // with nowhere to put a plate must not offer to build one.
         .toolbar {
             if onPick != nil {
-                ToolbarItem(placement: .primaryAction) {
-                    Button { creating = true } label: { Image(systemName: "plus") }
-                        .accessibilityLabel("New recipe")
-                }
+                ToolbarItem(placement: .primaryAction) { newControl }
             }
         }
         // `.onAppear`, not `.task`: this has to re-run when the library is returned
@@ -167,10 +171,21 @@ struct RecipesLibraryView: View {
                 if onPick != nil { createdForPick = saved }
             }
         }
-        .fullScreenCover(item: $building) { start in
-            NavigationStack { MealBuilderView(start: start, recipes: model) }
-                // A plate built here belongs in the library the moment it's saved.
-                .onDisappear { Task { await model.load() } }
+        .fullScreenCover(item: $building, onDismiss: {
+            // Same deferral as the recipe editor above: hand the plate back only once the
+            // builder's cover is fully gone, because taking it dismisses the picker sheet
+            // this library is sitting in and two teardowns in one frame drop the
+            // animation.
+            if let plate = createdMealForPick { createdMealForPick = nil; onPickMeal?(plate) }
+        }) { start in
+            NavigationStack {
+                MealBuilderView(start: start, recipes: model,
+                                // Only in pick mode: browsing, "Done" is the exit and the
+                                // plate lives in the library, so there is no slot to fill.
+                                onUse: onPickMeal == nil ? nil : { createdMealForPick = $0 })
+            }
+            // A plate built here belongs in the library the moment it's saved.
+            .onDisappear { Task { await model.load() } }
         }
         // A recipe or meal written anywhere else (another device, the editor, the
         // planner) reloads the library — and the rail with it, since a rename or a
@@ -305,17 +320,42 @@ struct RecipesLibraryView: View {
             Button { withAnimation(.snappy) { f.onlyFavorites.toggle() } } label: {
                 pill(systemImage: onlyFavoritesIcon, text: "Favorites", active: f.onlyFavorites)
             }
-            // Browsing (not picking for a meal slot) → offer something new to make.
+            // Browsing (not picking for a meal slot) → offer something new to make. In
+            // pick mode the same offer lives in the nav bar instead; see `newControl`.
             if onPick == nil {
-                Menu {
-                    Button { creating = true } label: { Label("New recipe", systemImage: "book") }
-                    Button { building = .fresh } label: { Label("New meal", systemImage: "square.stack.3d.up") }
-                } label: {
+                Menu { newMenuItems } label: {
                     pill(systemImage: "plus", text: "New", active: false)
                 }
             }
         }
         .padding(.horizontal, 16).padding(.top, 8)
+    }
+
+    /// What "make something new" may offer here — stated once, in `LibraryNewOffer`, so
+    /// the browse pill and the picker's ＋ cannot drift.
+    private var offer: LibraryNewOffer {
+        // Browsing can always take a plate back: it opens it. A picker can only take one
+        // if its host said so.
+        LibraryNewOffer.of(canPickMeal: onPick == nil || onPickMeal != nil)
+    }
+
+    /// A bare ＋ when a recipe is the only thing on offer — a one-item menu is a worse
+    /// button — and a menu the moment there are two.
+    @ViewBuilder private var newControl: some View {
+        if offer.offersMeal {
+            Menu { newMenuItems } label: { Image(systemName: "plus") }
+                .accessibilityLabel("New recipe or meal")
+        } else {
+            Button { creating = true } label: { Image(systemName: "plus") }
+                .accessibilityLabel("New recipe")
+        }
+    }
+
+    @ViewBuilder private var newMenuItems: some View {
+        Button { creating = true } label: { Label("New recipe", systemImage: "book") }
+        if offer.offersMeal {
+            Button { building = .fresh } label: { Label("New meal", systemImage: "square.stack.3d.up") }
+        }
     }
 
     private var onlyFavoritesIcon: String { f.onlyFavorites ? "heart.fill" : "heart" }

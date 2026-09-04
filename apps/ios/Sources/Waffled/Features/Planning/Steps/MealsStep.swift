@@ -29,6 +29,11 @@ struct MealsStepView: View {
     @State private var editing: String?
     @State private var shopping = false
 
+    /// The library the planner's manual-pick sheet browses. Owned here (the planner takes
+    /// one rather than making its own) and loaded only when the planner actually opens —
+    /// the seven nights don't need it.
+    @State private var plannerRecipes = RecipesModel()
+
     /// Resolved from the shared store on every body pass rather than held in `@State`:
     /// `@State` would capture the first model forever, and stepping to another week must
     /// land on that week's model. The model is `@Observable`, so reading its properties
@@ -134,6 +139,50 @@ struct MealsStepView: View {
                     }
                 })
         }
+        // THE PLANNER IS PRESENTED HERE, from the BODY, even though the button that opens
+        // it is in the footer. That is the whole reason `plannerOpen` sits on the shared
+        // model: the shell builds the body and the footer as two sibling trees, and the
+        // footer's own body renders NOTHING until the week is read and swaps to "Undo the
+        // three" the moment a fill lands — a `.sheet` attached there would be hung off a
+        // control that legitimately disappears. `MealsStep.tsx` renders its planner from
+        // `Body` for the same reason.
+        .sheet(isPresented: plannerBinding) { plannerSheet }
+    }
+
+    /// The app's OWN "Plan my week" planner, narrowed to this step's promise in the two
+    /// ways the web narrows it: the only day chips are the EMPTY nights, and applying
+    /// hands the approved cards to the step's fill endpoint — which is what keeps them
+    /// marked, undoable, and unable to overwrite a night somebody already decided.
+    ///
+    /// A second, step-shaped planner would be a worse copy of a screen that already has
+    /// the guardrails, the preferences box, reshuffle, swap, lock and a manual pick.
+    private var plannerSheet: some View {
+        PlanWeekSheet(
+            start: props.weekStart,
+            weekLabel: PlanningFormat.weekLabel(props.weekStart),
+            // Noon in the HOUSEHOLD's zone — see `PlanningMealsPlan.plannerDays` for why
+            // the hour and the zone are both load-bearing.
+            weekDays: PlanningMealsPlan.plannerDays(model.emptyDates, tz: sync.householdTz),
+            familySize: max(1, sync.members.count),
+            recipes: plannerRecipes,
+            mealTypes: [PlanningMealsModel.mealType],
+            initialDays: model.emptyDates,
+            note: PlanningMealsText.plannerNote(model.emptyDates.count),
+            onApply: { cards in
+                let landed = await model.applyPlan(weekStart: props.weekStart, approved: cards)
+                if landed { props.refresh() }
+                return landed
+            },
+            onApplied: {})
+            // Loaded when the planner opens, not with the seven nights: the library is
+            // only needed by the planner's manual-pick sheet.
+            .task { await plannerRecipes.load() }
+    }
+
+    /// Two-way, so the planner's own Cancel (and a swipe-down) close it: `dismiss()`
+    /// inside a sheet writes `false` back through this binding.
+    private var plannerBinding: Binding<Bool> {
+        Binding(get: { model.plannerOpen }, set: { model.setPlanner($0) })
     }
 
     /// Every write goes through here, so `props.refresh()` is called on LANDED writes only
