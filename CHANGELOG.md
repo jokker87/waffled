@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **An event you add for a pairing is that pairing's answer.** Making time for two people
+  from Connection's own ＋ now counts it for them straight away, named by its title, rather
+  than leaving you to tell the step that the thing you just did counts.
+
 - **Connection can point at time you already share.** A pairing used to count only an
   event that was *exactly* those two people; an evening where you're both there alongside
   everyone else could only be described ("you're both there, and it still isn't that").
@@ -175,6 +179,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   calendar, as before.
 
 ### Fixed
+
+- **Weekly Planning's Horizon scan fits the month and the parked notes on one screen.**
+  Giving every event chip its full height had pushed the parked-notes board off the bottom
+  of the page. The month now takes whatever room is left rather than claiming a size — it
+  shows two events a day and scrolls inside itself when six weeks don't fit — so the board
+  keeps its place and the chips are still never compressed.
+
+- **A connection row names the event instead of reciting a time.** It said "Tue 8:00 PM
+  counts", which identifies nothing on a row that can carry three evenings, and it could
+  show a different event from the sentence beside it. It names the event, and exactly one
+  chip on the row reads as the answer.
+
+- **A chosen chip stays readable when you hover it.** Selecting a tag on the Horizon scan
+  and moving the pointer over it turned the label black on a black fill. Fixed there and
+  on the Connection, Kids and Goals chips, which lost their selected colour the same way.
 
 - **Weekly Planning's month grid no longer squashes the day's events.** On a busy week the
   event chips were being compressed until their labels sat on the chip edges; each chip now

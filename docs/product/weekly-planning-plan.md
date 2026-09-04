@@ -341,6 +341,29 @@ a real **link** (which event answers this pairing), persisted through the step's
 record at its current status — an id is a pointer, not a copy, so it sits beside the
 counts without breaching the "crumbs are counts, never module data" rule.
 
+### The third pass: two layout rules, and one about hover
+
+- **A step cannot have both a floor and a full month.** Measured rather than guessed:
+  `.wp-body` is ~500px on a 720px screen, and six month rows that hold two chips each
+  without squeezing need ~582px before the bar, the note and the parked board get
+  anything. So any fixed month height either squashes the chips or pushes the board under
+  the fold — which is exactly how fixing the squash created the next report. The month is
+  `flex: 1` with a small floor and scrolls INSIDE itself; everything below it is
+  `flex: none`. Shorter is a chip fewer (`MonthView`'s `maxChips`), never a chip smaller.
+
+- **If `.on` sets a colour, something must say what `.on:hover` looks like.**
+  `:hover:not(:disabled)` scores (0,3,0) and `.on` only (0,2,0), so a hover rule wins
+  wherever it is written and repaints the one thing the selected state exists to say. It
+  put black text on a black chip here; it had already eaten the Kids chip's selected
+  state one round earlier as `.more` over `.on`. This will keep recurring while the two
+  states are written as independent rules.
+
+- **A row must not hold two ideas of the same answer.** Connection drew
+  `alreadyThisWeek[0]` on its chip and the linked event in its sentence, so a pairing with
+  two credited evenings named two different events and looked doubly chosen. The fix is
+  the distinction, not the styling: `answer` is what somebody picked, `oneTap` is what a
+  single chip can honestly stand for, and it stands for nothing when there are several.
+
 ### What wave 2 found, and what is still open
 
 Building a step against a shipped module is also an audit of it. Three findings survived:
