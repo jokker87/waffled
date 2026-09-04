@@ -28,8 +28,16 @@ extension WaffledAPI {
     // `step.key` is the right thing to key a .task(id:) on anyway.
     struct PlanningStep: Decodable, Identifiable, Equatable, Sendable {
         let key: String
-        /// Position among the steps that actually RUN, 1-based. Not an index into `steps`
-        /// — an unavailable step keeps its place in the catalog but takes no number.
+        /// 1-based position in the CATALOG — `i + 1` over all ten steps, including the
+        /// ones this household doesn't run.
+        ///
+        /// ⚠️ THIS IS NOT THE "2 of 9" THE COUNTER SHOWS, and an earlier version of this
+        /// comment claimed it was. A household with meals off would render "4 of 9" with
+        /// no step 3 anywhere, because the number skips the unavailable step while the
+        /// total counts only runnable ones. The web has never used it for the counter
+        /// either — `WeeklyPlanning.tsx` computes `runnable.findIndex(...) + 1`. Derive
+        /// the position from the runnable list (see `PlanningFormat.position`); use this
+        /// field only when you genuinely want the catalog slot.
         let number: Int
         let title: String
         /// The one question the step asks, shown in the chrome beside the title.

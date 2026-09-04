@@ -172,24 +172,77 @@ import Testing
         #expect(PlanningFormat.weekLabel("2026-09-06") == "6 Sun – 12 Sat")
     }
 
+    // MARK: - position (the "2 of 9" counter)
+
+    @Test func theCounterIsDerivedFromTheRUNNABLEListNotFromStepNumber() {
+        // THE BUG THIS PREVENTS. `step.number` is a CATALOG index — `i + 1` over all ten
+        // steps, unavailable ones included. Trusting it renders "4 of 9" with no step 3
+        // anywhere for a household with meals off: the number skips the dead step while
+        // the total counts only live ones. Both clients derive position instead.
+        let steps = [
+            step("looseEnds", 1),
+            step("calendar", 2),
+            step("meals", 3, available: false),   // catalog slot 3, never shown
+            step("tasks", 4),
+        ]
+        let (pos, total) = PlanningFormat.position(steps, currentKey: "tasks")
+        #expect(total == 3)
+        // 3 of 3, NOT "4 of 3" — which is what `step.number` would have produced.
+        #expect(pos == 3)
+    }
+
+    @Test func positionIsZeroWhenNoStepIsOnScreen() {
+        #expect(PlanningFormat.position([step("a", 1)], currentKey: nil).pos == 0)
+        #expect(PlanningFormat.position([step("a", 1)], currentKey: "nope").pos == 0)
+    }
+
+    // MARK: - the progress hair
+
+    @Test func theHairIsPositionalToMatchTheWeb() {
+        // `WeeklyPlanning.tsx` draws `pos / runnable.length`. Settled-over-available reads
+        // better in isolation but the two only agree at the ends of a session — and a bar
+        // that fills differently on the phone than on the kiosk for the SAME session is
+        // worse than either definition.
+        let steps = [step("a", 1), step("b", 2), step("c", 3), step("d", 4)]
+        #expect(PlanningFormat.hairFraction(steps, currentKey: "b") == 0.5)
+        #expect(PlanningFormat.hairFraction(steps, currentKey: "d") == 1)
+    }
+
+    @Test func theHairIgnoresWhetherStepsWereAnswered() {
+        // Standing on step 1 with everything else already done is still 1 of 4 — this is
+        // the divergence from `settledFraction`, made explicit so nobody "fixes" it.
+        let steps = [
+            step("a", 1, status: "pending"),
+            step("b", 2, status: "done"),
+            step("c", 3, status: "done"),
+            step("d", 4, status: "done"),
+        ]
+        #expect(PlanningFormat.hairFraction(steps, currentKey: "a") == 0.25)
+        #expect(PlanningFormat.settledFraction(steps) == 0.75)
+    }
+
+    @Test func theHairIsZeroRatherThanADivideByZeroWithNoRunnableSteps() {
+        #expect(PlanningFormat.hairFraction([step("a", 1, available: false)], currentKey: "a") == 0)
+    }
+
     // MARK: - progress
 
-    @Test func progressCountsSettledStepsEitherWaySinceASkipIsARealAnswer() {
+    @Test func settledProgressCountsSettledStepsEitherWaySinceASkipIsARealAnswer() {
         let steps = [
             step("a", 1, status: "done"),
             step("b", 2, status: "skipped"),
             step("c", 3, status: "pending"),
             step("d", 4, status: "pending"),
         ]
-        #expect(PlanningFormat.fraction(steps) == 0.5)
+        #expect(PlanningFormat.settledFraction(steps) == 0.5)
     }
 
-    @Test func progressIgnoresUnavailableStepsEntirely() {
+    @Test func settledProgressIgnoresUnavailableStepsEntirely() {
         let steps = [step("a", 1, status: "done"), step("b", 2, available: false)]
-        #expect(PlanningFormat.fraction(steps) == 1)
+        #expect(PlanningFormat.settledFraction(steps) == 1)
     }
 
     @Test func aSessionWithNoRunnableStepsIsZeroNotADivideByZero() {
-        #expect(PlanningFormat.fraction([step("a", 1, available: false)]) == 0)
+        #expect(PlanningFormat.settledFraction([step("a", 1, available: false)]) == 0)
     }
 }

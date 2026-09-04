@@ -85,9 +85,35 @@ enum PlanningFormat {
             + " – \(Self.dayNum.string(from: end)) \(Self.dow.string(from: end))"
     }
 
-    /// How far through the session we are, 0…1 — the 2px progress hair, and the only
-    /// progress indicator the design keeps.
-    static func fraction(_ steps: [WaffledAPI.PlanningStep]) -> Double {
+    /// Where you are in the session: 1-based position among the runnable steps, and how
+    /// many there are. This — not `step.number` — is the "2 of 9" the counter shows,
+    /// because `number` is a CATALOG index and would skip an unavailable step while the
+    /// total counted only runnable ones.
+    static func position(
+        _ steps: [WaffledAPI.PlanningStep], currentKey: String?
+    ) -> (pos: Int, total: Int) {
+        let avail = availableSteps(steps)
+        let i = avail.firstIndex { $0.key == currentKey }
+        return (pos: (i.map { $0 + 1 }) ?? 0, total: avail.count)
+    }
+
+    /// The 2px progress hair, 0…1 — the only progress indicator the design keeps.
+    ///
+    /// POSITIONAL, matching `WeeklyPlanning.tsx`'s `pos / runnable.length`. It is
+    /// deliberately not "how many steps are settled": the two agree at both ends of a
+    /// session and disagree in the middle the moment somebody jumps ahead from the agenda
+    /// sheet, and a bar that reads differently on the phone than on the kiosk for the
+    /// same session is worse than either definition.
+    static func hairFraction(_ steps: [WaffledAPI.PlanningStep], currentKey: String?) -> Double {
+        let (pos, total) = position(steps, currentKey: currentKey)
+        guard total > 0 else { return 0 }
+        return Double(pos) / Double(total)
+    }
+
+    /// How much of the session has actually been ANSWERED, 0…1 — settled over runnable.
+    /// Not the hair (see `hairFraction`); this is for a summary that wants work done
+    /// rather than cursor position, like the "part-planned" Today card.
+    static func settledFraction(_ steps: [WaffledAPI.PlanningStep]) -> Double {
         let avail = availableSteps(steps)
         guard !avail.isEmpty else { return 0 }
         return Double(avail.filter(\.isSettled).count) / Double(avail.count)

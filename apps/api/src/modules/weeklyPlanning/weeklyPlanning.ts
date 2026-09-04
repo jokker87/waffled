@@ -181,7 +181,11 @@ export interface StepHandoff {
 }
 
 export interface SessionStep extends StepDef {
-  number: number // 1-based position in the catalog (what "2 of 10" counts)
+  // 1-based position in the CATALOG — `i + 1` over all ten steps, unavailable ones
+  // included. NOT what the "2 of 9" counter shows: both clients derive that from the
+  // runnable list, because a household with meals off would otherwise see "4 of 9" with
+  // no step 3. (This comment used to say the opposite and misled the iOS port.)
+  number: number
   // False ⇒ the step's module is off, or the household turned the step off. The
   // session steps over it and the agenda sheet doesn't list it.
   available: boolean
