@@ -3329,6 +3329,11 @@ struct WaffledAPI: Sendable {
         let isSpotlight: Bool?
         let hasRewards: Bool
         let totalProgress: Double
+        // The display axis, as on `Goal` — see `GoalDisplay`. Optional `var`s so an older
+        // response still decodes and so the memberwise init keeps its defaults.
+        var periodDone: Double?
+        var stepDone: Double?
+        var stepTotal: Double?
         let streakDays: Int
         let deadline: String?
         let createdAt: String

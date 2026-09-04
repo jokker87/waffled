@@ -408,15 +408,19 @@ struct GoalsView: View {
     }
 
     private func sharedHero(_ g: WaffledAPI.Goal) -> some View {
-        let frac = g.target.map { $0 > 0 ? min(g.totalProgress / $0, 1) : 0 } ?? 0
+        // Through `GoalDisplay`, never the raw fields: a HABIT's ring is this period's
+        // count against its per-period target (it resets), and a CHECKLIST's is
+        // steps — `totalProgress / target` shows a habit its lifetime total and reads
+        // as long-since-done.
+        let frac = GoalDisplay.fraction(g)
         let maxProg = max(1, g.participants.map(\.progress).max() ?? 1)
         return VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top, spacing: 14) {
                 GoalRing(value: frac, size: 96, lineWidth: 9, stroke: .white, track: .white.opacity(0.25)) {
                     VStack(spacing: 0) {
-                        Text(ringFmt(g.totalProgress)).font(.system(size: 23, weight: .heavy)).foregroundStyle(.white)
+                        Text(ringFmt(GoalDisplay.progress(g))).font(.system(size: 23, weight: .heavy)).foregroundStyle(.white)
                             .lineLimit(1).minimumScaleFactor(0.5)
-                        Text("of \(ringFmt(g.target))\(g.unit.map { " \($0)" } ?? "")")
+                        Text("of \(ringFmt(GoalDisplay.target(g)))\(g.unit.map { " \($0)" } ?? "")")
                             .font(.system(size: 9, weight: .bold)).foregroundStyle(.white.opacity(0.85))
                             .lineLimit(1).minimumScaleFactor(0.8)
                     }
@@ -462,7 +466,7 @@ struct GoalsView: View {
             HStack {
                 Text("TOGETHER").font(.system(size: 10, weight: .heavy)).tracking(0.6).foregroundStyle(.white.opacity(0.8))
                 Spacer()
-                Text("\(goalFmt(g.totalProgress))/\(goalFmt(summedTarget))")
+                Text("\(goalFmt(GoalDisplay.progress(g)))/\(goalFmt(summedTarget))")
                     .font(.system(size: 15, weight: .heavy)).foregroundStyle(.white)
             }
             if !g.participants.isEmpty {
@@ -525,7 +529,11 @@ struct GoalsView: View {
 
     private func moreCard(_ g: WaffledAPI.Goal, pinned: Bool) -> some View {
         let c = GoalStyle.color(g.category)
-        let frac = g.target.map { $0 > 0 ? min(g.totalProgress / $0, 1) : 0 } ?? 0
+        // Through `GoalDisplay`, never the raw fields: a HABIT's ring is this period's
+        // count against its per-period target (it resets), and a CHECKLIST's is
+        // steps — `totalProgress / target` shows a habit its lifetime total and reads
+        // as long-since-done.
+        let frac = GoalDisplay.fraction(g)
         return Button { path.append(.goal(g)) } label: {
             VStack(alignment: .leading, spacing: 11) {
                 HStack(spacing: 12) {
@@ -545,8 +553,8 @@ struct GoalsView: View {
                     }
                     Spacer(minLength: 6)
                     HStack(alignment: .firstTextBaseline, spacing: 1) {
-                        Text(goalFmt(g.totalProgress)).font(.system(size: 16, weight: .heavy)).foregroundStyle(WF.ink)
-                        Text("/\(goalFmt(g.target))").font(.system(size: 11, weight: .semibold)).foregroundStyle(WF.ink3)
+                        Text(goalFmt(GoalDisplay.progress(g))).font(.system(size: 16, weight: .heavy)).foregroundStyle(WF.ink)
+                        Text("/\(goalFmt(GoalDisplay.target(g)))").font(.system(size: 11, weight: .semibold)).foregroundStyle(WF.ink3)
                     }
                     pinToggle(g)
                 }
@@ -2719,8 +2727,18 @@ struct GoalDetailView: View {
 
     // Prefer the freshly-loaded detail, fall back to the goal we were handed.
     private var unit: String? { model.detail?.unit ?? goal.unit }
-    private var target: Double? { model.detail?.target ?? goal.target }
-    private var progress: Double { model.detail?.totalProgress ?? goal.totalProgress }
+    private var target: Double? {
+        if let d = model.detail { return GoalDisplay.target(d) }
+        return GoalDisplay.target(goal)
+    }
+    /// The number on THIS goal's axis, freshest source first — see `GoalDisplay`. A
+    /// habit's detail screen must read this period's count, not its lifetime total.
+    /// `GoalDisplay` has an overload per DTO precisely so this stays two lines and the
+    /// axis rule lives in exactly one place.
+    private var progress: Double {
+        if let d = model.detail { return GoalDisplay.progress(d) }
+        return GoalDisplay.progress(goal)
+    }
     private var participants: [WaffledAPI.Goal.Participant] { model.detail?.participants ?? goal.participants }
     private var pct: Int { (target ?? 0) > 0 ? min(Int((progress / target!) * 100), 100) : 0 }
 

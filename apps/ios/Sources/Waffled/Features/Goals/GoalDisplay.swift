@@ -21,41 +21,87 @@ import Foundation
 /// the axis is a property of the goal's type, not of the screen showing it.
 enum GoalDisplay {
 
-    /// The number to show, on the axis this goal is actually measured on.
-    static func progress(_ g: WaffledAPI.Goal) -> Double {
-        switch g.goalType {
+    // MARK: - The axis, over primitives
+    //
+    // Factored this way because there are TWO goal DTOs that both need it — the list
+    // `Goal` and the `GoalDetail` behind a goal's own screen — and the one thing worse
+    // than a view reading `totalProgress` directly is two copies of the axis rule that
+    // can disagree with each other.
+
+    private static func axisProgress(
+        goalType: String, total: Double, periodDone: Double?, stepDone: Double?
+    ) -> Double {
+        switch goalType {
         // A habit resets each period, so the period's own count is the answer. `?? 0`
-        // rather than falling back to `totalProgress`: an older response that omits the
-        // field has no period figure, and showing the lifetime total in its place is the
-        // exact bug this helper exists to prevent.
-        case "habit": return g.periodDone ?? 0
-        case "checklist": return g.stepDone ?? 0
-        default: return g.totalProgress
+        // rather than falling back to `total`: a response that omits the field has no
+        // period figure, and showing the lifetime total in its place is the exact bug
+        // this helper exists to prevent.
+        case "habit": return periodDone ?? 0
+        case "checklist": return stepDone ?? 0
+        default: return total
         }
     }
 
-    /// What that number is measured against, or nil when the goal has no target.
-    static func target(_ g: WaffledAPI.Goal) -> Double? {
-        switch g.goalType {
-        case "habit": return g.habitTargetPerPeriod.map(Double.init) ?? g.target
+    private static func axisTarget(
+        goalType: String, target: Double?, habitTargetPerPeriod: Int?,
+        stepTotal: Double?, targetBasis: String?, participantCount: Int
+    ) -> Double? {
+        switch goalType {
+        case "habit": return habitTargetPerPeriod.map(Double.init) ?? target
         // `stepTotal` of 0 is an EMPTY checklist, not a target of zero — nil so callers
         // render "no target" instead of dividing by it.
-        case "checklist": return (g.stepTotal ?? 0) > 0 ? g.stepTotal : nil
+        case "checklist": return (stepTotal ?? 0) > 0 ? stepTotal : nil
         default:
             // An each_tracks / per_person goal's ring target is the per-person number
             // times the household size (read 12 EACH → 48 for four), so it grows as
             // people join.
-            if g.targetBasis == "per_person", let t = g.target {
-                return t * Double(max(1, g.participants.count))
+            if targetBasis == "per_person", let t = target {
+                return t * Double(max(1, participantCount))
             }
-            return g.target
+            return target
         }
+    }
+
+    // MARK: - Goal
+
+    /// The number to show, on the axis this goal is actually measured on.
+    static func progress(_ g: WaffledAPI.Goal) -> Double {
+        axisProgress(goalType: g.goalType, total: g.totalProgress,
+                     periodDone: g.periodDone, stepDone: g.stepDone)
+    }
+
+    /// What that number is measured against, or nil when the goal has no target.
+    static func target(_ g: WaffledAPI.Goal) -> Double? {
+        axisTarget(goalType: g.goalType, target: g.target,
+                   habitTargetPerPeriod: g.habitTargetPerPeriod, stepTotal: g.stepTotal,
+                   targetBasis: g.targetBasis, participantCount: g.participants.count)
     }
 
     /// 0…1 completion, clamped. Zero when there is no positive target to measure against.
     static func fraction(_ g: WaffledAPI.Goal) -> Double {
         guard let t = target(g), t > 0 else { return 0 }
         return min(progress(g) / t, 1)
+    }
+
+    // MARK: - GoalDetail
+    //
+    // The same rule for the detail read, so a goal's own screen cannot show a different
+    // number from the row that opened it.
+
+    static func progress(_ d: WaffledAPI.GoalDetail) -> Double {
+        axisProgress(goalType: d.goalType, total: d.totalProgress,
+                     periodDone: d.periodDone, stepDone: d.stepDone)
+    }
+
+    static func target(_ d: WaffledAPI.GoalDetail) -> Double? {
+        axisTarget(goalType: d.goalType, target: d.target,
+                   habitTargetPerPeriod: d.habitTargetPerPeriod, stepTotal: d.stepTotal,
+                   targetBasis: d.targetBasis, participantCount: d.participants.count)
+    }
+
+    static func fraction(_ d: WaffledAPI.GoalDetail) -> Double {
+        guard let t = target(d), t > 0 else { return 0 }
+        return min(progress(d) / t, 1)
     }
 
     /// The one place a goal amount is formatted: at most two decimals, trailing zeros

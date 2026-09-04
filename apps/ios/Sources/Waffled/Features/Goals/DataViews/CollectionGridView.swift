@@ -9,7 +9,10 @@ struct CollectionGridView: View {
     private static let columns = [GridItem(.adaptive(minimum: 30), spacing: 4)]
 
     private var target: Int { Int(ctx.goal.target ?? 0) }
-    private var done: Int { Int(ctx.goal.totalProgress.rounded()) }
+    // Through `GoalDisplay` like every other progress read. A collection goal is not a
+    // habit or a checklist, so this resolves to the same lifetime number — but going via
+    // the helper is what stops the next goal type quietly reading the wrong axis here.
+    private var done: Int { Int(GoalDisplay.progress(ctx.goal).rounded()) }
     private var currentMonth: Int { GoalDateKey.calendar.component(.month, from: GoalDateKey.parse(ctx.stats.today)) - 1 }
     private var monthMax: Double { max(1, ctx.stats.byMonth[0...currentMonth].max() ?? 1) }
 

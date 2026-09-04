@@ -56,6 +56,9 @@ struct GoalDataViewSwitcher: View {
         // Keyed on more than just goal.id: logging progress changes totalProgress/
         // recent/streakDays without changing the id, and activity must refetch then
         // or the charts go stale until the goal is closed and reopened.
+        // `totalProgress` here is a CHANGE KEY, not something shown — it is the cheapest
+        // signal that a log landed. It deliberately does not go through `GoalDisplay`:
+        // the axis decides what to DISPLAY, and any of these moving should reload.
         .task(id: "\(goal.id)|\(goal.totalProgress)|\(goal.recent.count)|\(goal.streakDays)") { await load() }
     }
 

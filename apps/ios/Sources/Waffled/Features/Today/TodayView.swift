@@ -682,7 +682,11 @@ struct TodayGoalPickerSheet: View {
 
     private func goalRow(_ g: WaffledAPI.Goal) -> some View {
         let col = GoalStyle.color(g.category)
-        let frac = g.target.map { $0 > 0 ? min(g.totalProgress / $0, 1) : 0 } ?? 0
+        // Through `GoalDisplay`, never the raw fields: a HABIT's ring is this period's
+        // count against its per-period target (it resets), and a CHECKLIST's is
+        // steps — `totalProgress / target` shows a habit its lifetime total and reads
+        // as long-since-done.
+        let frac = GoalDisplay.fraction(g)
         return Button { onSelect(g.id); dismiss() } label: {
             HStack(spacing: 12) {
                 Text(g.emoji ?? GoalStyle.emoji(g.category)).font(.system(size: 20)).frame(width: 42, height: 42)
