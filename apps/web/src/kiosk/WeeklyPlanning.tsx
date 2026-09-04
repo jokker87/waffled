@@ -210,6 +210,37 @@ function Handoff({ step, sessionId, busy, onDone, action, onAct }: {
   )
 }
 
+/**
+ * "I've stepped out of this session" — remembered on THIS DEVICE only.
+ *
+ * Coming back to `/planning` resumes the active session, deliberately: it is what lets
+ * another device pick a session up mid-way, and it is why the lobby is otherwise
+ * unreachable once a week is started. But it also made leaving meaningless — "leave for
+ * now just takes me out of the planning tab, but if I tap the planning tab it brings me
+ * right back" — and a button that does no more than the nav rail already does is
+ * decoration.
+ *
+ * So leaving records the intent, and it is stored rather than put in the URL because it
+ * has to survive tapping the Planning tab, which navigates to a plain `/planning`.
+ *
+ * `sessionStorage`, NOT the server: "not right now" is one person at one screen, and
+ * writing it to the session would reach into the very device the resume feature exists
+ * for. It is also why this is not a session status — the session is untouched, still
+ * active, still exactly where it was.
+ */
+const PAUSED_KEY = 'waffled.planning.pausedSession'
+const readPaused = (): string | null => {
+  // Storage can throw outright (private mode, blocked site data), and a session you
+  // cannot pause is a great deal better than a screen that will not render.
+  try { return sessionStorage.getItem(PAUSED_KEY) } catch { return null }
+}
+const writePaused = (id: string | null) => {
+  try {
+    if (id) sessionStorage.setItem(PAUSED_KEY, id)
+    else sessionStorage.removeItem(PAUSED_KEY)
+  } catch { /* the pause is a convenience; losing it costs a resumed session */ }
+}
+
 export function WeeklyPlanning() {
   const { step: urlStep } = useParams<{ step?: string }>()
   const [search] = useSearchParams()
@@ -285,6 +316,13 @@ export function WeeklyPlanning() {
     return `/planning${stepKey ? `/${stepKey}` : ''}${q}`
   }
 
+  // "Stepped out" on this device. Read into state so leaving re-renders this screen
+  // rather than needing a navigation to somewhere else — both doors land on `/planning`.
+  // Declared HERE rather than beside `leave` below because the URL-sync effect depends on
+  // it, and a dependency array naming a `const` declared later in the body is a TDZ
+  // error, not a lint warning.
+  const [paused, setPaused] = useState<string | null>(() => readPaused())
+
   // Is the view we're holding actually about the week the URL asks for? While a week
   // change is in flight it is NOT, and acting on a stale view here would shove the URL
   // back to the old week's step. Every correction below waits for the fresh view.
@@ -303,11 +341,16 @@ export function WeeklyPlanning() {
       return
     }
     if (!current) return
+    // STEPPED OUT: `/planning` is a destination now, not a path missing its step. Without
+    // this the correction below resumes the session a tick after "Leave for now" left it
+    // — which is precisely what leaving used to look like from the outside: "if I tap the
+    // planning tab it brings me right back".
+    if (paused === session.id && !urlStep) return
     // A path naming a step that can't run (or naming none at all) resumes instead. A
     // path naming a runnable step is left alone — a pasted link outranks the pointer.
     if (!runnable.some((s) => s.key === urlStep)) navigate(hrefFor(current.key), { replace: true })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, viewMatchesUrlWeek, session?.id, session?.status, current?.key, urlStep])
+  }, [view, viewMatchesUrlWeek, session?.id, session?.status, current?.key, urlStep, paused])
 
   async function go(fn: () => Promise<unknown>) {
     if (busy) return
@@ -362,6 +405,19 @@ export function WeeklyPlanning() {
   }
 
   const closeSheet = () => { setSheet(false); setConfirmDiscard(false) }
+
+  const leave = () => {
+    setSheet(false)
+    if (session) { writePaused(session.id); setPaused(session.id) }
+    // Drops any `/planning/<step>` from the path: the step is what you just left.
+    navigate(hrefFor(null))
+  }
+
+  const resume = () => {
+    writePaused(null)
+    setPaused(null)
+    if (session?.currentStep) navigate(hrefFor(session.currentStep))
+  }
 
   // Moving to another week drops the step: that week has its own session (or none),
   // and carrying this week's step across would name a step of a different record.
@@ -436,6 +492,33 @@ export function WeeklyPlanning() {
     )
   }
 
+  // ── Stepped out: the session is active, but not right now ───────────────────
+  // Where "Leave for now" puts you, and the answer to "I expected to leave the planning
+  // session and then go back to where I can select a week to plan for". It is the lobby's
+  // job with a session in hand: the week you were planning is OFFERED rather than forced,
+  // and the week stepper — which was only reachable through the agenda sheet once a
+  // session existed — is right here.
+  //
+  // `urlStep` overrides it: asking for a step by URL is asking for the step.
+  if (session?.status === 'active' && paused === session.id && !urlStep) {
+    return (
+      <div className="wp-screen">
+        <div className="wp-lobby" data-testid="wp-paused">
+          <div className="wp-lobby-t wf-serif">Left for now</div>
+          <div className="wp-lobby-s">
+            {weekLabel(view.weekStart)} is part-planned — {runnable.filter((x) => x.status !== 'pending').length} of{' '}
+            {runnable.length} steps decided. Nothing was lost; pick it up whenever.
+          </div>
+          <button type="button" className="btn btn-primary wp-lobby-go" disabled={busy} onClick={resume}>
+            Resume the session
+          </button>
+          <div className="wp-record-week">Plan another week <WeekStepper {...weekNav} /></div>
+          <DiscardBlock {...discardProps} />
+        </div>
+      </div>
+    )
+  }
+
   // ── Lobby: no session yet ────────────────────────────────────────────────────
   if (!session) {
     return (
@@ -486,12 +569,7 @@ export function WeeklyPlanning() {
             committed to finishing.
             The words are the sheet's, deliberately: "for now" is the part that matters,
             because leaving keeps the session and everything it has already decided. */}
-        <button
-          type="button"
-          className="wp-exit"
-          data-testid="wp-exit"
-          onClick={() => navigate('/')}
-        >
+        <button type="button" className="wp-exit" data-testid="wp-exit" onClick={leave}>
           Leave for now
         </button>
         {/* The 2px hair — the only progress indicator v4 keeps. */}
@@ -564,7 +642,7 @@ export function WeeklyPlanning() {
               <button type="button" className="btn btn-ghost" onClick={closeSheet}>Close</button>
               {/* The sheet already promises you can "leave whenever" — so it has to
                   offer the door. Leaving keeps the session exactly where it is. */}
-              <button type="button" className="btn btn-ghost" onClick={() => { closeSheet(); navigate('/') }}>Leave for now</button>
+              <button type="button" className="btn btn-ghost" onClick={leave}>Leave for now</button>
             </div>
             <DiscardBlock {...discardProps} />
           </div>

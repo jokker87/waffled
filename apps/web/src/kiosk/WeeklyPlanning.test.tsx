@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within, cleanup } from '@testing-library/react'
 import { MemoryRouter, Routes, Route, useLocation } from 'react-router'
 import { WeeklyPlanning } from './WeeklyPlanning'
 
@@ -40,6 +40,12 @@ const STEPS = [
   step('familyNight', 4, 'Family night', 'Claim the good', { available: false, requiresModule: 'familyNight' }),
   step('recap', 5, 'Recap', 'Close'),
 ]
+
+// Leaving a session is remembered PER DEVICE (see `PAUSED_KEY` in the shell), so it has
+// to be cleared between tests or one test's "leave" would put the next one in the lobby.
+// Deliberately not in `mockApi`: a test that re-renders mid-way is simulating coming back
+// to the tab, and that must see the flag that was set before it.
+beforeEach(() => { sessionStorage.clear() })
 
 const calls: { url: string; method: string; body: Record<string, unknown> | null }[] = []
 
@@ -220,9 +226,54 @@ describe('weekly planning · leaving and starting over', () => {
     draw()
     fireEvent.click(await screen.findByRole('button', { name: /2 of 4/ }))
     fireEvent.click(within(screen.getByTestId('wp-sheet')).getByRole('button', { name: /Leave for now/ }))
-    await waitFor(() => expect(where()).toBe('/'))
-    // Leaving is not deleting.
+    // Both doors land in the same place — the planning lobby, not Today.
+    await waitFor(() => expect(screen.getByTestId('wp-paused')).toBeTruthy())
     expect(sent('DELETE', '/session/s1').length).toBe(0)
+  })
+
+  it('leaves you where you can pick a week, and STAYS left', async () => {
+    // "leave for now just takes me out of the planning tab, but if I tap the planning tab
+    // it brings me right back. I expected to leave the planning session and then go back
+    // to where I can select a week to plan for."
+    //
+    // Two faults in one sentence. The button dropped you on Today, which the nav rail
+    // already does — so it was decoration. And coming back to Planning resumes, by
+    // design (it is what lets another device pick a session up), so leaving changed
+    // nothing at all.
+    mockApi(baseView({ session: session() }))
+    draw()
+    fireEvent.click(await screen.findByTestId('wp-exit'))
+
+    // WHERE YOU LAND: the planning lobby, with the session offered rather than forced,
+    // and the week stepper that was previously buried in the agenda sheet.
+    const paused = await screen.findByTestId('wp-paused')
+    expect(within(paused).getByRole('button', { name: /Resume/i })).toBeInTheDocument()
+    expect(within(paused).getByText(/Plan another week/i)).toBeInTheDocument()
+    // Still not a deletion, and still not an answer to the step you were standing on.
+    expect(sent('DELETE', '/session/s1').length).toBe(0)
+    expect(sent('POST', '/session/s1/step').length).toBe(0)
+
+    // AND IT STAYS LEFT. Rendering /planning again — which is what tapping the nav tab
+    // does — must not drop you back into step 5.
+    cleanup()
+    mockApi(baseView({ session: session() }))
+    draw()
+    expect(await screen.findByTestId('wp-paused')).toBeTruthy()
+  })
+
+  it('resumes from the lobby, and then stops offering to', async () => {
+    mockApi(baseView({ session: session() }))
+    draw()
+    fireEvent.click(await screen.findByTestId('wp-exit'))
+    fireEvent.click(within(await screen.findByTestId('wp-paused')).getByRole('button', { name: /Resume/i }))
+    await waitFor(() => expect(where()).toBe('/planning/calendar'))
+
+    // Resuming is the opposite intent, so coming back resumes again as it always did —
+    // the pause is one device saying "not right now", not a new session state.
+    cleanup()
+    mockApi(baseView({ session: session() }))
+    draw()
+    await waitFor(() => expect(screen.queryByTestId('wp-paused')).toBeNull())
   })
 
   it('puts the door in the session chrome, not only inside the agenda sheet', async () => {
@@ -240,7 +291,10 @@ describe('weekly planning · leaving and starting over', () => {
     expect(screen.queryByTestId('wp-sheet')).toBeNull()
 
     fireEvent.click(exit)
-    await waitFor(() => expect(where()).toBe('/'))
+    // The step leaves the path, and you land on Planning rather than on Today — leaving
+    // the session is not the same as leaving the app.
+    await waitFor(() => expect(where()).toBe('/planning'))
+    expect(await screen.findByTestId('wp-paused')).toBeTruthy()
     // Leaving is not deleting, and it is not answering the step you were standing on.
     expect(sent('DELETE', '/session/s1').length).toBe(0)
     expect(sent('POST', '/session/s1/step').length).toBe(0)

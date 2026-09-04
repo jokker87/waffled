@@ -15,10 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Weekly Planning has a visible way out.** Every step now shows **Leave for now** in the
-  header, so you can stop a session part-way without hunting for it in the agenda sheet.
-  Leaving keeps the session and everything it has already decided — it is not the same as
-  starting the week over, which still asks first.
+- **Weekly Planning has a visible way out, and it takes you somewhere useful.** Every step
+  shows **Leave for now** in the header, so you can stop part-way without hunting through
+  the agenda sheet. It puts you back on the Planning lobby — what is part-planned, a button
+  to resume, and the week stepper for planning a different week — instead of dropping you
+  on Today and pulling you straight back into the session the next time you open Planning.
+  Leaving keeps the session and everything it decided; it is not the same as starting the
+  week over, which still asks first.
 
 - **An event you add for a pairing is that pairing's answer.** Making time for two people
   from Connection's own ＋ now counts it for them straight away, named by its title, rather
