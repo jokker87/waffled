@@ -302,10 +302,17 @@ describe('Weekly planning · step 5 · Connection', () => {
     // says which event, by NAME. "I dont see the event I just made (at least not by its
     // title)": a day and an hour identify nothing on a row that can carry three credited
     // evenings.
-    await waitFor(
-      async () => expect((await row('p1-p2')).textContent).toMatch(/Date night/),
+    //
+    // It is also already LINKED. "If I make an event there I expect it to be linked on
+    // the connection page" — you opened this pairing's own ＋ and put time in the week
+    // for exactly these two; being made to then tell the step that counts is asking you
+    // to say the same thing twice.
+    const chip = await within(await row('p1-p2')).findByRole(
+      'button',
+      { name: /Date night.*is your time together/i },
       { timeout: 5000 }
     )
+    expect(chip).toHaveAttribute('aria-pressed', 'true')
   }, 15000)
 
   it('links a time that already has both of them on it', async () => {

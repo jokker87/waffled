@@ -275,14 +275,31 @@ function Body({ step, sessionId, weekStart, setDecisionData, refresh, busy }: St
     [remember]
   )
 
-  const settle = useCallback(async (was: number) => {
+  const settle = useCallback(async (was: number, autoLink?: { key: string; before: Set<string> }) => {
     for (let i = 0; i <= CATCHUP_MS.length; i++) {
       try {
         const b = await planningConnectionApi.board(weekStart)
         if (!alive.current) return
         setBoard(b)
         setError(false)
-        if (credited(b) > was) return
+        if (credited(b) > was) {
+          // THE EVENT YOU JUST MADE IS THE ANSWER TO THAT PAIRING. "If I make an event
+          // there I expect it to be linked on the connection page" — and it is the only
+          // reading that makes sense: you opened this pairing's own ＋ and put time in
+          // the week for exactly these two. Nobody should then have to tell the step
+          // that the thing they just did counts.
+          //
+          // Which event is "the one you just made" is answered by DIFFERENCE, not by an
+          // id handed back from the modal: the shared modal's `onSaved` takes no
+          // argument, and the write is local-first, so the only id that certainly
+          // belongs to the server is the one that has appeared since we looked.
+          if (autoLink) {
+            const pair = b.pairings.find((p) => p.personIds.join('-') === autoLink.key)
+            const fresh = pair?.alreadyThisWeek.find((e) => !autoLink.before.has(e.id))
+            if (fresh) link(autoLink.key, fresh.id)
+          }
+          return
+        }
       } catch {
         if (alive.current) setError(true)
         return
@@ -292,7 +309,7 @@ function Body({ step, sessionId, weekStart, setDecisionData, refresh, busy }: St
       await new Promise((r) => setTimeout(r, wait))
       if (!alive.current) return
     }
-  }, [weekStart])
+  }, [weekStart, link])
 
   useEffect(() => {
     if (!board) return
@@ -303,10 +320,17 @@ function Body({ step, sessionId, weekStart, setDecisionData, refresh, busy }: St
 
   function onSaved() {
     setAdded((n) => n + 1)
+    // Which pairing's ＋ was this, and what did it already have? Both read BEFORE the
+    // re-read, so the difference afterwards names the event that was just created.
+    // A pairing made from scratch ("Make a pairing") may match no row, and then nothing
+    // is linked — which is correct, there is no row to answer.
+    const key = compose ? compose.participantIds.join('-') : null
+    const row = key ? board?.pairings.find((p) => p.personIds.join('-') === key) : undefined
+    const autoLink = key && row ? { key, before: new Set(row.alreadyThisWeek.map((e) => e.id)) } : undefined
     // Re-read rather than bookkeeping: a pairing's status IS the calendar, so the only
     // honest way to redraw the rows is to ask again — and to keep asking until the
     // answer includes the event that was just written. See `CATCHUP_MS`.
-    void settle(credited(board))
+    void settle(credited(board), autoLink)
     refresh()
   }
 
