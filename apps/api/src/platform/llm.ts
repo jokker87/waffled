@@ -157,35 +157,12 @@ export async function setAiConfig(householdId: string, provider: Provider, model
 
 // ── Generic JSON completion across providers ─────────────────────────────────
 
-// Carries the HTTP status so the retry loop can tell a transient provider blip
-// (5xx / 429 — "you can retry" per OpenAI) from a permanent 4xx (bad key/request).
-class LlmHttpError extends Error {
-  constructor(message: string, readonly status: number) {
-    super(message)
-    this.name = 'LlmHttpError'
-  }
-}
-
-// How many times to retry a transient failure (on top of the first try). Providers
-// 500 occasionally under load; a single blip shouldn't sink a whole meal plan.
-const AI_RETRIES = Math.max(0, Number(process.env.AI_MAX_RETRIES ?? 2))
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
-
-// Retry provider 5xx/429 and transport errors (timeout abort, dropped socket), but
-// NOT 4xx (auth/bad request) or a parse/refusal — those won't fix themselves.
-function isRetryable(err: unknown): boolean {
-  if (err instanceof LlmHttpError) return err.status === 429 || err.status >= 500
-  const name = (err as { name?: string } | null)?.name
-  const msg = err instanceof Error ? err.message : ''
-  return name === 'AbortError' || /fetch failed|terminated|ECONNRESET|ETIMEDOUT|socket hang up|network/i.test(msg)
-}
-
 async function fetchJson(url: string, init: RequestInit, timeoutMs: number): Promise<unknown> {
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), timeoutMs)
   try {
     const res = await fetch(url, { ...init, signal: ctrl.signal })
-    if (!res.ok) throw new LlmHttpError(`${url} -> ${res.status} ${await res.text().catch(() => '')}`, res.status)
+    if (!res.ok) throw new Error(`${url} -> ${res.status} ${await res.text().catch(() => '')}`)
     return res.json()
   } finally {
     clearTimeout(timer)
@@ -398,29 +375,18 @@ export async function completeJson(householdId: string, req: LlmJsonRequest): Pr
   const call = () =>
     provider === 'anthropic' ? anthropicJson(req, m) : provider === 'openai' ? openaiJson(req, m) : ollamaJson(req, m)
 
-  // One place that logs every AI call outcome, and retries transient provider blips
-  // (a lone 5xx/timeout shouldn't fail the user's action). Failures below are almost
-  // always swallowed by callers (capture/meals return 200+fallback), so without this
-  // the real reason — the provider's status + body, carried in the thrown message —
-  // never reaches the logs. warn passes the default LOG_LEVEL=info threshold; the
-  // success line is debug so it's silent unless you opt in.
+  // Provider requests are not safe to retry: after a timeout or dropped connection,
+  // the model may still be processing the original request. Reissuing it can turn one
+  // user action into multiple identical, billable generations. Call exactly once and
+  // leave any deliberate retry to the user. Failures are often swallowed by callers
+  // (capture/meals return 200+fallback), so retain the provider error in the logs.
   const startedAt = Date.now()
-  for (let attempt = 0; ; attempt++) {
-    try {
-      const data = await call()
-      const meta = { provider, model: m, schema: req.schemaName, durationMs: Date.now() - startedAt }
-      if (attempt > 0) log.info('ai.complete recovered', { ...meta, attempts: attempt + 1 })
-      else log.debug('ai.complete ok', meta)
-      return { data, via: provider }
-    } catch (err) {
-      if (attempt < AI_RETRIES && isRetryable(err)) {
-        const delayMs = 400 * 2 ** attempt // 400ms, then 800ms
-        log.warn('ai.complete retrying', { provider, model: m, schema: req.schemaName, attempt: attempt + 1, delayMs, err: (err as Error).message })
-        await sleep(delayMs)
-        continue
-      }
-      log.warn('ai.complete failed', { provider, model: m, schema: req.schemaName, durationMs: Date.now() - startedAt, attempts: attempt + 1, err })
-      throw err
-    }
+  try {
+    const data = await call()
+    log.debug('ai.complete ok', { provider, model: m, schema: req.schemaName, durationMs: Date.now() - startedAt })
+    return { data, via: provider }
+  } catch (err) {
+    log.warn('ai.complete failed', { provider, model: m, schema: req.schemaName, durationMs: Date.now() - startedAt, err })
+    throw err
   }
 }

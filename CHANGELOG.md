@@ -28,6 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **AI actions now send their prompt only once.** Provider timeouts and connection
+  errors no longer make Waffled silently repeat the same request up to two more times,
+  avoiding duplicate generations and charges for a single action.
+
 ## [0.14.3] - 2026-09-02
 
 ### Added
