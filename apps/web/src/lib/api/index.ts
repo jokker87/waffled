@@ -37,6 +37,7 @@ export * from './mealBuilder'
 export * from './photos'
 export * from './media'
 export * from './capture'
+export * from './aiFeatures'
 export * from './today-layout'
 export * from './auth'
 

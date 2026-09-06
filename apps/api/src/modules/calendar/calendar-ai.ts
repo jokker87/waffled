@@ -7,7 +7,7 @@
 import createAPI, { type Request, type Response } from 'lambda-api'
 import { query } from '../../platform/db'
 import { tenantRoute } from '../../platform/route-guards'
-import { completeJson } from '../../platform/llm'
+import { completeJson, isFeatureEnabled } from '../../platform/llm'
 import { rangeEvents, getEventById, type EventRow } from '../events/events'
 
 type Api = ReturnType<typeof createAPI>
@@ -123,11 +123,13 @@ const HEADS_UP_SCHEMA = {
   required: ['headline', 'body'],
 }
 
-export async function weekHeadsUp(householdId: string, from: string, to: string, viewerPersonId: string | null): Promise<{ headline: string; body: string; via: string }> {
+export async function weekHeadsUp(householdId: string, from: string, to: string, viewerPersonId: string | null): Promise<{ headline: string; body: string; via: string; enabled: boolean }> {
+  const enabled = await isFeatureEnabled(householdId, 'headsUp')
   const tz = await householdTz(householdId)
   const events = await rangeEvents(householdId, from, to, viewerPersonId)
   const facts = weekFacts(events, tz)
   const fallback = headsUpFallback(facts)
+  if (!enabled) return { ...fallback, via: 'heuristic', enabled: false }
   try {
     const system = [
       "You write the one short 'Heads up this week' card on a family hub's calendar.",
@@ -144,9 +146,9 @@ export async function weekHeadsUp(householdId: string, from: string, to: string,
     const d = data as { headline?: unknown; body?: unknown }
     const headline = String(d.headline ?? '').trim() || fallback.headline
     const body = String(d.body ?? '').trim() || fallback.body
-    return { headline, body, via }
+    return { headline, body, via, enabled: true }
   } catch {
-    return { ...fallback, via: 'heuristic' }
+    return { ...fallback, via: 'heuristic', enabled: true }
   }
 }
 
@@ -183,11 +185,13 @@ export async function eventInsight(
   householdId: string,
   id: string,
   viewerPersonId: string | null
-): Promise<{ headline: string; body: string; leaveBy: string | null; reminder: string; via: string } | null> {
+): Promise<{ headline: string; body: string; leaveBy: string | null; reminder: string; via: string; enabled: boolean } | null> {
   const tz = await householdTz(householdId)
   const event = await getEventById(householdId, id, viewerPersonId)
   if (!event) return null
+  const enabled = await isFeatureEnabled(householdId, 'eventInsight')
   const fallback = eventInsightFallback(event, tz)
+  if (!enabled) return { ...fallback, via: 'heuristic', enabled: false }
   try {
     const p = partsInTz(new Date(event.starts_at), tz)
     const ctx = {
@@ -225,9 +229,10 @@ export async function eventInsight(
       leaveBy: typeof d.leaveBy === 'string' && d.leaveBy.trim() ? d.leaveBy.trim() : null,
       reminder: String(d.reminder ?? '').trim() || fallback.reminder,
       via,
+      enabled: true,
     }
   } catch {
-    return { ...fallback, via: 'heuristic' }
+    return { ...fallback, via: 'heuristic', enabled: true }
   }
 }
 

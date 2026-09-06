@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState, type FormEvent } from '
 import { useSearchParams } from 'react-router'
 import { useSyncHealth, type SyncHealthStatus } from '../lib/powersync/sync-health'
 import { restartPowerSyncHard } from '../lib/powersync/db'
-import { personsApi, permissionsApi, healthApi, updatesApi, type UpdateInfo, accountApi, type AccountInfo, apiKeysApi, captureApi, calendarsApi, mealsApi, currenciesApi, conversionsApi, rewardsApi, choresApi, goalCalendarApi, groceryApi, authApi, kioskApi, usePantry, pantryApi, useCountdowns, countdownsApi, DEFAULT_BIRTHDAY_HORIZON_DAYS, useFamilyNight, familyNightApi, weekdayName, type FamilyNightPart, ALLERGEN_LABELS, ALLERGEN_KEYS, isDisplayMode, setDisplayMode, isKioskMode, usePersons, useCurrencies, useConversions, useHousehold, useHouseholdSettings, useWeather, useEventsToday, usePhotos, emitHouseholdChanged, CAPABILITIES, CAPABILITY_LABELS, ROLE_LABELS, type SettingsMember, type CaptureConfig, type Provider, type CalendarStatus, type CalendarLink, type IcsFeed, type MealCalendarSettings, type Currency, type MemoryGroup, type PantryStaple, type OidcConfig, type OidcConfigPatch, type KioskDevice, type DisplayConfig, type StoredProof, type PermissionMatrix, type Role, type Capability, type HealthReport, type HealthStatus, type ApiKey, type ApiScopeDef } from '../lib/api'
+import { personsApi, permissionsApi, healthApi, updatesApi, type UpdateInfo, accountApi, type AccountInfo, apiKeysApi, captureApi, calendarsApi, mealsApi, currenciesApi, conversionsApi, rewardsApi, choresApi, goalCalendarApi, groceryApi, authApi, kioskApi, usePantry, pantryApi, useCountdowns, countdownsApi, DEFAULT_BIRTHDAY_HORIZON_DAYS, useFamilyNight, familyNightApi, weekdayName, type FamilyNightPart, ALLERGEN_LABELS, ALLERGEN_KEYS, isDisplayMode, setDisplayMode, isKioskMode, usePersons, useCurrencies, useConversions, useHousehold, useHouseholdSettings, useWeather, useEventsToday, usePhotos, emitHouseholdChanged, useAiFeatures, CAPABILITIES, CAPABILITY_LABELS, ROLE_LABELS, type AiFeatures, type SettingsMember, type CaptureConfig, type Provider, type CalendarStatus, type CalendarLink, type IcsFeed, type MealCalendarSettings, type Currency, type MemoryGroup, type PantryStaple, type OidcConfig, type OidcConfigPatch, type KioskDevice, type DisplayConfig, type StoredProof, type PermissionMatrix, type Role, type Capability, type HealthReport, type HealthStatus, type ApiKey, type ApiScopeDef } from '../lib/api'
 import { MODULES, moduleEnabled } from '../lib/modules'
 import { useThemePref } from '../lib/theme'
 import { eventStyle } from '../lib/display'
@@ -1066,6 +1066,16 @@ const PROVIDER_META: Record<Provider, { label: string; sub: string; envHint: str
 }
 const PROVIDER_ORDER: Provider[] = ['heuristic', 'ollama', 'anthropic', 'openai']
 
+const FEATURE_ROWS: Array<[keyof AiFeatures, string, string]> = [
+  ['capture', 'Quick capture', 'Understand natural-language additions and changes.'],
+  ['headsUp', 'Heads-up this week', 'Summarize noteworthy events in the coming week.'],
+  ['eventInsight', 'Event insight', 'Generate useful context for calendar events.'],
+  ['goalSuggest', 'Match goals to events', 'Suggest goals that relate to calendar events.'],
+  ['mealPlanning', 'Meal planning', 'Suggest meals and help plan the week.'],
+  ['recipeIngest', 'Import recipes', 'Turn photos or descriptions into recipes.'],
+  ['recipeMetadata', 'Recipe auto-fill', 'Suggest recipe details and metadata.'],
+]
+
 // Smart matching: the per-household learned word→goal cache that powers calendar
 // suggestions + auto-link. View what's been learned and forget any of it (a single
 // word, or all of it) — so a wrong pattern can be corrected.
@@ -1132,6 +1142,7 @@ function AiPanel() {
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState(false)
+  const { features, setEnabled } = useAiFeatures()
 
   useEffect(() => {
     let alive = true
@@ -1224,6 +1235,22 @@ function AiPanel() {
           </SettingRow>
         </SettingCard>
       )}
+
+      <SettingCard style={{ marginTop: 16 }}>
+        <CardHeader title="AI features" sub="Choose where Waffled may use your configured AI provider." />
+        {FEATURE_ROWS.map(([key, label, description]) => (
+          <SettingRow key={key} icon="" title={label} sub={description}>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={features?.[key] ?? true}
+              aria-label={label}
+              className={`toggle ${(features?.[key] ?? true) ? 'on' : ''}`}
+              onClick={() => setEnabled(key, !(features?.[key] ?? true))}
+            />
+          </SettingRow>
+        ))}
+      </SettingCard>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16 }}>
         <button type="button" className="btn btn-primary" onClick={save} disabled={!dirty || saving}>

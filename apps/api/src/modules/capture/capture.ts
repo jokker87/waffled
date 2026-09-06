@@ -27,6 +27,10 @@ import {
   availability,
   defaultModel,
   PROVIDERS,
+  getFeatureFlags,
+  setFeatureFlags,
+  AI_FEATURES,
+  type AiFeature,
   type Provider,
 } from '../../platform/llm'
 
@@ -768,6 +772,31 @@ export function registerCaptureRoutes(api: Api): void {
     }
   }))
 
+  // Per-feature AI toggles are readable by any household member.
+  api.get('/api/ai/features', tenantRoute(async (tenant) => {
+    return { features: await getFeatureFlags(tenant.householdId) }
+  }))
+
+  // Changing the household-shared toggles is admin/owner-only, like changing
+  // the active provider. Unknown keys are ignored for forward compatibility.
+  api.put('/api/ai/features', adminRoute(async (tenant, req: Request, res: Response) => {
+    const body = (req.body ?? {}) as { features?: unknown }
+    if (!body.features || typeof body.features !== 'object' || Array.isArray(body.features)) {
+      return res.status(400).json({ error: 'BadRequest', message: 'features must be an object' })
+    }
+    const updates: Partial<Record<AiFeature, boolean>> = {}
+    for (const key of Object.keys(body.features as Record<string, unknown>)) {
+      if (!(AI_FEATURES as string[]).includes(key)) continue
+      const value = (body.features as Record<string, unknown>)[key]
+      if (typeof value !== 'boolean') {
+        return res.status(400).json({ error: 'BadRequest', message: `feature "${key}" must be a boolean` })
+      }
+      updates[key as AiFeature] = value
+    }
+    await setFeatureFlags(tenant.householdId, updates)
+    return { features: await getFeatureFlags(tenant.householdId) }
+  }))
+
   // Current selection + which providers the environment makes available + the
   // default model for each. Never returns secrets.
   api.get('/api/capture/config', adminRoute(async (tenant) => {
@@ -775,6 +804,7 @@ export function registerCaptureRoutes(api: Api): void {
     return {
       provider,
       model,
+      features: await getFeatureFlags(tenant.householdId),
       available: availability(),
       defaultModels: {
         anthropic: config.ai.anthropic.defaultModel,

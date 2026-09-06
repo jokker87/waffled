@@ -103,6 +103,7 @@ Legend: ✅ supported · 🟡 partial · 🚧 planned · ❌ not supported / N-A
 | Connect calendars + per-person write-target (Settings → Calendars) | ✅ | ✅ | ✅ | ✅ Done |
 | **Offline** calendar (PowerSync: local reads + queued writes) | ✅ | ✅ | ✅ | ✅ Done |
 | AI **"Heads up this week"** digest + **per-event insight** | ✅ | ✅ | ✅ | ✅ Done |
+| **Per-feature AI controls** — independently enable quick capture, calendar heads-ups, event insights, goal matching, meal planning, recipe import, and recipe metadata auto-fill | ✅ | ❌ N/A | ❌ N/A | ✅ Done — household-shared, admin-managed in Settings → AI & Capture; existing households default every switch on and disabled features keep their non-AI fallback where available |
 | "Counts toward a goal" tag on an event | ✅ | ✅ | ✅ | ✅ Done |
 | **🔁 rhythm marker** on an event that keeps a rhythm | ✅ | ✅ | ✅ | ✅ Done — a scheduling-shape rhythm books an ordinary event and points it back at itself (`events.rhythm_id`), so there is no separate entity to draw: just a glyph before the title in Month / Week / Day / Agenda / People **and** on Today's agenda card, plus a "This slot keeps a rhythm" line on the event detail. Deliberately not follow-through language — no "done", no streak |
 | **Recurring events** — rrule **expansion / read** | ✅ | ✅ | ✅ | ✅ Done |

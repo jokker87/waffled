@@ -158,7 +158,9 @@ Legend: ✅ done · 🟡 partial / in progress · 🚧 planned · ⛔ dropped (s
   select bulk move/delete, screensaver + per-album screensaver source, crossfade
   slideshow, recipe hero images.
 - **AI capture** — pluggable provider (Claude / OpenAI-compatible / Ollama), instant
-  heuristic → LLM upgrade, offline fallback. The "Add anything" bar now **creates** across
+  heuristic → LLM upgrade, offline fallback, plus household-level switches in **Settings →
+  AI & Capture** for quick capture, calendar heads-ups, event insights, goal matching, meal
+  planning, recipe import, and recipe metadata auto-fill. The "Add anything" bar now **creates** across
   the app: events, tasks/chores, grocery, meals, custom lists, countdowns (incl. holidays by
   name), **family members** (admin-only), **goals**, **pantry items**, and **rewards** — each
   gated on the relevant module/permission and confirmed in an editable preview before it

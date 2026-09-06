@@ -46,13 +46,112 @@ export async function getAiConfig(householdId: string): Promise<{ provider: Prov
   return { provider, model }
 }
 
-export async function setAiConfig(householdId: string, provider: Provider, model: string | null): Promise<void> {
-  // Merge into the existing settings jsonb so other keys are preserved.
+// ── Per-feature toggles (households.settings.ai.features) ────────────────────
+// Each AI feature can be switched off per household; missing/unknown flags default
+// to enabled (existing households keep current behavior). Enforcement lives in
+// completeJson (every feature funnels through it), plus a few routes that check
+// explicitly so they can respond with an "enabled" marker instead of just
+// falling back.
+export type AiFeature =
+  | 'capture'           // quick-capture voice/text parsing (falls back to on-device parser)
+  | 'headsUp'           // "Heads up this week" calendar card
+  | 'eventInsight'      // per-event AI insight card on the event detail screen
+  | 'goalSuggest'       // goal match/suggest (memory + keyword matching stays on)
+  | 'mealPlanning'      // Plan my week / Plan my month (falls back to shuffle)
+  | 'recipeIngest'      // describe-a-recipe / photo recipe import
+  | 'recipeMetadata'    // quiet AI auto-fill of recipe metadata
+export const AI_FEATURES: AiFeature[] = [
+  'capture', 'headsUp', 'eventInsight', 'goalSuggest', 'mealPlanning', 'recipeIngest', 'recipeMetadata',
+]
+
+// Maps each completeJson schemaName to the feature that owns it, so enforcement
+// lives in one place regardless of how many schemas a feature uses.
+const SCHEMA_TO_FEATURE: Record<string, AiFeature> = {
+  record_intent: 'capture',
+  heads_up: 'headsUp',
+  event_insight: 'eventInsight',
+  goal_matches: 'goalSuggest',
+  meal_plan: 'mealPlanning',
+  meal_pool: 'mealPlanning',
+  recipe_markdown: 'recipeIngest',
+  recipe_metadata: 'recipeMetadata',
+}
+
+export class FeatureDisabledError extends Error {
+  constructor(feature: AiFeature) {
+    super(`AI feature "${feature}" is disabled in Settings`)
+    this.name = 'FeatureDisabledError'
+  }
+}
+
+export function isFeatureDisabledError(err: unknown): boolean {
+  return err instanceof FeatureDisabledError
+}
+
+async function readAiFeatureFlags(householdId: string): Promise<Record<string, boolean> | null> {
+  const { rows } = await query<{ settings: { ai?: { features?: unknown } } | null }>(
+    `select settings from households where id = $1`,
+    [householdId]
+  )
+  const f = rows[0]?.settings?.ai?.features
+  return f && typeof f === 'object' && !Array.isArray(f) ? (f as Record<string, boolean>) : null
+}
+
+// Missing flag → true (opt-out model, default on).
+export async function isFeatureEnabled(householdId: string, feature: AiFeature): Promise<boolean> {
+  const flags = await readAiFeatureFlags(householdId)
+  const v = flags?.[feature]
+  return typeof v === 'boolean' ? v : true
+}
+
+export async function getFeatureFlags(householdId: string): Promise<Record<AiFeature, boolean>> {
+  const flags = await readAiFeatureFlags(householdId)
+  const out = {} as Record<AiFeature, boolean>
+  for (const f of AI_FEATURES) {
+    const v = flags?.[f]
+    out[f] = typeof v === 'boolean' ? v : true
+  }
+  return out
+}
+
+export async function setFeatureFlags(householdId: string, updates: Partial<Record<AiFeature, boolean>>): Promise<void> {
+  const patch: Record<string, boolean> = {}
+  for (const f of AI_FEATURES) {
+    if (typeof updates[f] === 'boolean') patch[f] = updates[f]
+  }
+  if (Object.keys(patch).length === 0) return
+  // Merge into the existing feature map (read-modify-write) so other features
+  // and the sibling ai.provider/ai.model keys survive — a jsonb `||` here would
+  // replace the whole features map with just the patched key.
+  const { rows } = await query<{ settings: { ai?: { features?: Record<string, boolean> } } | null }>(
+    `select settings from households where id = $1`,
+    [householdId]
+  )
+  const existing = rows[0]?.settings?.ai?.features ?? {}
+  const merged = { ...existing, ...patch }
   await query(
     `update households
-        set settings = coalesce(settings, '{}'::jsonb) || jsonb_build_object('ai', jsonb_build_object('provider', $2::text, 'model', $3::text))
+        set settings = coalesce(settings, '{}'::jsonb) || jsonb_build_object(
+            'ai', coalesce((coalesce(settings, '{}'::jsonb) -> 'ai'), '{}'::jsonb) || jsonb_build_object('features', $2::jsonb))
       where id = $1`,
-    [householdId, provider, model]
+    [householdId, JSON.stringify(merged)]
+  )
+}
+
+export async function setAiConfig(householdId: string, provider: Provider, model: string | null): Promise<void> {
+  // Read-modify-write so a provider change preserves the sibling ai.features map.
+  const { rows } = await query<{ settings: { ai?: { features?: Record<string, boolean> } } | null }>(
+    `select settings from households where id = $1`,
+    [householdId]
+  )
+  const features = rows[0]?.settings?.ai?.features
+  const aiObj: { provider: Provider; model: string | null; features?: Record<string, boolean> } = { provider, model }
+  if (features && typeof features === 'object' && !Array.isArray(features)) aiObj.features = features
+  await query(
+    `update households
+        set settings = coalesce(settings, '{}'::jsonb) || jsonb_build_object('ai', $2::jsonb)
+      where id = $1`,
+    [householdId, JSON.stringify(aiObj)]
   )
 }
 
@@ -274,6 +373,7 @@ async function ollamaModelHasVision(model: string): Promise<boolean> {
 // Whether the household's *selected* provider+model can read images right now.
 // Gates the photo-import path; speech/text import only needs completeJson.
 export async function visionAvailable(householdId: string): Promise<boolean> {
+  if (!(await isFeatureEnabled(householdId, 'recipeIngest'))) return false
   const { provider, model } = await getAiConfig(householdId)
   if (!availability()[provider]) return false
   const cap = modelSupportsVision(provider, model)
@@ -287,6 +387,10 @@ export async function visionAvailable(householdId: string): Promise<boolean> {
 // no provider is selected (heuristic) or its credentials are missing — callers
 // surface that as "pick a provider in Settings".
 export async function completeJson(householdId: string, req: LlmJsonRequest): Promise<{ data: unknown; via: Provider }> {
+  const feature = req.schemaName ? SCHEMA_TO_FEATURE[req.schemaName] : undefined
+  if (feature && !(await isFeatureEnabled(householdId, feature))) {
+    throw new FeatureDisabledError(feature)
+  }
   const { provider, model } = await getAiConfig(householdId)
   if (provider === 'heuristic') throw new Error('No AI provider selected — choose one in Settings → AI & capture')
   if (!availability()[provider]) throw new Error(`provider ${provider} is not configured on the server`)

@@ -51,7 +51,7 @@ import {
   MAX_INGEST_PHOTOS,
   type IngestPhotoInput,
 } from './recipe-ingest.service'
-import { getAiConfig, availability, visionAvailable } from '../../platform/llm'
+import { getAiConfig, availability, visionAvailable, isFeatureEnabled } from '../../platform/llm'
 import {
   assertPersonInHousehold,
   assertPersonsInHousehold,
@@ -270,7 +270,7 @@ export function registerMealRoutes(api: Api): void {
   // import entry points.
   api.get('/api/recipes/ingest/config', tenantRoute(async (tenant) => {
     const { provider } = await getAiConfig(tenant.householdId)
-    const text = provider !== 'heuristic' && availability()[provider]
+    const text = provider !== 'heuristic' && availability()[provider] && (await isFeatureEnabled(tenant.householdId, 'recipeIngest'))
     const vision = await visionAvailable(tenant.householdId)
     return { text, vision }
   }))
@@ -580,7 +580,7 @@ export function registerMealRoutes(api: Api): void {
     // No LLM provider configured (heuristic) or the selected provider isn't usable in
     // this environment → shuffle the empty slots from the library instead of 501ing.
     const ai = await getAiConfig(tenant.householdId)
-    if (ai.provider === 'heuristic' || !availability()[ai.provider]) {
+    if (ai.provider === 'heuristic' || !availability()[ai.provider] || !(await isFeatureEnabled(tenant.householdId, 'mealPlanning'))) {
       return await shuffleWeek(tenant, { start, mealType, dates, cookingFor: typeof b.cookingFor === 'number' ? b.cookingFor : null })
     }
     try {
@@ -638,7 +638,7 @@ export function registerMealRoutes(api: Api): void {
     // No LLM provider configured (heuristic) or the selected provider isn't usable
     // here → shuffle the month's empty nights from the library instead of 501ing.
     const ai = await getAiConfig(tenant.householdId)
-    if (ai.provider === 'heuristic' || !availability()[ai.provider]) {
+    if (ai.provider === 'heuristic' || !availability()[ai.provider] || !(await isFeatureEnabled(tenant.householdId, 'mealPlanning'))) {
       return await shuffleMonth(tenant, {
         start,
         weekdays,
