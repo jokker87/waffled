@@ -49,10 +49,10 @@ export interface ApiScopeDef {
 export const API_SCOPES: ApiScopeDef[] = [
   { resource: 'family', label: 'Family', description: 'Household, members, and overviews', prefixes: ['/api/household', '/api/persons', '/api/family'], readOnly: true },
   {
-  resource: 'lists',
-  label: 'Lists',
-  description: 'Grocery and to-do lists',
-  prefixes: ['/api/lists', '/api/list-items']
+    resource: 'lists',
+    label: 'Lists',
+    description: 'Grocery and to-do lists',
+    prefixes: ['/api/lists', '/api/list-items'],
   },
   { resource: 'pantry', label: 'Pantry', description: 'On-hand inventory', prefixes: ['/api/pantry'] },
   { resource: 'chores', label: 'Chores', description: 'Chores and completions', prefixes: ['/api/chores'] },
