@@ -41,9 +41,16 @@ You can set **more than one** — the active provider and model are chosen **per
    ```
 
 2. In the app, open **Settings → AI & capture** and pick the **provider** and **model** for your
-   household.
+   household. The **AI features** card below it lets an admin independently enable or disable:
+   quick capture, the weekly calendar heads-up, event insights, goal-to-event matching, meal
+   planning, recipe import, and recipe metadata auto-fill.
 
 That's it — the capture bar, meal/recipe AI, and calendar heads-ups now use it.
+
+Feature switches are shared by the household and default to on, so existing installations keep
+their current behavior. Turning one off prevents that feature from calling the configured model.
+Where Waffled has a deterministic alternative—such as capture parsing, calendar summaries, or
+meal-plan shuffling—it uses that fallback instead.
 
 ## Running a local model with Ollama
 

@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Choose which AI features each household uses.** Settings → AI & Capture now has
+  separate switches for quick capture, calendar heads-ups, event insights, goal matching,
+  meal planning, recipe import, and recipe metadata suggestions. Existing households keep
+  every feature enabled until an admin turns one off, and non-AI fallbacks remain available.
+
 ### Changed
 
 ### Fixed

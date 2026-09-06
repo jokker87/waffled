@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router'
 import { EventModal } from './components/EventModal'
 import { useTopbarFull } from './topbar-slot'
-import { api, eventsApi, useEvent, useEventsRange, useHousehold, useGoals, mealsApi, invalidateGetCache, type AgendaEvent } from '../lib/api'
+import { api, eventsApi, useEvent, useEventsRange, useHousehold, useGoals, mealsApi, invalidateGetCache, useAiFeatures, type AgendaEvent } from '../lib/api'
 import { useEventColor } from '../lib/event-color'
 import { deleteEventLocal, tombstoneEvent } from '../lib/powersync/events-local'
 import { suggestGoalForEvent } from '../lib/goal-match'
@@ -89,6 +89,9 @@ export function EventDetail() {
   const [dismissedSuggest, setDismissedSuggest] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const { features } = useAiFeatures()
+  const insightOn = !features || features.eventInsight !== false
+  const goalSuggestOn = !features || features.goalSuggest !== false
 
   // Real AI insight for this event (headline + practical tip + a reminder nudge),
   // via the household's chosen provider with a deterministic server fallback. The
@@ -97,13 +100,13 @@ export function EventDetail() {
   const [insight, setInsight] = useState<Insight | null>(null)
   const [remindShown, setRemindShown] = useState(false)
   useEffect(() => {
-    if (!id) return
+    if (!id || !insightOn) return
     let alive = true
     setInsight(null)
     setRemindShown(false)
     eventsApi.eventInsight(id).then((d) => alive && setInsight(d)).catch(() => {})
     return () => { alive = false }
-  }, [id])
+  }, [id, insightOn])
 
   // Resolve the recipe for a planned-meal event so we can offer "View recipe".
   const isMeal = event?.origin === 'meal_plan'
@@ -161,13 +164,15 @@ export function EventDetail() {
               </button>
             </>
           )}
-          <button type="button" className="btn btn-primary" onClick={() => setRemindShown(true)}>
-            ⏰ Remind me
-          </button>
+          {insightOn && (
+            <button type="button" className="btn btn-primary" onClick={() => setRemindShown(true)}>
+              ⏰ Remind me
+            </button>
+          )}
         </div>
       </div>
     ),
-    [confirmDelete, deleting, id, event?.rrule, occurrenceOn, isFeedEvent]
+      [confirmDelete, deleting, id, event?.rrule, occurrenceOn, isFeedEvent, insightOn]
   )
 
   if (loading && !event) return <div className="muted" style={{ padding: 40 }}>Loading…</div>
@@ -204,7 +209,7 @@ export function EventDetail() {
   // a checklist step). Hidden once dismissed or if the event is already linked.
   const attendeeIds = view.participants.length ? view.participants.map((p) => p.id) : view.personId ? [view.personId] : []
   const suggestedGoal =
-    !view.goalId && !view.rrule && view.origin !== 'meal_plan' && !dismissedSuggest
+    !view.goalId && !view.rrule && view.origin !== 'meal_plan' && !dismissedSuggest && goalSuggestOn
       ? suggestGoalForEvent(view.title, null, attendeeIds, goals)
       : null
 
@@ -317,7 +322,7 @@ export function EventDetail() {
       </div>
 
       <div className="ed-side">
-        <div className="ed-ai">
+        {insightOn && <div className="ed-ai">
           <div className={`ed-ai-icon ${insight ? '' : 'thinking'}`}>✦</div>
           <div className="ed-ai-main">
             {insight ? (
@@ -341,7 +346,7 @@ export function EventDetail() {
               </div>
             )}
           </div>
-        </div>
+        </div>}
 
         <DayTimeline event={view} tz={tz} />
       </div>

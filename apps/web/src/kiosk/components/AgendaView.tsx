@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { usePersons, useHousehold, eventsApi, type AgendaEvent } from '../../lib/api'
+import { useAiFeatures, usePersons, useHousehold, eventsApi, type AgendaEvent } from '../../lib/api'
 import { useEventColor } from '../../lib/event-color'
 import { Icon } from '../icons'
 import { RhythmMark } from './RhythmMark'
@@ -165,6 +165,7 @@ export function AgendaView({
   // month) follow the household's own week, same as the grids.
   const { household } = useHousehold()
   const firstDay = household?.weekStart === 'monday' ? 1 : 0
+  const { features: aiFeatures } = useAiFeatures()
   // The agenda surfaces use a lighter unassigned grey than the calendar grids.
   const colorOf = useEventColor('#A6A29B')
   const today = new Date()
@@ -238,7 +239,7 @@ export function AgendaView({
       <div className="ag-side">
         <MiniMonth events={events} tz={tz} colorOf={colorOf} onPickDate={onPickDate} firstDay={firstDay} />
 
-        <HeadsUpCard refreshKey={events.length} firstDay={firstDay} />
+        {aiFeatures?.headsUp === true && <HeadsUpCard refreshKey={events.length} firstDay={firstDay} />}
 
         {busy.rows.length > 0 && (
           <div className="card ag-busy">

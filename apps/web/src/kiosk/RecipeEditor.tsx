@@ -5,7 +5,7 @@ import { ChipEditor } from './components/ChipEditor'
 import { ConfirmDialog } from './components/ConfirmDialog'
 import { RECIPE_TEMPLATE, RECIPE_EXAMPLE } from './components/recipe-template'
 import { PhotoImportModal, DescribeImportModal } from './components/RecipeImportModals'
-import { mealsApi, uploadImage, useRecipe, type IngredientInput, type RecipeDetail, type RecipeMetadataSuggestion, type RecipeWriteInput, type StepInput } from '../lib/api'
+import { mealsApi, uploadImage, useRecipe, useAiFeatures, type IngredientInput, type RecipeDetail, type RecipeMetadataSuggestion, type RecipeWriteInput, type StepInput } from '../lib/api'
 import { fmtAmt, parseAmt } from '../lib/amount'
 import { ApiSendError } from '../lib/api/client'
 import '../styles/recipe.css'
@@ -190,6 +190,9 @@ export function RecipeEditorBody({
   const [pendingSectionUid, setPendingSectionUid] = useState<string | null>(null)
 
   const [pasteOpen, setPasteOpen] = useState(false)
+  const { features } = useAiFeatures()
+  const recipeMetaOn = !features || features.recipeMetadata !== false
+  const recipeIngestOn = !features || features.recipeIngest !== false
   // AI import (new-recipe only): which paths this household can use + open modal.
   const [importCfg, setImportCfg] = useState<{ text: boolean; vision: boolean }>({ text: false, vision: false })
   const [photoOpen, setPhotoOpen] = useState(false)
@@ -459,7 +462,7 @@ export function RecipeEditorBody({
   const aiSig = JSON.stringify([title.trim(), ingNames, stepTexts])
 
   useEffect(() => {
-    if (aiOffRef.current || title.trim().length < 3 || ingNames.length < 1 || aiSig === lastSigRef.current) return
+    if (aiOffRef.current || !recipeMetaOn || title.trim().length < 3 || ingNames.length < 1 || aiSig === lastSigRef.current) return
     const handle = setTimeout(async () => {
       lastSigRef.current = aiSig
       setSuggesting(true)
@@ -475,7 +478,7 @@ export function RecipeEditorBody({
     }, 1200)
     return () => clearTimeout(handle)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [aiSig])
+  }, [aiSig, recipeMetaOn])
 
   // A scalar suggestion shows only when the field is empty and not dismissed.
   const sugScalar = (key: string): string | null => {
@@ -550,10 +553,10 @@ export function RecipeEditorBody({
       {!isEdit && (
         <div className="re-paste-bar">
           <span className="tiny muted" style={{ fontWeight: 700 }}>Build it by hand below, or</span>
-          {importCfg.vision && (
+          {recipeIngestOn && importCfg.vision && (
             <button type="button" className="pill" onClick={() => setPhotoOpen(true)}>📷 From a photo</button>
           )}
-          {importCfg.text && (
+          {recipeIngestOn && importCfg.text && (
             <button type="button" className="pill" onClick={() => setDescribeOpen(true)}>🎤 Describe it</button>
           )}
           <button type="button" className="pill" onClick={() => setPasteOpen((v) => !v)}>📋 Paste markdown</button>
