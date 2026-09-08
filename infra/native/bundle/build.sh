@@ -65,7 +65,7 @@ PG_CLIENT_TGZ="$CACHE/postgres/postgresql-${PG_CLIENT_VERSION}-aarch64-apple-dar
 PG_CLIENT_HOME="$CACHE/postgres/theseus-${PG_CLIENT_VERSION}"
 CADDY_TGZ="$CACHE/caddy/caddy_${CADDY_VERSION}_mac_arm64.tar.gz"
 CADDY_HOME="$CACHE/caddy/caddy-${CADDY_VERSION}"
-PS_SRC="$CACHE/powersync-service"
+PS_SRC="$CACHE/powersync-service-v${POWERSYNC_VERSION}"   # version-keyed like NODE_HOME/PG_HOME/CADDY_HOME: bumping the pin must not reuse a stale build
 PS_PRUNED_STAMP="$PS_SRC/.waffled-prod-pruned"
 
 c_grn=$'\033[32m'; c_red=$'\033[31m'; c_ylw=$'\033[33m'; c_dim=$'\033[2m'; c_reset=$'\033[0m'
