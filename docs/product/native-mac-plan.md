@@ -295,7 +295,7 @@ Throwaway bash under `infra/native/spike/`. Purpose: **learn**, not build.
    rebuilds PowerSync's slot and storage, and refuses a dump newer than the bundle before
    stopping anything. Compose's plain `.sql.gz` dumps restore too, which is the
    Docker-to-Mac path. `backup --install-schedule` generates and loads the launchd agent.
-4. *(done — PR #TBD)* Integration test: spins the whole stack from an empty data dir on CI
+4. *(done — PR #189)* Integration test: spins the whole stack from an empty data dir on CI
    (macOS runner) and hits the same health endpoints as Phase 1. `.github/workflows/native-runtime.yml`
    runs `apps/runtime`'s Go checks on every PR, plus a `macos-15` job that builds the real
    bundle (`build.sh fetch|build|verify`) and runs the `-tags integration` suite against it.
