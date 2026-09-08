@@ -328,13 +328,21 @@ const PARTICIPANTS_SUBQUERY = `coalesce((
 // `extract(dow)` is 0=Sunday..6=Saturday; subtracting the household's start day (mod 7,
 // kept positive) walks back to it. Day and month have no such preference and fall through
 // to date_trunc. `h` is the households row every caller already joins.
-const PERIOD_START_SQL = `case
+// EXPORTED, and parameterised on the households alias, so the Weekly Planning goals step
+// measures "last week" on this exact clock rather than spelling the rule again — see
+// `weeklyPlanning/steps/goals.ts`, whose query calls the households row `l` (a `local`
+// CTE) rather than `h`. It had its own `date_trunc('week', …)` and was therefore
+// Monday-only: a second spelling of this rule is precisely how Monday truncation crept
+// back in after being fixed here.
+export const periodStartSQL = (hh = 'h') => `case
   when g.habit_period = 'week' then
-    (now() at time zone h.timezone)::date
-      - ((extract(dow from (now() at time zone h.timezone))::int
-          - case when h.week_start = 'monday' then 1 else 0 end + 7) % 7)
-  else date_trunc(g.habit_period, (now() at time zone h.timezone))::date
+    (now() at time zone ${hh}.timezone)::date
+      - ((extract(dow from (now() at time zone ${hh}.timezone))::int
+          - case when ${hh}.week_start = 'monday' then 1 else 0 end + 7) % 7)
+  else date_trunc(g.habit_period, (now() at time zone ${hh}.timezone))::date
 end`
+
+const PERIOD_START_SQL = periodStartSQL('h')
 
 // Habit goals are about consistency, not a grand total: how many distinct days
 // have been logged in the CURRENT period (day/week/month, household timezone).

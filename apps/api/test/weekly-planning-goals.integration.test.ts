@@ -216,9 +216,17 @@ beforeAll(async () => {
   await logAt(gCadence, 2, `now() - interval '70 days'`)
   await logAt(gCadence, 1, `now() - interval '2 days'`)
   // Two distinct days in the PREVIOUS household week, plus one in the current week so
-  // the goal doesn't read as stalled. Anchored to date_trunc, not to a day count, so it
+  // the goal doesn't read as stalled. Anchored to a week START, not a day count, so it
   // lands in the right week whatever weekday the suite runs on.
-  const weekStartSql = `date_trunc('week', (now() at time zone h.timezone))`
+  //
+  // That anchor is the HOUSEHOLD's week (`week_start`, default sunday) — it used to be
+  // `date_trunc('week', …)`, which is Monday-only, and so this fixture encoded the very
+  // bug the step had: its expected "2 of 5 last week" was derived from Monday
+  // truncation and stayed green when the code did the same wrong thing. A fixture that
+  // shares the code's mistake cannot catch it.
+  const weekStartSql = `((now() at time zone h.timezone)::date`
+    + ` - ((extract(dow from (now() at time zone h.timezone))::int`
+    + `     - case when h.week_start = 'monday' then 1 else 0 end + 7) % 7))`
   await logAt(gHabit, 1, `(${weekStartSql} - interval '1 day') at time zone h.timezone`)
   await logAt(gHabit, 1, `(${weekStartSql} - interval '2 days') at time zone h.timezone`)
   await logAt(gHabit, 1, `(${weekStartSql} + interval '2 hours') at time zone h.timezone`)
@@ -336,6 +344,53 @@ describe('weekly planning · goals · pace', () => {
 
   it('reads a recently-worked goal as last week’s amount, in its own unit', async () => {
     expect(await paceOf(gWeek)).toEqual({ text: '8 hours last week', tone: 'ok' })
+  })
+
+  // WHICH WEEK "LAST WEEK" IS — the household's, not Postgres's.
+  //
+  // `prev_period_days` used bare `date_trunc('week', …)`, which is MONDAY-only, while the
+  // goals module's own `PERIOD_START_SQL` derives the week from `households.week_start`
+  // (default **sunday**) precisely because Monday truncation got this wrong before: "log
+  // on Sunday and again on Monday and a 5× a week habit read 2, having reset nothing."
+  //
+  // The habit fixture above cannot catch it: it anchors its own logs with
+  // `date_trunc('week', …)`, the same wrong expression, so it reads correctly under either
+  // rule. This one pins the log to a REAL calendar Sunday and then flips the household's
+  // setting, which is the invariant that was broken — under the bug the answer does not
+  // move when the setting does.
+  //
+  // (On a Sunday run the two rules put this fixture's log in the same relative period, so
+  // the first assertion stops discriminating that one day in seven. It is never wrong,
+  // just less sharp — pinning `now()` is not available to us in SQL.)
+  it('reads “last week” off the household’s week_start, not Postgres’s Monday', async () => {
+    const { query } = await import('../src/platform/db')
+    const gRule = json(await call('POST', '/api/goals', kevin, {
+      title: 'Stretch', goalListId: paceList, goalType: 'habit', habitPeriod: 'week',
+      habitTargetPerPeriod: 5, trackingMode: 'each_tracks', participantIds: [kevinId],
+    })).goal.id as string
+
+    // This week's SUNDAY, always — `today - dow`, independent of any household setting.
+    const thisSunday = `((now() at time zone h.timezone)::date - (extract(dow from (now() at time zone h.timezone))::int))`
+    await query(
+      `insert into goal_logs (household_id, goal_id, amount, logged_at)
+       select h.id, $2::uuid, 1, (${thisSunday} + interval '3 hours') at time zone h.timezone
+         from households h where h.id = $1`,
+      [householdId, gRule]
+    )
+    const paceFor = async () => {
+      const g = (await group(kevin, paceList)).goals.find((x) => x.id === gRule)
+      return g?.pace?.text
+    }
+
+    // Sunday-start household: that log is THIS week, so last week saw nothing.
+    await query(`update households set week_start = 'sunday' where id = $1`, [householdId])
+    expect(await paceFor()).toBe('0 of 5 last week')
+
+    // Monday-start household: the very same log now belongs to the week that just ended.
+    await query(`update households set week_start = 'monday' where id = $1`, [householdId])
+    expect(await paceFor()).toBe('1 of 5 last week')
+
+    await query(`update households set week_start = 'sunday' where id = $1`, [householdId])
   })
 
   it('measures a habit against the cadence it set itself, on last period’s count', async () => {

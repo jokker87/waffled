@@ -30,7 +30,7 @@
 import type { PoolClient } from 'pg'
 import { query, getPool } from '../../../platform/db'
 import type { Tenant } from '../../households/households'
-import { listGoalLists, listGoals } from '../../goals/goals.service'
+import { listGoalLists, listGoals, periodStartSQL } from '../../goals/goals.service'
 import { getSessionById } from '../weeklyPlanning'
 
 const STEP_KEY = 'goals'
@@ -170,14 +170,17 @@ export function paceFor(goal: Goal, a: Activity | undefined): Pace | null {
 
 // Every live goal's recent activity in one grouped query.
 //
-// `prev_period_days` mirrors goals.service's PERIOD_DONE_SUBQUERY exactly, shifted back
-// one period — same `date_trunc`, same household timezone, same distinct-days count —
-// so "2 of 5 last week" is measured on the same clock as the "3 of 5" the goals screen
-// shows for this week. The interval comes from a CASE, never from concatenating a
-// column into a cast.
+// `prev_period_days` is the goals module's OWN period rule, shifted back one period — it
+// imports `periodStartSQL` rather than restating it, so "2 of 5 last week" is measured on
+// the same clock as the "3 of 5" the goals screen shows for this week. The interval comes
+// from a CASE, never from concatenating a column into a cast.
+//
+// It used to say it mirrored that rule while actually using bare `date_trunc('week', …)`,
+// which is MONDAY-only. On a Sunday-start household (the default) Sunday's log landed in
+// the wrong period, so this line disagreed with the goals screen about the same habit.
 async function recentActivity(householdId: string): Promise<Map<string, Activity>> {
   const { rows } = await query<ActivityRow>(
-    `with local as (select id, timezone, (now() at time zone timezone)::date as today
+    `with local as (select id, timezone, week_start, (now() at time zone timezone)::date as today
                       from households where id = $1),
           logs as (
             select gl.goal_id,
@@ -197,19 +200,22 @@ async function recentActivity(householdId: string): Promise<Map<string, Activity
                  from goal_logs gl2
                 where gl2.goal_id = g.id and gl2.deleted_at is null
                   and (gl2.logged_at at time zone l.timezone)
-                      >= date_trunc(g.habit_period, (now() at time zone l.timezone))
+                      >= (${periodStartSQL('l')})
                          - (case g.habit_period when 'day' then interval '1 day'
                                                 when 'month' then interval '1 month'
                                                 else interval '1 week' end)
                   and (gl2.logged_at at time zone l.timezone)
-                      < date_trunc(g.habit_period, (now() at time zone l.timezone))
+                      < (${periodStartSQL('l')})
              ) else 0 end) as prev_period_days,
             l.today::text as today
        from goals g
        cross join local l
        left join logs lg on lg.goal_id = g.id
       where g.household_id = $1 and g.deleted_at is null and g.is_active
-      group by g.id, g.goal_type, g.habit_period, l.today, l.timezone`,
+      -- l.week_start joins the grouping because the correlated subquery above reads it:
+      -- an aggregate query may only reference outer columns that are grouped, and Postgres
+      -- infers functional dependency from a real table's primary key, never through a CTE.
+      group by g.id, g.goal_type, g.habit_period, l.today, l.timezone, l.week_start`,
     [householdId]
   )
   return new Map(
