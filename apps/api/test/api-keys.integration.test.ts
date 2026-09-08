@@ -159,3 +159,81 @@ describe('api-key authentication + scope gate', () => {
     expect((await keyCall('GET', '/api/lists', key)).statusCode).toBe(401)
   })
 })
+
+// Hyphenated sibling routes (/api/chore-instances, /api/chore-proofs, /api/goal-lists,
+// /api/pantry-staples) belong to a resource that IS in the scope catalog, but
+// `pathMatches` needs a `/` boundary — so until their prefixes were listed explicitly
+// each one 403'd "not available to API keys" no matter which scopes the key held.
+// Assert on the MESSAGE, not just the status: a bare 403 passes both before and after.
+describe('hyphenated sibling routes are reachable with the right scope', () => {
+  const BOGUS = '00000000-0000-4000-8000-000000000000'
+  let listsRead = ''
+  let listsWrite = ''
+  let goalsRead = ''
+  let goalsWrite = ''
+  let choresRead = ''
+  let choresWrite = ''
+
+  const msg = (res: { body: string }): string => JSON.parse(res.body).message as string
+
+  beforeAll(async () => {
+    const mintKey = async (name: string, scopes: string[]): Promise<string> =>
+      JSON.parse((await call('POST', '/api/api-keys', kevin, { name, scopes })).body).key as string
+    listsRead = await mintKey('lists-r', ['lists:read'])
+    listsWrite = await mintKey('lists-w', ['lists:write'])
+    goalsRead = await mintKey('goals-r', ['goals:read'])
+    goalsWrite = await mintKey('goals-w', ['goals:write'])
+    choresRead = await mintKey('chores-r', ['chores:read'])
+    choresWrite = await mintKey('chores-w', ['chores:write'])
+  })
+
+  it('/api/pantry-staples answers to the lists scope (not pantry)', async () => {
+    expect((await keyCall('GET', '/api/pantry-staples', listsRead)).statusCode).toBe(200)
+
+    // A key for another resource is refused for a MISSING SCOPE, not as unexposed.
+    const wrong = await keyCall('GET', '/api/pantry-staples', goalsRead)
+    expect(wrong.statusCode).toBe(403)
+    expect(msg(wrong)).toMatch(/missing the required scope: lists:read/)
+
+    // :read can't write; :write can.
+    const denied = await keyCall('POST', '/api/pantry-staples', listsRead, { name: 'Olive oil' })
+    expect(denied.statusCode).toBe(403)
+    expect(msg(denied)).toMatch(/missing the required scope: lists:write/)
+    expect((await keyCall('POST', '/api/pantry-staples', listsWrite, { name: 'Olive oil' })).statusCode).toBe(201)
+
+    // Reaches the handler (the route's own 404), rather than the scope gate's 403.
+    expect((await keyCall('DELETE', `/api/pantry-staples/${BOGUS}`, listsWrite)).statusCode).toBe(404)
+  })
+
+  it('/api/goal-lists answers to the goals scope', async () => {
+    expect((await keyCall('GET', '/api/goal-lists', goalsRead)).statusCode).toBe(200)
+
+    const denied = await keyCall('POST', '/api/goal-lists', goalsRead, { name: 'Summer' })
+    expect(denied.statusCode).toBe(403)
+    expect(msg(denied)).toMatch(/missing the required scope: goals:write/)
+    expect((await keyCall('POST', '/api/goal-lists', goalsWrite, { name: 'Summer' })).statusCode).toBe(201)
+  })
+
+  it('/api/chore-instances answers to the chores scope', async () => {
+    expect((await keyCall('GET', '/api/chore-instances/today', choresRead)).statusCode).toBe(200)
+    expect((await keyCall('GET', '/api/chore-instances/awaiting', choresRead)).statusCode).toBe(200)
+
+    const denied = await keyCall('POST', `/api/chore-instances/${BOGUS}/complete`, choresRead)
+    expect(denied.statusCode).toBe(403)
+    expect(msg(denied)).toMatch(/missing the required scope: chores:write/)
+
+    // Past the gate and into the handler → the route's own 404 for an unknown id.
+    expect((await keyCall('POST', `/api/chore-instances/${BOGUS}/complete`, choresWrite)).statusCode).toBe(404)
+  })
+
+  it('/api/chore-proofs answers to the chores scope (admin-owned key)', async () => {
+    // adminRoute is satisfiable by a key: apiKeyTenant carries the owner person's
+    // is_admin, and the owner here is the household admin.
+    expect((await keyCall('GET', '/api/chore-proofs', choresRead)).statusCode).toBe(200)
+
+    const denied = await keyCall('DELETE', '/api/chore-proofs', choresRead)
+    expect(denied.statusCode).toBe(403)
+    expect(msg(denied)).toMatch(/missing the required scope: chores:write/)
+    expect((await keyCall('DELETE', '/api/chore-proofs', choresWrite)).statusCode).toBe(200)
+  })
+})
