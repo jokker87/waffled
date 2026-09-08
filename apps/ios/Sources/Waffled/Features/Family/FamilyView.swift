@@ -99,6 +99,10 @@ struct FamilyView: View {
         case "photos": return .photos
         case "settings": return .settings
         case "display": return .settingsDisplay
+        // The Weekly Planning CONFIG panel, not a session — a nav-stack screen two taps
+        // deep, and the simulator has no tap API, so without a name here its controls
+        // (the per-step switches, and the per-list ones) cannot be looked at headlessly.
+        case "settingsPlanning": return .settingsWeeklyPlanning
         default: return nil
         }
     }

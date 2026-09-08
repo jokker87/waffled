@@ -30,4 +30,12 @@ import Testing
         #expect(FamilyView.route(for: "planing") == nil)
         #expect(FamilyView.route(for: "") == nil)
     }
+
+    // The config panel is reachable by name too, so the switches on it can be verified
+    // headlessly. It is NOT the session: `planning` starts/resumes one, this one only
+    // configures it.
+    @Test func theSettingsPanelHasItsOwnName() {
+        #expect(FamilyView.route(for: "settingsPlanning") == .settingsWeeklyPlanning)
+        #expect(FamilyView.route(for: "planning") == .weeklyPlanning)
+    }
 }
