@@ -208,7 +208,11 @@ export async function findShoppingTrip(householdId: string, weekStart: string, h
        join chore_instances ci on ci.chore_id = c.id and ci.deleted_at is null
        left join persons p on p.id = ci.person_id and p.deleted_at is null
       where c.household_id = $1 and c.deleted_at is null and c.rrule is null
-        and (c.id = $4::uuid or (lower(c.title) = lower($5) and ci.due_on between $2::date and $3::date))
+        -- THE WEEK BOUND APPLIES TO BOTH BRANCHES. The hint used to be OR-ed outside it, so
+        -- a stale choreId query param — the web step keeps the last trip it saw across a
+        -- week change — resolved another week trip, which the shopper write then rewrote.
+        and ci.due_on between $2::date and $3::date
+        and (c.id = $4::uuid or lower(c.title) = lower($5))
       order by is_hint desc, ci.due_on
       limit 1`,
     [householdId, weekStart, weekEnd, hintChoreId && UUID_RE.test(hintChoreId) ? hintChoreId : null, GROCERY_CHORE_TITLE]

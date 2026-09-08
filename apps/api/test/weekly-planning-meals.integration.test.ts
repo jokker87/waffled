@@ -621,6 +621,33 @@ describe('weekly planning · meals · who is shopping', () => {
     await call('PATCH', '/api/household/modules', kevin, { chores: true })
     expect((await stepView()).choresOn).toBe(true)
   })
+
+  // A STALE HINT MUST NOT REACH INTO ANOTHER WEEK.
+  //
+  // `?choreId=` is the trip the client last saw — a hint, never a fact. But the lookup OR'd
+  // it in OUTSIDE the week bound: `c.id = $4 or (lower(title) = … and ci.due_on between …)`.
+  // The web step passes `state.view?.shopping?.choreId`, which survives a week change in the
+  // shell, so stepping to next week and assigning a shopper resolved — and then rewrote —
+  // LAST week's trip.
+  it('ignores a hint whose chore belongs to another week', async () => {
+    // A trip on this week, so there is something for a stale hint to point at.
+    await setShopper({ personId: ownerId, dueOn: days[6], dueTime: '09:00' })
+    const thisWeeksTrip = (await stepView()).shopping?.choreId as string
+    expect(thisWeeksTrip).toBeTruthy()
+
+    // Next week's view, handed this week's chore id as its hint.
+    const nextWeek = addDays(weekStart, 7)
+    const next = json(await call(
+      'GET', `/api/weekly-planning/meals?weekStart=${nextWeek}&choreId=${thisWeeksTrip}`, kevin))
+    expect(next.weekStart).toBe(nextWeek)
+    // Next week has no trip of its own, and must not borrow this week's.
+    expect(next.shopping).toBeNull()
+
+    // …and the hint still works for the week it actually belongs to.
+    const same = json(await call(
+      'GET', `/api/weekly-planning/meals?weekStart=${weekStart}&choreId=${thisWeeksTrip}`, kevin))
+    expect(same.shopping?.choreId).toBe(thisWeeksTrip)
+  })
 })
 
 describe('weekly planning · meals · the meals module', () => {
