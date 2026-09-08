@@ -14,6 +14,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/kevinpsites/waffled/apps/runtime/internal/atomicfile"
 )
 
 // Label is the launchd job label. The plist filename must match it.
@@ -88,8 +90,13 @@ func (a *Agent) Install() error {
 	}
 	// 0644, not 0600: launchd refuses a job file that is group- or world-writable, and
 	// there is nothing secret in it — the secrets stay in config.env.
-	if err := os.WriteFile(a.PlistPath(), body, 0o644); err != nil {
-		return fmt.Errorf("write %s: %w", a.PlistPath(), err)
+	//
+	// Written atomically — temp file, fsync, rename — like every other file this runtime
+	// owns. A crash or power loss part-way through a bare write leaves a truncated plist
+	// that launchd refuses at the next login, while Installed() (a bare os.Stat) goes on
+	// reporting a nightly backup that can never run.
+	if err := atomicfile.WriteFile(a.PlistPath(), body, 0o644); err != nil {
+		return err
 	}
 	// Best-effort: bootout fails when nothing is loaded, which is the common case.
 	_, _ = a.run("bootout", a.domainTarget())

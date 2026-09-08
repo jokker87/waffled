@@ -192,3 +192,27 @@ func TestUninstallWhenNothingIsInstalled(t *testing.T) {
 		t.Errorf("Uninstall with nothing installed: %v", err)
 	}
 }
+
+// The plist is written atomically — temp file, fsync, rename — so a crash part-way
+// through leaves either the old job file or the new one, never a truncated one launchd
+// refuses at the next login while Installed() still reports it as there. Atomicity itself
+// needs fault injection to observe; what this pins is that the dance leaves nothing
+// behind, a stray temp file in ~/Library/LaunchAgents being the visible symptom of
+// getting it wrong.
+func TestInstallLeavesNoTemporaryFileBehind(t *testing.T) {
+	a, _ := newAgent(t)
+	if err := a.Install(); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	entries, err := os.ReadDir(a.AgentsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != Label+".plist" {
+		var names []string
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Errorf("LaunchAgents holds %v, want only %s.plist", names, Label)
+	}
+}
