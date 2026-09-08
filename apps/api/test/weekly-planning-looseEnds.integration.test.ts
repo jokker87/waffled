@@ -1000,6 +1000,61 @@ describe('loose ends · the route contract', () => {
   })
 })
 
+// THE READ IS HOUSEHOLD-SCOPED, and it was not.
+//
+// `?sessionId=` makes step 1's read self-contained, and it was passed straight through to
+// `listRoutes`, which selected from `planning_session_steps` by `session_id` ALONE. That
+// table has no `household_id` of its own — it is scoped only through `planning_sessions` —
+// so an id belonging to another household read that household's routes, and every route
+// entry carries a `title`: the wording of another family's chores, list items and notes.
+//
+// Found by a `/code-review medium` pass on PR #184. The WRITE paths were always guarded
+// (404 on a foreign session, 400 on a malformed id) and `horizon.ts` guards its own read;
+// this one read was the exception, which is what made it easy to miss.
+describe('loose ends · the read cannot see another household', () => {
+  let theirSession = ''
+
+  beforeAll(async () => {
+    const { rows: h } = await query(
+      `insert into households (name, timezone) values ('Costanzas','America/Chicago') returning id`
+    )
+    const { rows: se } = await query(
+      `insert into planning_sessions (household_id, week_start, status, current_step)
+       values ($1, date_trunc('week', now())::date, 'active', 'looseEnds') returning id`,
+      [h[0].id]
+    )
+    theirSession = se[0].id
+    // A routed item, with words on it — the thing that would leak.
+    await query(
+      `insert into planning_session_steps (session_id, step_key, status, data)
+       values ($1,'looseEnds','pending',$2::jsonb)`,
+      [theirSession, JSON.stringify({
+        routes: [{ kind: 'chore', id: '22222222-2222-4222-8222-222222222222', title: 'THEIR PRIVATE CHORE', source: 'notDone', to: 'tasks' }],
+      })]
+    )
+  })
+
+  it('returns no routes for a session belonging to someone else', async () => {
+    const view = await read(`?sessionId=${theirSession}`)
+    expect(view.routes).toEqual([])
+    expect(JSON.stringify(view)).not.toContain('THEIR PRIVATE CHORE')
+  })
+
+  it('still reads our OWN session normally — the guard is scoping, not a blanket refusal', async () => {
+    const view = await read(`?sessionId=${sessionId}`)
+    expect(Array.isArray(view.routes)).toBe(true)
+    expect(view.weekStart).toBeTruthy()
+  })
+
+  // A malformed id reached Postgres as `uuid = 'nope'` → 22P02 → 500. It is now simply
+  // "no session", the same answer `horizon.ts` gives.
+  it('treats a malformed session id as no session rather than a 500', async () => {
+    const r = await call('GET', '/api/weekly-planning/loose-ends?sessionId=nope', kevin)
+    expect(r.statusCode).toBe(200)
+    expect(json(r).routes).toEqual([])
+  })
+})
+
 describe('loose ends · the resolve contract', () => {
   it('refuses an unknown kind or action rather than guessing', async () => {
     expect((await resolve({ kind: 'nonsense', id: ownerId, action: 'done' })).statusCode).toBe(400)

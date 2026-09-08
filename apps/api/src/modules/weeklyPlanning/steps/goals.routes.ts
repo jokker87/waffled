@@ -1,5 +1,6 @@
 import type createAPI from 'lambda-api'
 import type { Request, Response } from 'lambda-api'
+import { getSessionById } from '../weeklyPlanning'
 import { moduleRoutes, requireModule } from '../../../platform/route-guards'
 import { getGoalsStepView, setGroupFocus } from './goals'
 
@@ -24,7 +25,14 @@ export function registerGoalsStepRoutes(api: Api): void {
   // axis) and what this session has already settled for it.
   api.get('/api/weekly-planning/goals', tenantRoute(async (tenant, req: Request) => {
     await requireModule(tenant, 'goals')
-    return getGoalsStepView(tenant, uuidOrNull(req.query?.sessionId))
+    // Ownership, not just shape. `readFocus` reads `planning_session_steps` by session id
+    // alone (that table is scoped only through `planning_sessions`), so a well-formed id
+    // from another household used to reach their goals-step data. Less to leak here than
+    // step 1 had — goal ids that cannot match this household's lists — but the same hole,
+    // and the same one-line guard the recap and kids reads already use.
+    const asked = uuidOrNull(req.query?.sessionId)
+    const session = asked ? await getSessionById(tenant.householdId, asked) : null
+    return getGoalsStepView(tenant, session ? asked : null)
   }))
 
   // Answer one group. `goalId: null` is the real answer "nothing this week" — it clears
