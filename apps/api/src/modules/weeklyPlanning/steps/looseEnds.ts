@@ -17,7 +17,7 @@
 //     unchecked row there is shopping, not a loose end (see staleListItems).
 //
 //   PARKED is what somebody wrote down during the week and that exists nowhere else
-//     yet, so it gets the one table this step owns (0101_planning_parked_items). Same
+//     yet, so it gets the one table this step owns (0102_planning_parked_items). Same
 //     card, different verbs — because a parked thing might turn out to be nothing,
 //     which is why Drop is a real answer there and only there.
 //
