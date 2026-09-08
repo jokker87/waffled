@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router'
 import {
   useWeeklyPlanning,
@@ -13,6 +13,7 @@ import {
   type PlanningStep,
 } from '../lib/api'
 import { STEP_MODULES, type PlanningStepModule, type StepBodyProps } from './planning/registry'
+import type { RecapPanelProps } from './planning/steps/RecapStep'
 import { StepPlaceholder } from './planning/StepPlaceholder'
 import { StepErrorBoundary } from './planning/StepErrorBoundary'
 import { HandoffCtx, type HandoffAction } from './planning/handoff'
@@ -318,6 +319,10 @@ export function WeeklyPlanning() {
   const next = current ? nextStepAfter(steps, current.key) : null
   const session = view?.session ?? null
   const stepMod = useStepModule(current?.key)
+  // The finished week's read-back. Fetched here — above every early return — because the
+  // record is one of them.
+  // Capitalised because it IS a component — a lowercase name in JSX is an HTML tag.
+  const RecordRecap = useRecapPanel(session?.status === 'completed')
 
   // THE VERB THIS STEP LENDS THE BANNER, if it has one. See `./handoff` — the shell
   // keeps the banner and the step keeps its composer, so there is still exactly one way
@@ -504,17 +509,50 @@ export function WeeklyPlanning() {
   // ── Saved: the record ────────────────────────────────────────────────────────
   // v4 step 10: "after that Today is the surface, not this session." So the finished
   // session is a receipt, not a dashboard — what it decided, and a way back in.
+  //
+  // AND WHAT IT DECIDED IS THE WEEK, NOT THE STEP LIST. This screen used to be ten green
+  // ticks against ten step names, which tells you the session finished and nothing at all
+  // about the week it decided: "the web recap page shows just the checklist. On the
+  // iPhone recap page we had a better experience where we showed the actual week
+  // decisions." So it leads with step 10's own read-back — the same panel, the same
+  // payload, on both clients — and keeps the per-step list UNDERNEATH, because that list
+  // is the only place that records which steps were skipped on purpose.
+  //
+  // The panel is a lazy chunk and the recap step can be turned off, so neither is assumed
+  // present: without it this screen is exactly what it was before, which is a working
+  // record rather than a hole.
   if (session?.status === 'completed') {
     const decided = runnable.filter((s) => s.status !== 'pending')
+    const recapStep = steps.find((s) => s.key === 'recap')
+    const readBack = RecordRecap && recapStep
+      ? <RecordRecap
+          step={recapStep}
+          sessionId={session.id}
+          weekStart={view.weekStart}
+          setDecisionData={NO_CRUMB}
+          refresh={refetch}
+          busy={busy}
+          hrefForStep={(key) => RECORD_MODULE_HREF[key] ?? null}
+        />
+      : null
     return (
       <div className="wp-screen">
-        <div className="wp-record">
+        <div className={`wp-record${readBack ? ' is-read' : ''}`}>
           <div className="wp-record-h">
             <div className="wp-record-t wf-serif">The week is decided</div>
             <div className="wp-record-s">
               {weekLabel(view.weekStart)} · saved {new Date(session.completedAt ?? session.startedAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
             </div>
           </div>
+          {/* The read-back has no boundary above it on this screen — the shell is the one
+              component whose failure has nowhere to fall back to — so a panel that throws
+              costs the read-back and leaves the record standing. */}
+          {readBack && (
+            <div className="wp-record-read">
+              <StepErrorBoundary key="record-recap" title="the week">{readBack}</StepErrorBoundary>
+            </div>
+          )}
+          {readBack && <div className="wp-record-steps">Step by step</div>}
           <div className="wp-record-list">
             {decided.map((s) => (
               <div key={s.key} className={`wp-record-row ${s.status}`}>
@@ -706,6 +744,53 @@ export function WeeklyPlanning() {
     </HandoffCtx.Provider>
   )
 }
+
+// WHERE A ROW ON THE FINISHED RECORD GOES.
+//
+// Inside a session the recap's rows point back at the step that owns them. On the record
+// they cannot: the effect above force-drops the step from the path once a session is
+// completed ("Saved: the record is the surface"), so a `/planning/<step>` link would
+// bounce straight back to the record it was clicked on. Carving an exception into that
+// correction is not worth an affordance — it is the one piece of this screen with a scar
+// on it ("two routing updates racing in one tick").
+//
+// So a row goes to the MODULE the decision lives in, which is what the recap's own
+// footnote has always promised: "already live in Calendar, Meals, Lists, Chores and
+// Goals". Wanting to change the DECISION rather than look at it is what "Reopen the
+// session" is for, two rows below.
+//
+// PARTIAL ON PURPOSE. A step whose decisions have no single module of their own — loose
+// ends spans chores, lists and rhythms; family night and the kids' step write events plus
+// their own state — gets no href and renders as a plain row, because a row that looks
+// tappable and isn't is worse than a plain one.
+const RECORD_MODULE_HREF: Record<string, string> = {
+  calendar: '/calendar',
+  meals: '/meals',
+  tasks: '/tasks',
+  goals: '/goals',
+}
+
+// The recap panel, in its own chunk. Deliberately not through `useStepModule`: the
+// registry's `Body` is typed for the step contract alone, and the record needs the two
+// extra props (`hrefForStep`, `saved`) that make the same read-back honest on a saved
+// week. Loaded only when a record is actually on screen.
+function useRecapPanel(active: boolean): ComponentType<RecapPanelProps> | null {
+  const [panel, setPanel] = useState<ComponentType<RecapPanelProps> | null>(null)
+  useEffect(() => {
+    if (!active) return
+    let alive = true
+    import('./planning/steps/RecapStep')
+      .then((m) => { if (alive) setPanel(() => m.RecapPanel) })
+      .catch(() => { /* the tick-list below is the fallback, and it is never not there */ })
+    return () => { alive = false }
+  }, [active])
+  return panel
+}
+
+// A step body may hand the session a crumb to keep. The record cannot answer a step, so
+// there is nothing for a crumb to be attached TO — and a module-level constant keeps the
+// panel's effect from re-firing on every render of this screen.
+const NO_CRUMB = () => {}
 
 // Load the step's module from the registry. Each step is its own chunk, so reaching
 // step 7 never downloaded steps 1–6, and — the reason the registry exists at all — a

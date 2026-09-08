@@ -61,6 +61,12 @@ function mockApi(view: Record<string, unknown>) {
     const method = init?.method ?? 'GET'
     calls.push({ url: u, method, body: init?.body ? JSON.parse(String(init.body)) : null })
 
+    // The recap read, ANSWERED BEFORE the generic weekly-planning GET below — both are
+    // GETs under /api/weekly-planning, and handing the shell's own view to a surface
+    // expecting days/groups/counts is how the record's read-back came back empty.
+    if (u.includes('/api/weekly-planning/recap') && method === 'GET') {
+      return { ok: true, json: async () => (state.recap ?? RECAP) }
+    }
     if (u.includes('/api/weekly-planning') && method === 'GET') return { ok: true, json: async () => state }
     // Real step bodies now load in place of the stubs, and they read other modules.
     // The shell's tests aren't about their content, but they must not crash on a reply
@@ -95,6 +101,31 @@ function mockApi(view: Record<string, unknown>) {
     }
     return { ok: true, json: async () => ({ ok: true, session: state.session, steps: state.steps }) }
   }) as unknown as typeof fetch
+}
+
+// What `GET /api/weekly-planning/recap` answers with: the week read back. Shaped like
+// the real payload — a day with a dinner and an event, a module group that names the step
+// that owns it, and a step whose honest answer was "nothing this week".
+const RECAP = {
+  weekStart: '2026-09-06',
+  savedAt: '2026-09-06T17:40:00.000Z',
+  days: [
+    {
+      date: '2026-09-06', meal: 'Lentil soup', cook: 'Lottie',
+      events: [{ id: 'e1', title: 'Swim lesson', when: '9:00 AM', personId: 'p1', personName: 'Ada', personColor: '#38bdf8', participantIds: ['p1'] }],
+      more: 0,
+    },
+    { date: '2026-09-07', meal: null, cook: null, events: [], more: 2 },
+  ],
+  groups: [
+    { key: 'calendar', label: 'Calendar', headline: '6 things on the week', detail: 'Swim lesson · Dentist', count: 2, stepKey: 'calendar' },
+  ],
+  lastCall: [],
+  lastCallMore: 0,
+  leftAlone: [
+    { key: 'none:goals', label: 'Goals', detail: 'Nothing changed this week', badge: 'none', stepKey: 'goals' },
+  ],
+  counts: { decisions: 2, deferred: 1, parked: 0 },
 }
 
 const baseView = (over: Record<string, unknown> = {}) => ({
@@ -365,6 +396,72 @@ describe('weekly planning · the record', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Reopen the session/ }))
     await waitFor(() => expect(sent('PATCH', '/session/s1')[0].body).toMatchObject({ status: 'active' }))
+  })
+
+  // "the web recap page shows just the checklist. On the iPhone recap page we had a
+  // better experience where we showed the actual week decisions."
+  //
+  // The record used to be ten green ticks against ten step names — which says the session
+  // finished and nothing whatever about the week it decided. It leads with the week now:
+  // the same read-back step 10 shows, on the same payload, on both clients.
+  it('leads with the week itself, not only a tick-list of steps', async () => {
+    mockApi(baseView({
+      session: session({ status: 'completed', completedAt: '2026-09-06T17:40:00.000Z' }),
+      steps: [
+        step('looseEnds', 1, 'Loose ends', 'Intake', { status: 'done' }),
+        step('calendar', 2, 'Calendar', 'Frame the week', { status: 'skipped' }),
+        step('recap', 3, 'Recap', 'Close'),
+      ],
+    }))
+    draw()
+    expect(await screen.findByText('The week is decided')).toBeTruthy()
+
+    // The week strip, the module grouping and the receipt's numbers — the three things
+    // the shell's own comment recorded as missing.
+    expect(await screen.findByTestId('wpr-day-2026-09-06')).toBeTruthy()
+    expect(screen.getByText('Lentil soup · Lottie')).toBeTruthy()
+    expect(screen.getByTestId('wpr-group-calendar')).toBeTruthy()
+    expect(screen.getByText('6 things on the week')).toBeTruthy()
+    expect(screen.getByText('2 decisions')).toBeTruthy()
+    expect(screen.getByTestId('wpr-alone-none:goals')).toBeTruthy()
+
+    // …and the per-step list survives underneath, because it is the only record of what
+    // was skipped ON PURPOSE. Both readings of the week, in the order that reads best.
+    expect(screen.getByText(/Skipped — a real answer/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Reopen the session/ })).toBeTruthy()
+  })
+
+  // The week is SAVED here, so the copy cannot be written in the tense step 10 uses.
+  it('reads the record in the past tense, not "what tonight changed"', async () => {
+    mockApi(baseView({ session: session({ status: 'completed', completedAt: '2026-09-06T17:40:00.000Z' }) }))
+    draw()
+    expect(await screen.findByText('What the session changed')).toBeTruthy()
+    expect(screen.queryByText('What tonight changed')).toBeNull()
+  })
+
+  // A row on the record cannot point at /planning/<step>: the shell strips the step from
+  // the path the moment the session completes, so such a link would bounce straight back.
+  // It points at the module the decisions actually live in — which is what the recap's
+  // own footnote has always claimed ("already live in Calendar, Meals, Lists, …").
+  it('sends a row to the module that owns it, not back into the finished session', async () => {
+    mockApi(baseView({ session: session({ status: 'completed', completedAt: '2026-09-06T17:40:00.000Z' }) }))
+    draw()
+    const row = await screen.findByTestId('wpr-group-calendar')
+    expect(row.getAttribute('href')).toBe('/calendar')
+    fireEvent.click(row)
+    await waitFor(() => expect(where()).toBe('/calendar'))
+  })
+
+  // A step with no module of its own gets a plain row: "a row that looks tappable and
+  // isn't is worse than a plain one."
+  it('leaves a row plain when there is no module to send it to', async () => {
+    mockApi(baseView({
+      session: session({ status: 'completed', completedAt: '2026-09-06T17:40:00.000Z' }),
+      recap: { ...RECAP, groups: [{ key: 'connection', label: 'Connection', headline: 'One check-in', detail: 'Ada', count: 1, stepKey: 'connection' }] },
+    }))
+    draw()
+    const row = await screen.findByTestId('wpr-group-connection')
+    expect(row.getAttribute('href')).toBeNull()
   })
 })
 

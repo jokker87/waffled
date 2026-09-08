@@ -142,7 +142,7 @@ struct RecapStepView: View {
         WaffledCard(padding: 14) {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 8) {
-                    Text("What tonight changed")
+                    Text(PlanningRecapText.changedTitle(saved: model.saved))
                         .font(.system(size: 15, weight: .bold)).foregroundStyle(WF.ink)
                     Spacer(minLength: 6)
                     WaffledStatusBadge(
@@ -171,7 +171,7 @@ struct RecapStepView: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text("Nothing was decided in this session")
                             .font(.system(size: 13.5, weight: .semibold)).foregroundStyle(WF.ink)
-                        Text("Saving still records the week you read back — and everything on the calendar, the plan and the board stays exactly as it is.")
+                        Text(PlanningRecapText.nothingDecidedDetail(saved: model.saved))
                             .font(.system(size: 12)).foregroundStyle(WF.ink3)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -318,7 +318,7 @@ struct RecapStepView: View {
     }
 
     private var footNote: some View {
-        Text("Every line above is a pointer, not a copy — it is already live in Calendar, Meals, Lists, Chores and Goals. Saving writes the record: what was decided, what was deferred, what rolled over, with a timestamp.")
+        Text(PlanningRecapText.footNote(saved: model.saved))
             .font(.system(size: 12)).foregroundStyle(WF.ink3)
             .fixedSize(horizontal: false, vertical: true)
     }

@@ -19,13 +19,15 @@ import '../../../styles/planning-recap.css'
 //
 // WHAT IT DELIBERATELY DOES NOT BUILD:
 //
-//  · A SAVED FRAME. `WeeklyPlanning.tsx` already renders the finished record — the
-//    timestamp, the per-step read-back, "Reopen the session" and "Start this week over"
-//    — and drops the step from the URL the moment the session completes, so a saved
-//    frame here would be unreachable as well as duplicated. The v4 mock's second board
-//    is the shell's, not this step's. (What the shell's version lacks — the week strip,
-//    the module grouping and the receipt's three numbers — is a shell change, raised
-//    rather than made.)
+//  · A SAVED FRAME. `WeeklyPlanning.tsx` owns the finished record — the timestamp, the
+//    per-step read-back, "Reopen the session" and "Start this week over" — and drops the
+//    step from the URL the moment the session completes, so a saved frame here would be
+//    unreachable as well as duplicated. The v4 mock's second board is the shell's, not
+//    this step's. What the shell's version LACKED — the week strip, the module grouping
+//    and the receipt's three numbers — was recorded here as "a shell change, raised
+//    rather than made", and it was then reported: "the web recap page shows just the
+//    checklist." So the shell now renders THIS panel above its tick-list, through
+//    `RecapPanel` below. The frame stays the shell's; the reading is shared.
 //  · A "CHANGE SOMETHING" FOOTER BUTTON. The mock puts one beside the primary, but the
 //    shell's step chip already opens the agenda sheet, which jumps AND moves the
 //    session's own pointer. A second control that had to guess which step you meant
@@ -67,7 +69,29 @@ function useRecap(sessionId: string) {
   return { view, loading, setView }
 }
 
-function Body({ sessionId, setDecisionData, busy }: StepBodyProps) {
+// The recap is rendered on TWO surfaces, and the difference between them is two props.
+//
+// Step 10 renders it inside a running session: rows point back at the step that owns
+// them, and the copy is written for a week about to be saved. The finished-week record
+// (`WeeklyPlanning.tsx`) renders the same read-back on the same payload — that was the
+// report, "the web recap page shows just the checklist … on the iPhone we showed the
+// actual week decisions" — and neither of those two things holds there: the shell strips
+// the step from the path the moment a session completes, so a `/planning/<step>` link
+// would bounce straight back, and "what tonight changed" is the wrong tense for a week
+// saved on Sunday and read on Thursday.
+//
+// The routing prop is OPTIONAL and absent means step 10's behaviour, so the live session
+// and this file's own tests are untouched by the record's existence. THE TENSE IS NOT A
+// PROP: it is `savedAt` on the payload, the field the server ships for exactly this
+// ("here so any surface reading the record can date it"), so the two clients cannot drift
+// into describing the same week in different tenses.
+export interface RecapPanelProps extends StepBodyProps {
+  // Where a row naming a step should point, or null for a plain row. Absent ⇒ the step
+  // inside the session.
+  hrefForStep?: (stepKey: string) => string | null
+}
+
+export function RecapPanel({ sessionId, setDecisionData, busy, hrefForStep }: RecapPanelProps) {
   const { view, loading } = useRecap(sessionId)
   const [search] = useSearchParams()
   // Family colour when an event covers the household, the owner's colour otherwise, grey
@@ -89,7 +113,8 @@ function Body({ sessionId, setDecisionData, busy }: StepBodyProps) {
   // the pointer"), so this moves THIS browser without touching the session's own
   // `current_step` — which stays where the family is.
   const q = search.toString()
-  const hrefFor = (stepKey: string) => `/planning/${stepKey}${q ? `?${q}` : ''}`
+  const hrefFor = (stepKey: string): string | null =>
+    hrefForStep ? hrefForStep(stepKey) : `/planning/${stepKey}${q ? `?${q}` : ''}`
 
   const drop = useCallback(
     async (id: string) => {
@@ -110,6 +135,9 @@ function Body({ sessionId, setDecisionData, busy }: StepBodyProps) {
 
   const lastCall = view.lastCall.filter((n) => !kept.includes(n.id) && !dropped.includes(n.id))
   const nothing = !view.groups.length && !view.leftAlone.length
+  // The week is already saved, so the closing copy cannot be written for a week about to
+  // be. "What tonight changed" is wrong on a Thursday reading of Sunday's session.
+  const saved = !!view.savedAt
 
   return (
     <div className="wpr">
@@ -148,7 +176,7 @@ function Body({ sessionId, setDecisionData, busy }: StepBodyProps) {
       <div className="wpr-cols">
         <div className="wpr-card">
           <div className="wpr-h">
-            What tonight changed
+            {saved ? 'What the session changed' : 'What tonight changed'}
             <span>{view.counts.decisions === 1 ? '1 decision' : `${view.counts.decisions} decisions`}</span>
           </div>
           {view.groups.map((g) => {
@@ -164,8 +192,9 @@ function Body({ sessionId, setDecisionData, busy }: StepBodyProps) {
             )
             // The row IS the way back to the decision — which is the grouping's whole
             // argument: a line names the module, and the module is where you change it.
-            return g.stepKey ? (
-              <Link key={g.key} to={hrefFor(g.stepKey)} className="wpr-row" data-testid={`wpr-group-${g.key}`}>
+            const href = g.stepKey ? hrefFor(g.stepKey) : null
+            return href ? (
+              <Link key={g.key} to={href} className="wpr-row" data-testid={`wpr-group-${g.key}`}>
                 {inner}
               </Link>
             ) : (
@@ -176,7 +205,11 @@ function Body({ sessionId, setDecisionData, busy }: StepBodyProps) {
             <div className="wpr-row">
               <span className="wpr-t">
                 Nothing was decided in this session
-                <s>Saving still records the week you read back — and everything on the calendar, the plan and the board stays exactly as it is.</s>
+                <s>
+                  {saved
+                    ? 'The week was saved as it stood — everything on the calendar, the plan and the board is exactly as it was.'
+                    : 'Saving still records the week you read back — and everything on the calendar, the plan and the board stays exactly as it is.'}
+                </s>
               </span>
             </div>
           )}
@@ -234,8 +267,9 @@ function Body({ sessionId, setDecisionData, busy }: StepBodyProps) {
                     <span className={`wpr-n is-${l.badge}`}>{l.badge}</span>
                   </>
                 )
-                return l.stepKey ? (
-                  <Link key={l.key} to={hrefFor(l.stepKey)} className="wpr-row" data-testid={`wpr-alone-${l.key}`}>
+                const href = l.stepKey ? hrefFor(l.stepKey) : null
+                return href ? (
+                  <Link key={l.key} to={href} className="wpr-row" data-testid={`wpr-alone-${l.key}`}>
                     {inner}
                   </Link>
                 ) : (
@@ -249,13 +283,14 @@ function Body({ sessionId, setDecisionData, busy }: StepBodyProps) {
 
       <div className="wpr-foot">
         Every line above is a <b>pointer</b>, not a copy — it is already live in Calendar,
-        Meals, Lists, Chores and Goals. Saving writes the record: what was decided, what
-        was deferred, what rolled over, with a timestamp. After that Today is the surface,
-        not this session.
+        Meals, Lists, Chores and Goals.{' '}
+        {saved
+          ? 'The record was written when the week was saved: what was decided, what was deferred, what rolled over. Today is the surface now, not this session.'
+          : 'Saving writes the record: what was decided, what was deferred, what rolled over, with a timestamp. After that Today is the surface, not this session.'}
       </div>
     </div>
   )
 }
 
-const mod: PlanningStepModule = { Body }
+const mod: PlanningStepModule = { Body: RecapPanel }
 export default mod

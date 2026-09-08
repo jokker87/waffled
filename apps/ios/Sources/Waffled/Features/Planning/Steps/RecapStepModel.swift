@@ -31,6 +31,30 @@ enum PlanningRecapText {
         n == 1 ? "1 decision" : "\(n) decisions"
     }
 
+    /// THE TENSE. The recap reads on two surfaces — step 10, inside a session about to be
+    /// saved, and the finished-week record, which may be opened on Thursday. Every
+    /// sentence below that promises what SAVING will do is a lie on the second one, and
+    /// "what tonight changed" is the wrong night. Which surface it is comes from the
+    /// week's own `savedAt` rather than a flag a view passes down, so a saved week cannot
+    /// read one way here and another on the web.
+
+    static func changedTitle(saved: Bool) -> String {
+        saved ? "What the session changed" : "What tonight changed"
+    }
+
+    static func nothingDecidedDetail(saved: Bool) -> String {
+        saved
+            ? "The week was saved as it stood — everything on the calendar, the plan and the board is exactly as it was."
+            : "Saving still records the week you read back — and everything on the calendar, the plan and the board stays exactly as it is."
+    }
+
+    static func footNote(saved: Bool) -> String {
+        let pointer = "Every line above is a pointer, not a copy — it is already live in Calendar, Meals, Lists, Chores and Goals."
+        return saved
+            ? "\(pointer) The record was written when the week was saved: what was decided, what was deferred, what rolled over. Today is the surface now, not this session."
+            : "\(pointer) Saving writes the record: what was decided, what was deferred, what rolled over, with a timestamp. After that Today is the surface, not this session."
+    }
+
     /// "…and 2 more still on the board".
     static func lastCallMoreLabel(_ n: Int) -> String {
         n == 1 ? "…and 1 more still on the board" : "…and \(n) more still on the board"
@@ -162,6 +186,11 @@ final class PlanningRecapModel {
 
     /// "Nothing was decided in this session" — an honest state, not an empty screen.
     var nothingDecided: Bool { groups.isEmpty && leftAlone.isEmpty }
+
+    /// The week is already saved — the record, not step 10. Off the payload, because the
+    /// server ships `savedAt` for exactly this ("here so any surface reading the record
+    /// can date it") and a screen-level flag would be a second opinion about it.
+    var saved: Bool { view?.savedAt != nil }
 
     /// The receipt's integers, and ONLY those. See `PlanningRecapCrumb`.
     ///

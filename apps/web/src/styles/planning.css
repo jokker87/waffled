@@ -278,6 +278,23 @@
   background: var(--card); border-radius: var(--r-xl); box-shadow: var(--sh-2);
   padding: 28px 32px 24px;
 }
+/* Leading with the week's read-back needs the width the read-back was designed for: a
+   seven-column strip beside two cards. A record with no panel (the recap step turned
+   off, or its chunk failing to load) keeps the 640px receipt it has always been. */
+.wp-record.is-read { max-width: 1180px; }
+
+.wp-record-read { margin-top: 20px; }
+
+/* The per-step list is the SECOND reading of the week now, so it says what it is. Without
+   the panel above it there is nothing to distinguish it from, and this label is absent. */
+.wp-record-steps {
+  margin-top: 26px; padding-top: 16px; border-top: 1px solid var(--hair-2);
+  font-size: 11.5px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.wp-record.is-read .wp-record-list { margin-top: 6px; }
+
 .wp-record-t { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; }
 .wp-record-s { margin-top: 4px; font-size: 13.5px; font-weight: 600; color: var(--ink-2); }
 .wp-record-list { margin: 20px 0 4px; }

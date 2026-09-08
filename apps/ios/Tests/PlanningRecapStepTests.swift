@@ -88,6 +88,18 @@ private func decodedRecap() throws -> WaffledAPI.PlanningRecapView {
     try WaffledAPI.decoder.decode(WaffledAPI.PlanningRecapView.self, from: recapJSON)
 }
 
+// The same week, already saved. `savedAt` is the ONLY difference — which is the point:
+// the tense of the recap's copy is the payload's business, not a flag a screen passes in,
+// so a saved week cannot read one way on iOS and another on the web.
+private let savedRecapJSON = Data(
+    String(decoding: recapJSON, as: UTF8.self)
+        .replacingOccurrences(of: "\"savedAt\": null", with: "\"savedAt\": \"2026-09-06T17:40:00.000Z\"")
+        .utf8)
+
+private func decodedSavedRecap() throws -> WaffledAPI.PlanningRecapView {
+    try WaffledAPI.decoder.decode(WaffledAPI.PlanningRecapView.self, from: savedRecapJSON)
+}
+
 // MARK: - The feed
 
 @MainActor
@@ -444,5 +456,41 @@ private func model(_ feed: RecapFeed) -> PlanningRecapModel {
         // through the shell's own gate rather than being computed here.
         #expect(feed.fetchArgs == [RecapFeed.Ask(sessionId: nil, weekStart: "2026-09-06")])
         #expect(model.days.count == 7)
+    }
+}
+
+// MARK: - The tense
+//
+// The recap is rendered on two surfaces: step 10, inside a session about to be saved, and
+// the finished-week record, which may be read on Thursday. "What tonight changed" is
+// wrong on the second, and so is every sentence that promises what SAVING will do. The
+// week itself says which it is — `savedAt` — so the two clients cannot drift.
+@Suite struct PlanningRecapTenseTests {
+
+    @Test func aWeekAboutToBeSavedReadsForward() {
+        #expect(PlanningRecapText.changedTitle(saved: false) == "What tonight changed")
+        #expect(PlanningRecapText.footNote(saved: false).contains("Saving writes the record"))
+        #expect(PlanningRecapText.nothingDecidedDetail(saved: false).contains("Saving still records"))
+    }
+
+    @Test func aWeekAlreadySavedReadsBack() {
+        #expect(PlanningRecapText.changedTitle(saved: true) == "What the session changed")
+        // Nothing in the saved copy may promise a future write: the write already happened.
+        #expect(!PlanningRecapText.footNote(saved: true).contains("Saving"))
+        #expect(PlanningRecapText.footNote(saved: true).contains("was saved"))
+        #expect(PlanningRecapText.nothingDecidedDetail(saved: true).contains("was saved as it stood"))
+    }
+
+    // Both sides of the rule, through the model, off the payload — not off a flag.
+    @MainActor @Test func theWeekItselfDecidesTheTense() async throws {
+        let feed = try RecapFeed()
+        let live = model(feed)
+        await live.load(sessionId: "s1", weekStart: "2026-09-06")
+        #expect(live.saved == false)
+
+        feed.view = try decodedSavedRecap()
+        let saved = model(feed)
+        await saved.load(sessionId: "s1", weekStart: "2026-09-06")
+        #expect(saved.saved)
     }
 }
