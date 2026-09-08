@@ -148,6 +148,12 @@ user owns). Restoring a *live* cluster from a file-level backup produces a corru
 `backups/` is what should be backed up. Failing to set it is a warning, never a failed
 start.
 
+Once set, the answer is remembered in `runtime.json` and **trusted without re-asking**:
+the exclusion is asserted when a Supervisor is constructed, and `status` constructs one on
+every poll, so verifying it there would fork `tmutil` once a second behind the menu-bar
+app. `doctor` asks tmutil live instead — an exclusion someone removed by hand shows up the
+moment a human runs the command that exists to re-check settled questions.
+
 ## Ports
 
 | | Default | Bind | Chosen by |

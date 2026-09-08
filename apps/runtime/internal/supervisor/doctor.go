@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/kevinpsites/waffled/apps/runtime/internal/backup"
-	"github.com/kevinpsites/waffled/apps/runtime/internal/datadir"
 	"github.com/kevinpsites/waffled/apps/runtime/internal/ports"
 	"github.com/kevinpsites/waffled/apps/runtime/internal/schedule"
 	"github.com/kevinpsites/waffled/apps/runtime/internal/services"
@@ -68,7 +67,7 @@ func (s *Supervisor) Doctor(ctx context.Context) []Check {
 		add("data directory location", CheckWarn, "%s", warning)
 	}
 
-	if datadir.IsExcludedFromBackup(s.plan.Layout.Postgres) {
+	if isExcludedFromBackup(s.plan.Layout.Postgres) {
 		add("Time Machine", CheckOK, "the live database is excluded; %s is what gets backed up", s.plan.Layout.Backups)
 	} else if s.postgresInitialized() {
 		add("Time Machine", CheckWarn,

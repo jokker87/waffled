@@ -21,6 +21,14 @@ const (
 	pgStopTimeout  = 60 * time.Second
 )
 
+// The two tmutil-backed calls go through package-level vars so the tests can count them
+// rather than run tmutil against the machine holding the suite. Always the real
+// functions in production; nothing outside a test ever reassigns them.
+var (
+	isExcludedFromBackup = datadir.IsExcludedFromBackup
+	excludeFromBackup    = datadir.ExcludeFromBackup
+)
+
 // postgresInitialized reports whether PGDATA already holds a cluster.
 func (s *Supervisor) postgresInitialized() bool {
 	_, err := os.Stat(filepath.Join(s.plan.Layout.Postgres, "PG_VERSION"))
@@ -84,23 +92,26 @@ func (s *Supervisor) initPostgres(ctx context.Context) error {
 //
 // It runs when the data directory is created rather than when the cluster is, so an
 // install that predates this, or one where tmutil failed once, is repaired on its next
-// start. The result is remembered in runtime.json so a settled question is not re-asked
-// on every `status` poll. Failing is always a warning: a household whose Time Machine is
-// misconfigured should still get a server.
+// start. Failing is always a warning: a household whose Time Machine is misconfigured
+// should still get a server.
+//
+// The memo in runtime.json is trusted OUTRIGHT rather than verified against tmutil. This
+// runs from New(), and `status` constructs a Supervisor on every poll — so re-asking here
+// would fork /usr/bin/tmutil once a second behind the menu-bar app, which is the exact
+// cost the memo was added to avoid. Someone who removes the exclusion by hand afterwards
+// is caught by `doctor`, which asks tmutil live: re-asking settled questions is what that
+// command is for, and it runs once when a human types it.
 func (s *Supervisor) excludeDataFromTimeMachine() {
-	if s.state.BackupExcluded && datadir.IsExcludedFromBackup(s.plan.Layout.Postgres) {
+	if s.state.BackupExcluded {
 		return
 	}
-	if err := datadir.ExcludeFromBackup(s.plan.Layout.Postgres); err != nil {
+	if err := excludeFromBackup(s.plan.Layout.Postgres); err != nil {
 		s.log.Warnf("could not exclude the database from Time Machine: %v — "+
 			"back up %s instead of restoring the live cluster", err, s.plan.Layout.Backups)
-		s.state.BackupExcluded = false
 		return
 	}
-	if !s.state.BackupExcluded {
-		s.log.Infof("excluded %s from Time Machine (%s is what gets backed up)",
-			s.plan.Layout.Postgres, s.plan.Layout.Backups)
-	}
+	s.log.Infof("excluded %s from Time Machine (%s is what gets backed up)",
+		s.plan.Layout.Postgres, s.plan.Layout.Backups)
 	s.state.BackupExcluded = true
 }
 
