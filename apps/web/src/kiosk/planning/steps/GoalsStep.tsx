@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { AvatarStack } from '../../components/Avatar'
 import {
   planningGoalsApi,
   planningGoalsDecision,
@@ -10,7 +11,6 @@ import {
   fmtGoalNum,
   type PlanningGoalGroup,
   type PlanningGoalGoal,
-  type PlanningGoalMember,
   type PlanningGoalsView,
 } from '../../../lib/api'
 import { CATEGORIES } from '../../categories'
@@ -72,18 +72,6 @@ function groupSub(g: PlanningGoalGroup): string {
   if (g.isEveryone) return 'shared · everyone tracks it'
   if (n === 2) return `shared · ${g.members.map((m) => firstName(m.name)).join(' & ')}`
   return `shared · ${n} people`
-}
-
-function AvStack({ members }: { members: PlanningGoalMember[] }) {
-  return (
-    <div className="avstack">
-      {members.slice(0, 4).map((m) => (
-        <div key={m.personId} className="av sm" style={{ background: `${m.colorHex ?? '#A6A29B'}22` }} title={m.name}>
-          {m.avatarEmoji ?? '🙂'}
-        </div>
-      ))}
-    </div>
-  )
 }
 
 // One choosable goal. Progress ALWAYS comes from the shared helpers — never an inline
@@ -276,7 +264,7 @@ function Body({ sessionId, setDecisionData, refresh, busy }: StepBodyProps) {
               </div>
               <div className="wpg-card-s">{groupSub(active)}</div>
             </div>
-            <AvStack members={active.members} />
+            <AvatarStack members={active.members} max={4} />
           </div>
 
           <div className="wpg-opts" role="radiogroup" aria-label={`${active.name}’s focus this week`}>

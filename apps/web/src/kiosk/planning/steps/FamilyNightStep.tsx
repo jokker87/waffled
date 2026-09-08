@@ -1,4 +1,5 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
+import { avTint } from '../../components/Avatar'
 import { addDays, ymd } from '../../components/cal-utils'
 import type { PlanningStepModule, StepBodyProps } from '../registry'
 import {
@@ -162,7 +163,7 @@ function PartRow({ part, board, p, disabled }: {
             key={m.id}
             type="button"
             className={`wpfn-face${m.id === part.personId ? ' on' : ''}`}
-            style={{ background: `${m.colorHex ?? '#A6A29B'}22` }}
+            style={{ background: avTint(m.colorHex) }}
             // A face with no accessible name is unaddressable, and "🦄" is not a name.
             // The label is always the ACTION, because tapping the suggested person is a
             // real one: it turns the rotation's guess into a decision.

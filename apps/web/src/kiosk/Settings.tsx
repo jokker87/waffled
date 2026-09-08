@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { avTint } from './components/Avatar'
 import { useSearchParams } from 'react-router'
 import { useSyncHealth, type SyncHealthStatus } from '../lib/powersync/sync-health'
 import { restartPowerSyncHard } from '../lib/powersync/db'
@@ -86,7 +87,7 @@ function MemberRow({ m, onClick }: { m: SettingsMember; onClick: () => void }) {
   const bday = fmtBirthday(m.birthday)
   return (
     <div className="set-member" onClick={onClick}>
-      <div className="av md" style={{ background: `${m.colorHex ?? '#A6A29B'}22` }}>{m.avatarEmoji ?? '🙂'}</div>
+      <div className="av md" style={{ background: avTint(m.colorHex) }}>{m.avatarEmoji ?? '🙂'}</div>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div className="set-member-n">{m.name}</div>
         <div className="tiny muted" style={{ fontWeight: 600 }}>{roleLine(m)}</div>
@@ -1720,7 +1721,7 @@ function CalendarsPanel() {
     const canTarget = !!cal.personId && !isReadOnly(cal.accessRole)
     return (
       <div className="set-row2">
-        <div className="set-ic2" style={{ background: `${cal.colorHex ?? '#A6A29B'}22` }}>📅</div>
+        <div className="set-ic2" style={{ background: avTint(cal.colorHex) }}>📅</div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div className="set-row2-t" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {cal.summary ?? cal.googleCalendarId}

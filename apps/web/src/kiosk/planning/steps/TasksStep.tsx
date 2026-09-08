@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { avTint } from '../../components/Avatar'
 import { Icon } from '../../icons'
 import { ChoreModal } from '../../components/ChoreModal'
 import { useHandoffAction } from '../handoff'
@@ -201,7 +202,7 @@ function ChoreCard({
                   key={p.id}
                   type="button"
                   className="wpt-face"
-                  style={{ background: `${p.colorHex ?? '#A6A29B'}22` }}
+                  style={{ background: avTint(p.colorHex) }}
                   title={`${p.name} takes it`}
                   aria-label={`Give ${chore.title} to ${p.name}`}
                   disabled={frozen}
@@ -443,7 +444,7 @@ function Body({ weekStart, setDecisionData, refresh, busy }: StepBodyProps) {
           >
             <div className="chore-head">
               <span className="nm">
-                <span className="chore-ava" style={{ background: `${p.colorHex ?? '#A6A29B'}22` }}>{p.avatarEmoji ?? '🙂'}</span>
+                <span className="chore-ava" style={{ background: avTint(p.colorHex) }}>{p.avatarEmoji ?? '🙂'}</span>
                 {p.name}
               </span>
               <span className="wpt-count">{p.chores.length} this week</span>

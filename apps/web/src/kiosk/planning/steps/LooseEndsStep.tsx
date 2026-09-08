@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { avTint } from '../../components/Avatar'
 import { ApiSendError } from '../../../lib/api/client'
 import {
   looseEndsApi,
@@ -83,7 +84,7 @@ function Owner({ owner }: { owner: LooseEnd['owner'] }) {
   if (!owner) return null
   return (
     <span className="wp-le-owner">
-      <span className="chore-ava" style={{ background: `${owner.colorHex ?? '#A6A29B'}22` }} aria-hidden>
+      <span className="chore-ava" style={{ background: avTint(owner.colorHex) }} aria-hidden>
         {owner.avatarEmoji ?? '🙂'}
       </span>
       {owner.name}
