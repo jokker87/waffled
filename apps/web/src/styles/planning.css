@@ -295,6 +295,15 @@
 
 .wp-record.is-read .wp-record-list { margin-top: 6px; }
 
+/* A failed write or read, said plainly. Mirrors the loose-ends step own .wp-le-err so an
+   error reads the same wherever the session shows one. */
+.wp-err {
+  max-width: 620px; width: 100%; margin: 0 auto 4px;
+  border-radius: var(--r-lg); padding: 10px 14px;
+  background: var(--card-2); border: 1px solid var(--danger);
+  font-size: 13px; font-weight: 650; color: var(--ink);
+}
+
 .wp-record-t { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; }
 .wp-record-s { margin-top: 4px; font-size: 13.5px; font-weight: 600; color: var(--ink-2); }
 .wp-record-list { margin: 20px 0 4px; }

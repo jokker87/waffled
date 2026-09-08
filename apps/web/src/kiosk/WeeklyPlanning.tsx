@@ -304,6 +304,8 @@ export function WeeklyPlanning() {
   const { view, loading, refetch } = useWeeklyPlanning(weekParam)
   const [sheet, setSheet] = useState(false)
   const [busy, setBusy] = useState(false)
+  // What a failed write left on screen. Cleared when the next one starts.
+  const [error, setError] = useState<string | null>(null)
   // Two-tap confirm on discarding a session — it can't be undone, and it sits next to
   // the everyday "Close".
   const [confirmDiscard, setConfirmDiscard] = useState(false)
@@ -410,10 +412,27 @@ export function WeeklyPlanning() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, viewMatchesUrlWeek, session?.id, session?.status, current?.key, urlStep, paused])
 
+  // EVERY WRITE ON THIS SCREEN GOES THROUGH HERE, so this is the one place that has to
+  // notice a failure. It used to be `try/finally` with no catch: a rejected write was an
+  // unhandled rejection, nothing appeared, and the refetch redrew the screen as though it
+  // had worked — a failed `complete()` left the session active while the record read as
+  // saved. iOS's `PlanningModel` has always set an `errorMessage` here; this was the gap.
+  //
+  // The refetch still runs on the failure path, deliberately: the server's answer is what
+  // the screen should show, and a write that half-happened is exactly when a stale local
+  // view is most misleading.
   async function go(fn: () => Promise<unknown>) {
     if (busy) return
     setBusy(true)
-    try { await fn() } finally { setBusy(false); refetch() }
+    setError(null)
+    try {
+      await fn()
+    } catch {
+      setError('That didn’t save. Check your connection and try again — nothing was lost.')
+    } finally {
+      setBusy(false)
+      refetch()
+    }
   }
 
   const start = () => go(async () => {
@@ -666,6 +685,8 @@ export function WeeklyPlanning() {
         {/* The 2px hair — the only progress indicator v4 keeps. */}
         <div className="wp-prog"><div style={{ width: `${pct}%` }} /></div>
       </div>
+
+      {error && <div className="wp-err" role="alert">{error}</div>}
 
       <div className="wp-body">
         {/* `?? []` on purpose: a payload missing the field must cost the banner, never

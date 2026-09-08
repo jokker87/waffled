@@ -50,18 +50,26 @@ import '../../../styles/planning-horizon.css'
 function useHorizon(sessionId: string) {
   const [tags, setTags] = useState<HorizonTag[]>([])
   const [parked, setParked] = useState<HorizonNote[]>([])
+  // A failed read used to reject unhandled and leave `parked` empty, so the "Parked in this
+  // session" board just didn't appear — notes somebody had written a moment earlier were
+  // invisible AND uneditable, with nothing on screen saying the read had failed. An empty
+  // board and an unreadable one look identical, so they must not be the same state.
+  const [readFailed, setReadFailed] = useState(false)
   useEffect(() => {
     let alive = true
-    horizonApi.get(sessionId).then((v) => {
-      if (!alive) return
-      setTags(v.tags ?? [])
-      setParked(v.parked ?? [])
-    })
+    setReadFailed(false)
+    horizonApi.get(sessionId)
+      .then((v) => {
+        if (!alive) return
+        setTags(v.tags ?? [])
+        setParked(v.parked ?? [])
+      })
+      .catch(() => { if (alive) setReadFailed(true) })
     return () => {
       alive = false
     }
   }, [sessionId])
-  return { tags, parked, setParked }
+  return { tags, parked, setParked, readFailed }
 }
 
 /** "September 2026" — the label between the month arrows. */
@@ -113,7 +121,7 @@ function Body({ weekStart, sessionId, setDecisionData, refresh, busy }: StepBody
   // The shared event modal: `{ date }` creates on that day, `{ event }` edits in place.
   const [modal, setModal] = useState<{ date?: string; event?: AgendaEvent } | null>(null)
 
-  const { tags, parked, setParked } = useHorizon(sessionId)
+  const { tags, parked, setParked, readFailed } = useHorizon(sessionId)
   const [note, setNote] = useState('')
   // Which step this note is for. THREE states, not two: `undefined` is "nobody has
   // chosen", which resolves to the server's primary tag (Tasks), while `null` is the
@@ -199,6 +207,12 @@ function Body({ weekStart, sessionId, setDecisionData, refresh, busy }: StepBody
 
   return (
     <div className="wph">
+      {readFailed && (
+        <div className="wp-err" role="alert">
+          Couldn’t read what’s parked in this session. The month above is fine — anything you
+          parked is still there; this board just couldn’t be fetched.
+        </div>
+      )}
       <header className="wph-head">
         <button
           type="button"

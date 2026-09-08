@@ -467,6 +467,32 @@ describe('weekly planning · the record', () => {
 
 // The URL is the state. Leaving the module and coming back has to land you where you
 // were — and so does a refresh, the back button, and a link someone pasted.
+// A FAILED WRITE HAS TO SAY SO.
+//
+// `go()` was `try { await fn() } finally { setBusy(false); refetch() }` — no catch, and both
+// call sites float the promise. So a `complete()` that failed rejected unhandled, nothing
+// appeared on screen, and the refetch redrew the session as though the week had been saved
+// while it was still active. iOS's `PlanningModel` sets an `errorMessage` for exactly this,
+// so the asymmetry was a gap rather than a decision.
+describe('weekly planning · a write that fails', () => {
+  it('says so instead of redrawing as if it worked', async () => {
+    mockApi(baseView({ session: session({ currentStep: 'recap' }), steps: STEPS }))
+    // Let everything through except the save.
+    const inner = globalThis.fetch as unknown as typeof fetch
+    globalThis.fetch = vi.fn(async (url: string, init?: RequestInit) => {
+      if (String(url).endsWith('/complete')) throw new Error('offline')
+      return (inner as (u: string, i?: RequestInit) => Promise<unknown>)(url, init)
+    }) as unknown as typeof fetch
+
+    drawAt('/planning/recap')
+    fireEvent.click(await screen.findByRole('button', { name: /Looks right/ }))
+
+    expect(await screen.findByRole('alert')).toBeTruthy()
+    // And it must NOT claim the week is decided.
+    expect(screen.queryByText('The week is decided')).toBeNull()
+  })
+})
+
 describe('weekly planning · the URL', () => {
   it('rewrites bare /planning to the step the session resumed at', async () => {
     mockApi(baseView({ session: session({ currentStep: 'horizon' }) }))

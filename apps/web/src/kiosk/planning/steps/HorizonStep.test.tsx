@@ -627,3 +627,24 @@ describe('Horizon scan · fixing a note that is already parked', () => {
     expect(screen.queryByLabelText('Edit this note')).not.toBeInTheDocument()
   })
 })
+
+// A READ THAT FAILS HAS TO SAY SO TOO.
+//
+// `horizonApi.get(...).then(...)` had no `.catch`, so a failed read rejected unhandled and
+// left `parked` empty — the "Parked in this session" board simply did not render, and notes
+// the user had just written were invisible and uneditable with nothing on screen explaining
+// why.
+describe('horizon · when its own read fails', () => {
+  it('says the board could not be read rather than showing an empty one', async () => {
+    mockApi()
+    const inner = globalThis.fetch as unknown as typeof fetch
+    globalThis.fetch = vi.fn(async (url: string, init?: RequestInit) => {
+      if (String(url).includes('/weekly-planning/horizon')) throw new Error('offline')
+      return (inner as (u: string, i?: RequestInit) => Promise<unknown>)(url, init)
+    }) as unknown as typeof fetch
+
+    renderStep()
+
+    expect(await screen.findByRole('alert')).toBeTruthy()
+  })
+})
