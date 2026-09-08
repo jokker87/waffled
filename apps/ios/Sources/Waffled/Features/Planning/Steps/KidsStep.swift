@@ -295,10 +295,10 @@ struct KidsStepView: View {
                 Spacer(minLength: 6)
                 if let progress {
                     HStack(alignment: .firstTextBaseline, spacing: 2) {
-                        Text(GoalDisplay.number(progress))
+                        Text(goalFmt(progress))
                             .font(.system(size: 16, weight: .heavy)).foregroundStyle(WF.ink)
                         if let target {
-                            Text("/ \(GoalDisplay.number(target))")
+                            Text("/ \(goalFmt(target))")
                                 .font(.system(size: 11, weight: .semibold)).foregroundStyle(WF.ink3)
                         }
                     }

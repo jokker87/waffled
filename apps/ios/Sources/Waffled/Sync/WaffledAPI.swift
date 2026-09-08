@@ -4305,9 +4305,21 @@ struct WaffledAPI: Sendable {
 
     // MARK: helpers
 
+    // THE SIX HELPERS BELOW ARE INTERNAL, NOT PRIVATE, and it is load-bearing.
+    //
+    // Weekly Planning's reads live in their own files under `Features/Planning/API/` —
+    // ten steps' worth, which would bury this one if they were inlined here — and they
+    // extend `WaffledAPI` to reach exactly this plumbing: one `url(path:)`, one auth
+    // header, one 401-refresh, one decoder. Private would mean each of those files
+    // hand-rolling its own request building, which is how two clients of the same API
+    // start disagreeing about what a 401 means.
+    //
+    // (Lost once already: a merge that took this file wholesale from `main` reverted the
+    // widening and broke the build in `PlanningGoalsAPI`. If that happens again, this is
+    // the note that says it was deliberate.)
     /// POST/PATCH a JSON body to `path`, throwing on non-2xx. The response body is
     /// ignored — capture commits only care that the write succeeded.
-    private func send(_ method: String, _ path: String, body: [String: JSONValue]) async throws {
+    func send(_ method: String, _ path: String, body: [String: JSONValue]) async throws {
         var req = URLRequest(url: try url(path))
         req.httpMethod = method
         authorize(&req)
@@ -4318,7 +4330,7 @@ struct WaffledAPI: Sendable {
     }
 
     /// POST/PATCH a JSON body and decode the JSON response, throwing on non-2xx.
-    private func sendReturning<T: Decodable>(_ method: String, _ path: String, body: [String: JSONValue], as: T.Type) async throws -> T {
+    func sendReturning<T: Decodable>(_ method: String, _ path: String, body: [String: JSONValue], as: T.Type) async throws -> T {
         var req = URLRequest(url: try url(path))
         req.httpMethod = method
         authorize(&req)
@@ -4332,7 +4344,7 @@ struct WaffledAPI: Sendable {
     /// PATCH an arbitrary Encodable body and decode the JSON response. Optionals in
     /// the body are omitted when nil (Swift's `encodeIfPresent`), so only the fields
     /// you set are sent.
-    private func patchEncodable<B: Encodable, T: Decodable>(_ path: String, body: B, as: T.Type) async throws -> T {
+    func patchEncodable<B: Encodable, T: Decodable>(_ path: String, body: B, as: T.Type) async throws -> T {
         var req = URLRequest(url: try url(path))
         req.httpMethod = "PATCH"
         authorize(&req)
@@ -4344,7 +4356,7 @@ struct WaffledAPI: Sendable {
     }
 
     /// POST/PATCH (no body) and decode the JSON response, throwing on non-2xx.
-    private func sendJSON<T: Decodable>(_ method: String, _ path: String, as: T.Type) async throws -> T {
+    func sendJSON<T: Decodable>(_ method: String, _ path: String, as: T.Type) async throws -> T {
         var req = URLRequest(url: try url(path))
         req.httpMethod = method
         authorize(&req)
@@ -4354,7 +4366,7 @@ struct WaffledAPI: Sendable {
     }
 
     /// GET `path` and decode the JSON body, throwing on non-2xx.
-    private func getJSON<T: Decodable>(_ path: String, as: T.Type) async throws -> T {
+    func getJSON<T: Decodable>(_ path: String, as: T.Type) async throws -> T {
         var req = URLRequest(url: try url(path))
         authorize(&req)
         let (data, resp) = try await perform(req)
@@ -4363,7 +4375,7 @@ struct WaffledAPI: Sendable {
     }
 
     /// DELETE `path`, throwing on non-2xx (204 is success).
-    private func delete(_ path: String) async throws {
+    func delete(_ path: String) async throws {
         var req = URLRequest(url: try url(path))
         req.httpMethod = "DELETE"
         authorize(&req)

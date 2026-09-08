@@ -1216,6 +1216,16 @@ struct GoalCreateSheet: View {
     let members: [SyncedMember]
     /// When set, the sheet prefills from this goal and reads as "Edit goal".
     var editGoal: WaffledAPI.GoalDetail? = nil
+    /// When set, the goal's list is FIXED and the picker is not offered — for a host whose
+    /// own question is already per-group (the Weekly Planning Goals step, whose whole
+    /// question is "what is this group's focus this week?"). The group is then STATED
+    /// rather than offered: re-offering the picker there would only be a way to answer a
+    /// different group's question by accident. Mirrors the web's `embed.listId`.
+    var lockedListId: String? = nil
+    /// Start on the Pinned tier. What such a host means by "a goal for THIS week" — the
+    /// planning step reads a list's lone pin as that group's current focus, so a goal made
+    /// from there comes back already selected. Mirrors the web's `embed.featured`.
+    var startFeatured: Bool = false
     let onSubmit: ([String: JSONValue], String?) -> Void
 
     @State private var didPrefill = false
@@ -1505,8 +1515,13 @@ struct GoalCreateSheet: View {
                     .overlay(RoundedRectangle(cornerRadius: WF.rMD, style: .continuous).strokeBorder(WF.hair, lineWidth: 1.5))
                     .wfShadow1()
             }
-            mockSection("Who’s it for?", hint: "Pick a goal list — the people in it share this goal.") {
-                whoChips
+            mockSection(
+                "Who’s it for?",
+                hint: lockedListId == nil
+                    ? "Pick a goal list — the people in it share this goal."
+                    : "The group you’re planning for — this goal joins it."
+            ) {
+                if lockedListId == nil { whoChips } else { lockedWhoChip }
             }
             mockSection("How do you measure it?", hint: "This shapes how progress is logged and shown.") {
                 measureCards
@@ -1830,6 +1845,20 @@ struct GoalCreateSheet: View {
             }
             .buttonStyle(.plain)
         }
+    }
+
+    /// The group, stated. Shown in place of the picker when the host fixed the list — the
+    /// same faces the picker would have shown, minus the ability to answer a different
+    /// group's question by accident.
+    private var lockedWhoChip: some View {
+        HStack(spacing: 7) {
+            AvatarStack(members: selectedList?.members ?? [], size: 20)
+            Text(selectedList?.name ?? "This group").font(.system(size: 13, weight: .semibold))
+        }
+        .foregroundStyle(WF.ink)
+        .padding(.horizontal, 12).padding(.vertical, 7)
+        .wfChip(selected: true)
+        .accessibilityLabel("This goal joins \(selectedList?.name ?? "this group")")
     }
 
     private var shareSegment: some View {
@@ -2322,7 +2351,10 @@ struct GoalCreateSheet: View {
         didPrefill = true
         if localLists.isEmpty { localLists = lists }
         guard let g = editGoal else {
-            if goalListId == nil { goalListId = defaultListId ?? lists.first?.id }
+            if goalListId == nil { goalListId = lockedListId ?? defaultListId ?? lists.first?.id }
+            // Set here rather than as a `@State` default so the tier picker shows Pinned
+            // selected — the host's intent is visible, and still overridable.
+            if startFeatured { isFeatured = true }
             return
         }
         title = g.title
@@ -3221,7 +3253,11 @@ struct GoalListCreateSheet: View {
     }
 }
 
-private extension View {
+// Internal rather than `private`: the Weekly Planning Goals step presents this same
+// editor over the session, and it must behave the way the goals module's editor behaves
+// everywhere else (a sheet on the phone, a full-screen cover on the family display)
+// rather than growing a planning-only presentation.
+extension View {
     /// Presents the goal editor: full-screen on iPad (web-like, so the two-pane
     /// form + live-preview layout has room), a large sheet on iPhone. The iPad used
     /// to get `.presentationSizing(.page)`, which floated a cramped modal the two
