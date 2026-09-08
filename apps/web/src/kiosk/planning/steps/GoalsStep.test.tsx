@@ -347,10 +347,10 @@ describe('GoalsStep · picking the week’s focus', () => {
 
 // When the honest answer doesn't exist yet.
 //
-// This used to navigate to /goals/new. That ejected the family from the session — a
-// fifteen-second detour with nothing to bring them back — so the editor now opens as a
-// modal OVER the week: same component, no route change, and the group they were looking
-// at is the group the goal belongs to.
+// The editor opens as a modal OVER the week rather than navigating to /goals/new, which would
+// eject the family from the session — a fifteen-second detour with nothing to bring them back.
+// Same component, no route change, and the group they were looking at is the group the goal
+// belongs to.
 describe('GoalsStep · making the goal that does not exist yet', () => {
   const openModal = async (group: string) => {
     renderStep()

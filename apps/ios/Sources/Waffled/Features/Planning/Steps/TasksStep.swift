@@ -2,54 +2,18 @@ import SwiftUI
 
 /// Weekly Planning · step 8 "Tasks" — "Who's doing what?"
 ///
-/// Per-person columns, an up-for-grabs strip, and the existing chore editor for both
-/// adding and editing.
+/// Per-person columns, an up-for-grabs strip, and the app's own `ChoreEditSheet` for both
+/// adding and editing (`canDelete: false` — this step asks who does what, not which chores
+/// should exist). Ported from `planning/steps/TasksStep.tsx`; rationale, and why every move
+/// is reversible, in docs/product/weekly-planning-plan.md.
 ///
-/// Ported from `apps/web/src/kiosk/planning/steps/TasksStep.tsx`.
-///
-/// Laid out by person, in the same vocabulary the Chores screen uses, because that is
-/// where the family already reads this. Everything nobody has taken sits in one strip at
-/// the top with the member faces under each card: tap a face and the task moves to that
-/// person; leave it and it stays up for grabs, which is a real answer and not an error
-/// state. Each person's footer names the recurring load they already carry, so fairness
-/// is visible without anyone computing a score.
-///
-/// EVERY MOVE IS REVERSIBLE. A card in a person's block carries the same faces as one in
-/// the strip, plus a 🙌 that puts it back up for grabs — handing a task over is a
-/// decision, and a decision you can't take back is a trap. Both directions move the
-/// chore definition AND every open day of it already sitting on a kiosk board (see
-/// `planningHandOutChore`), so the two screens can never end up disagreeing about who
-/// has it.
-///
-/// THIS STEP LENDS THE SHELL'S PARKED-NOTE BANNER A VERB. "Make a task" opens the very
-/// same `ChoreEditSheet` the strip's own "Add a task" opens, seeded with the note's
-/// words, and reports back `true` only if a task was really created.
-///
-/// DRAGGING DOES THE SAME THING AS TAPPING, AND ADDS NOTHING OF ITS OWN. Grip a card,
-/// drop it on a person's block or back on the strip; it resolves through the very same
-/// `give` the faces call (`PlanningTasksModel.drop`), and a card dropped where it already
-/// sits writes nothing. Tapping a face is NOT replaced by it — one gesture for the person
-/// who reaches for a drag, one for the person who can't. Three things this cost us:
-///
-///  * **The drag lives on a grip, not on the whole card.** A card holds three Buttons
-///    (title, day chip, faces); making the card itself `.draggable` would have meant
-///    demoting those to `.onTapGesture` and fighting the drag for every tap.
-///  * **The payload is a custom `PlanningTaskDrag`, never a `String`.** A string id is
-///    offered to every text field in the app and gets pasted in as text.
-///  * **Not a `List`.** `List` silently refuses `.dropDestination`, so the drop targets
-///    would have been dead with no error anywhere. The shell's `ScrollView` around this
-///    body is what the drop targets live in; this step must never become a `List`.
-///
-/// ONE KNOWN DIVERGENCE FROM THE WEB, deliberate: **the chore editor here cannot delete**
-/// (`canDelete: false`, matching the web). This step asks who does what, not which chores
-/// should exist: removing one reaches far outside the week being planned, and the Meals
-/// step's shopping trip is a real chore on this very board whose identity other steps
-/// resolve by id.
-///
-/// The body is content-sized: the SHELL owns the scroll view, so there is no `ScrollView`
-/// and no `WF.tabBarClearance` here — and no horizontal padding of its own either. The
-/// shell already insets every step by 16, and a second 16 here drew this step's columns
-/// 32pt narrower than the Calendar and Meals steps beside it.
+/// THREE CONSTRAINTS THAT LOOK ARBITRARY AND ARE NOT:
+///  * **Never a `List`.** `List` silently refuses `.dropDestination`, so the drop targets
+///    would be dead with no error anywhere.
+///  * **The drag payload is `PlanningTaskDrag`, never a `String`** — a string id is offered
+///    to every text field in the app and gets pasted in as text.
+///  * **No `ScrollView` and no horizontal padding here.** The shell owns both and already
+///    insets every step by 16; a second 16 drew these columns 32pt narrower than Calendar's.
 struct TasksStepView: View {
     let props: PlanningStepProps
 

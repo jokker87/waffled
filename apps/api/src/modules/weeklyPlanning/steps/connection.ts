@@ -57,10 +57,9 @@ export interface ConnectionSlot {
    * "Wed after Scouts" / "Tue after 8:30 PM" / "Sun · free all day". Built server-side
    * so web and iOS say it the same way.
    *
-   * The empty-day chip used to read "Sun · open", which was asked about directly —
-   * "the chips that are there 'sat open' what does that mean?". One word was carrying
-   * "this day has nothing on it at all", sitting next to a sibling that spells its own
-   * meaning out in full. Both halves say when you are free now.
+   * Both halves spell their meaning out. An empty day reads "Sun · free all day", never "Sun ·
+   * open" — one word cannot carry "this day has nothing on it at all" while sitting next to a
+   * sibling that spells its own meaning out in full.
    */
   label: string
 }

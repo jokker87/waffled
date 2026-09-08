@@ -1,63 +1,12 @@
 // Weekly Planning · step 10 "Recap" — read the week back, then it's over.
 //
-// ────────────────────────────────────────────────────────────────────────────────
-// THE ONE RULE THIS FILE EXISTS TO OBEY
-//
-//   "Every line is a pointer rather than a copy."
-//
-// The finished session is a RECEIPT of what was decided; the live truth is whatever
-// the modules say now. So this step STORES NOTHING. There is no recap table, no
-// snapshot column, and not a single title, id or name copied at decision time. Every
-// line below is resolved when somebody reads it, out of the module that owns the
-// decision — which is why a decision later undone somewhere else makes the line change
-// or disappear instead of making the record lie.
-//
-// The distinction that makes that workable, and the one to hold on to:
-//
-//   · A STATEMENT ABOUT THE WEEK is live ("6 tasks have an owner and a day"). It is
-//     re-resolved on every read, so it is never stale. Storing one would be the copy.
-//   · A STATEMENT ABOUT THE SESSION is historical ("2 events added since you started").
-//     It is re-derived from PROVENANCE — `created_at >= session.started_at` on the row
-//     the decision actually wrote — so it too moves when the thing is deleted. Nothing
-//     is counted into a column to make it true.
-//
-// That second half is why this file does not read the step crumbs
-// (`planning_session_steps.data`) for its tallies, even though several of them hold
-// exactly the number the mock wants. The shell clears the crumb on every step change
-// and only persists it when the step is ANSWERED (see StepBodyProps), so
-// `{ added: 2 }` really means "2 added during the visit that happened to end in Done":
-// add two events, jump to Horizon from the agenda sheet, come back and press Done, and
-// the crumb says 0. A provenance query cannot go wrong that way.
-//
-// The crumbs it DOES read are the ones that are the decision itself and have no other
-// home — the goals focus map, the kids' answers, step 1's routes. For those, the
-// session row IS the owning module.
-//
-// ────────────────────────────────────────────────────────────────────────────────
-// GROUPED BY THE MODULE THE DECISION LIVES IN
-//
-// The design's grouping — Calendar · Meals + Lists · Chores + Rhythms · Goals ·
-// Family Night · Kids — is not cosmetic: it is what makes each line a pointer, because
-// a group names the place you would go to change it. Note that three steps fold into
-// Calendar (calendar, horizon and connection all write `events`), which is the grouping
-// doing its job.
-//
-// A group with no decisions in it is ABSENT rather than zeroed — and if its step was
-// answered anyway, it moves to "left alone on purpose", which is the other half of the
-// design's two cards. A module that is off contributes no group at all and is never
-// named (the `sources` precedent in looseEnds/kids: never claim to have read something
-// you didn't).
-//
-// ────────────────────────────────────────────────────────────────────────────────
-// WHAT IS DELIBERATELY NOT A DECISION
-//
-//   · An UNPINNED family-night part is the rotation's suggestion, not something anybody
-//     said. Reporting it would put a name on the record the family never chose.
-//   · A goal group the session has not settled carries `focusGoalId` anyway — the step
-//     pre-selects an already-featured goal so nobody has to re-pick it. That is a flag
-//     we found lying around, not an answer. Only `settled` counts.
-//   · A step still `pending` is not "left alone on purpose", it is unreached. Only
-//     `skipped` (and the deliberate non-answers) are outcomes.
+// THIS STEP STORES NOTHING: no recap table, no snapshot, no title or id copied at
+// decision time. Every line is resolved on read out of the module that owns the
+// decision, so a decision undone elsewhere changes the line instead of making the
+// record lie. Session-relative counts come from provenance (`created_at >=
+// started_at`), never from the step crumbs, which the shell clears on step change.
+// The full rationale, the grouping, and the three things that only look like
+// decisions: docs/product/weekly-planning-plan.md § "The recap stores nothing".
 import { query } from '../../../platform/db'
 import { moduleEnabled, type ModuleKey } from '../../../platform/modules'
 import { visibleTo } from '../../events/events'

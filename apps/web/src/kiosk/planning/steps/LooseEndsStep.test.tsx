@@ -351,10 +351,10 @@ describe('loose ends · see all', () => {
     expect(screen.getByRole('heading', { name: /Parked/ })).toBeInTheDocument()
   })
 
-  // THE IA BUG. The switch used to stay on screen in see-all, still looking selected,
-  // while it no longer governed anything on it — so "Not done" + See all read as a
-  // filtered list of not-done items when in fact BOTH groups were listed. The v4 mock's
-  // boardList frame is the answer: it renders the two labelled sections and the
+  // THE IA BUG. The group switch must not survive into see-all: still on screen and still
+  // looking selected, it would govern nothing there, so "Not done" + See all would read as a
+  // filtered list while BOTH groups were listed. The v4 mock's boardList frame is the answer: it
+  // renders the two labelled sections and the
   // disclaimer, and no switch. In see-all the section headings ARE the grouping, so a
   // switch there is redundant AND misleading; it belongs to the one-at-a-time mode,
   // where it genuinely picks the deck you are working through.

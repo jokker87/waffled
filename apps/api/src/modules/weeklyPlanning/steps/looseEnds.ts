@@ -1,40 +1,19 @@
 // Weekly Planning · step 1 "Loose ends" — service logic.
 //
-// STEP 1 IS INTAKE, NOT REPAIR. It ROUTES things to the steps that will handle them;
-// it does not do the work. The mock says it outright on the see-all screen: "Routing
-// here changes nothing in your modules — it only decides which step handles it." That
-// is why the Tasks step later shows rows captioned "sent here in step 1".
+// STEP 1 IS INTAKE, NOT REPAIR: it ROUTES things to the steps that will handle them and
+// writes nothing to any module. The two exceptions prove it — "It's done already" (the
+// module should know) and "Drop it" (a parked note, which exists nowhere else). NOT DONE
+// is computed from the modules that own the work; PARKED is what somebody wrote down
+// during the week, in the one table this step owns (0102_planning_parked_items). See
+// docs/product/weekly-planning-plan.md § "Step 1 routes; it does not resolve".
 //
-// The step asks one question ("Anything still open from last week?") over two groups,
-// and the distinction between them is the whole design:
+// THE CROSS-STEP CONTRACT, which later steps read directly:
+// `planning_session_steps.data` for the `looseEnds` step holds
+// `{ routes: [{ kind, id, title, source, to }] }`, `to` being a step key. Steps 2/6/8/9
+// filter it to their own key; nothing else is shared.
 //
-//   NOT DONE is COMPUTED from the modules that already own the work — overdue
-//     chore_instances, unchecked items on the household's own (custom) lists, rhythms
-//     past due, habit goals short for the week. Nobody typed those; they are simply
-//     still open, which is why there is no lookback logic anywhere and no copy of them
-//     in any planning table. Its destinations are Tasks / Calendar / Kids / Goals.
-//     NOT the grocery list: it rebuilds itself from the meal plan every week, so an
-//     unchecked row there is shopping, not a loose end (see staleListItems).
-//
-//   PARKED is what somebody wrote down during the week and that exists nowhere else
-//     yet, so it gets the one table this step owns (0102_planning_parked_items). Same
-//     card, different verbs — because a parked thing might turn out to be nothing,
-//     which is why Drop is a real answer there and only there.
-//
-// TWO ANSWERS DO WRITE, and they are the exceptions that prove the rule: "It's done
-// already" (the item was finished and its module should know) and "Drop it" (a parked
-// note nobody wants, and dropping it destroys nothing but the note). Everything else
-// is a routing decision recorded on the SESSION.
-//
-// WHERE ROUTES LIVE — the cross-step contract. `planning_session_steps.data` for the
-// `looseEnds` step, as `{ routes: [{ kind, id, title, source, to }] }` with `to` a step
-// key. No new table, and no shared file changes: every later step already receives the
-// whole view, so step 2/6/8/9 read
-// `steps.find(s => s.key === 'looseEnds').data.routes` and filter to their own key.
-//
-// A source module that is off contributes nothing, on the read AND on the write: the
-// weeklyPlanning gate says nothing about whether chores or goals are enabled, and
-// planning must not be a hole that reaches into a disabled module.
+// A source module that is off contributes nothing, on the read AND the write — planning
+// must not be a hole that reaches into a disabled module.
 import { query } from '../../../platform/db'
 import { moduleEnabled, type ModuleKey } from '../../../platform/modules'
 import type { Tenant } from '../../households/households'
@@ -50,10 +29,9 @@ import { listGoals, logProgress } from '../../goals/goals.service'
 
 // WHO A LOOSE END ALREADY BELONGS TO.
 //
-// Reported as "some of these are already assigned an owner but we have no idea who": the
-// deck showed a title and how late it was, so a board of eleven rows could not tell you
-// whose bed was unmade — and routing something that already has an owner is a different
-// decision from routing something nobody has picked up.
+// A row's owner is part of the decision: routing something that already has an owner is a
+// different decision from routing something nobody has picked up, and a title plus how late it
+// is cannot tell you whose bed is unmade.
 //
 // The colour and the avatar travel WITH the name so each client renders the person the way
 // the rest of its app does, rather than inventing a chip of its own from an id.
@@ -524,8 +502,7 @@ export interface ParkInput {
   // note sets it to the step that will handle it; step 3 ("Horizon scan") sets it when
   // somebody parks against a tag, and writes the SAME values, so a consumer can't tell
   // the two producers apart. Validated against the server-owned catalog so a typo can't
-  // create a tag nothing will ever match. (This comment used to say step 3 parks with
-  // 'horizon' — it never has, and step 10 reads a null tag as "nobody said yet".)
+  // Step 10 reads a null tag as "nobody said yet".
   stepKey?: unknown
   // The session it was parked during, if any. Optional, and the row survives that
   // session being discarded (on delete set null) — see the migration.

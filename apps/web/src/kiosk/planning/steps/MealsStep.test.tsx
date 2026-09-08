@@ -528,10 +528,9 @@ describe('meals step · plan the rest for me', () => {
 
 // Tapping a night opens the app's OWN recipe browser — the same `RecipeBrowser`
 // behind the Meals screen's "Add a dinner · Sun Aug 30", PlanMonth's manual swap and
-// Cook-from-pantry. The step used to draw a flat list of chips, which worked at one
-// recipe and fell apart at fifty. What is asserted here is that the browser is really
-// what opens, that its search narrows the grid, and that every way out of it —
-// a recipe, a placeholder night, a dish nobody saved — writes through the same
+// What is asserted here is that the browser is really what opens, that its search narrows the
+// grid, and that every way out of it — a recipe, a placeholder night, a dish nobody saved —
+// writes through the same
 // meal-plan endpoint the Meals screen uses.
 describe('meals step · picking a dish for one night', () => {
   const library = () => [titleOnly('r-9', 'Chili'), titleOnly('r-8', 'Fish tacos'), titleOnly('r-7', 'Soup')]
@@ -563,7 +562,7 @@ describe('meals step · picking a dish for one night', () => {
     expect(search(picker).placeholder).toMatch(/search recipes by name/i)
     expect(picker.querySelectorAll('.picker-filters .mp-filter').length).toBeGreaterThan(1)
     await waitFor(() => expect(cardNamed(picker, 'Chili')).toBeTruthy())
-    // …and the chip list this step used to draw is gone for good.
+    // No chip list: the browser is the only picker here.
     expect(document.querySelectorAll('.wpm-recipe')).toHaveLength(0)
     // The night it is about is named, and so is what it currently holds.
     expect(within(picker).getByText(/fri dinner/i)).toBeTruthy()

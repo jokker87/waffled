@@ -2,9 +2,8 @@ import SwiftUI
 
 // Weekly Planning — FIXING A NOTE THAT IS ALREADY PARKED.
 //
-// Reported as: "parked in this session — I have no way to edit the item or change the
-// category and I should." Until this, a note was written once and then only ANSWERED:
-// the sole repair for a typo, or for the wrong tag chip, was to drop the note and type it
+// A parked note's words and its tag are both fixable here. Without this the only repair for a
+// typo, or for the wrong tag chip, would be to drop the note and type it
 // again — and Drop is supposed to mean something ("it was never really a thing"), not be
 // the backspace key.
 //

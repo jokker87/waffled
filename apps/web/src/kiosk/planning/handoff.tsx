@@ -8,9 +8,9 @@ import { createContext, useContext, useEffect, useRef } from 'react'
  * everywhere. What it could NOT do was the thing you actually came to the step to do:
  * its only answers were "Handled" and "Drop it", both of which are bookkeeping.
  *
- * Reported as: "while handled vs not kind of works, I feel like we should have an action
- * relevant to the page we are on, like for tasks it should be 'make a task', for a
- * calendar parking it would be 'make an event', goals 'make a goal'".
+ * So the step lends a verb relevant to where you are: "Make a task" on Tasks, "Make an event" on
+ * Calendar. A step with no composer lends nothing rather than offering a button that only ticks
+ * the note off.
  *
  * So the shell still owns the banner and each step lends it ONE verb. This context is
  * that loan. It deliberately does not let a step render into the banner — the banner

@@ -300,10 +300,9 @@ function Body({ weekStart, setDecisionData, refresh, busy }: StepBodyProps) {
         refresh()
       } catch {
         // HANDING A CHORE OVER IS TWO WRITES — the chore DEFINITION, then each pending
-        // instance — so a failure here does not mean nothing moved. This used to claim
-        // exactly that ("nothing moved, so there's nothing to undo") and skip the re-read,
-        // which left the card in its old column and the tally wrong until something else
-        // happened to refetch.
+        // so a failure here does not mean nothing moved. It must not claim otherwise, and must
+        // still re-read: skipping that leaves the card in its old column and the tally wrong
+        // until something else happens to refetch.
         //
         // We cannot know which half landed, so we ask the server instead of guessing, and
         // say plainly that it may be half-done.

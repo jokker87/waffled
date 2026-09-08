@@ -2,63 +2,19 @@ import SwiftUI
 
 /// EVERYTHING SOMEBODY SENT TO THIS STEP, in one box at the top of it.
 ///
-/// **THE SHELL OWNS THIS, NOT THE TEN STEPS.** `planning_parked_items.step_key` names a
-/// DESTINATION — "which step is going to look at this" — and for a while nothing read it:
-/// a note tagged for Meals or Tasks was never seen again. It was reported exactly that
-/// way: "I added a bunch to the park it thing, expecting to go over them in the
-/// appropriate step but I never saw them again, where did they go?"
-///
-/// It belongs to the shell because the box is identical on every step, because the shell
-/// already refetches after every write (so a note dealt with anywhere stops being offered
-/// everywhere), and because each step's OWN affordances are what act on what is in it.
-/// The box's job is to put things back in front of you at the moment they are actionable,
-/// not to grow a tenth way to add a chore.
-///
-/// **TWO WAYS IN, ONE BOX — and the second one used to land at the bottom of the step.**
-///
-///  · A **parked note** is free text somebody typed, tagged for a step. It arrives on
-///    `step.parked`.
-///  · A **routed loose end** is a concrete thing that already exists — an overdue chore, an
-///    unchecked list item, a parked note — that step 1's triage addressed to a step. It
-///    arrives in step 1's own `data.routes` and is handed down through
-///    `PlanningStepProps.routes`.
-///
-/// Routed ends used to be drawn by each step BODY, in a trailing section under the step's
-/// real content, which is where they were reported: "wouldn't these be in the top 'parked
-/// things' box? why are they hidden at the bottom?" They are in this box now — GROUPED,
-/// not flattened, because the two are not the same thing and cannot take the same answers.
-/// Each half keeps its own heading and its own affordances, and the whole box disappears
-/// when both halves are empty.
-///
-/// **A note's three answers, and the third is the honest one.** "Handled" resolves the note
-/// (you did the thing with the step's own controls) and "Drop it" says it was never really
-/// a thing — both are bookkeeping. Leaving a note alone is the real third answer and writes
-/// NOTHING: it stays parked and turns up again in the recap, which is what parking is
-/// for. And when the step lends one (`PlanningStepProps.lendVerb`), a verb that actually
-/// does the thing — "Make a task", "Make an event" — opening that step's own composer
-/// seeded with the note's words. A step with no composer lends nothing and the box stays
-/// as it was; a button reading "Make a goal" that only ticks the note off promises an
-/// action it does not perform.
-///
-/// **A ROUTED END GETS THE VERB AND NOTHING ELSE.** Routing wrote nothing to any module —
-/// the overdue chore is still overdue — so there is no bookkeeping to answer here: no
-/// "Handled" (its module already knows), and no "Drop it" (dropping a real chore from a
-/// nudge would be a write nobody asked for; step 1 and the recap own that). On a step that
-/// lends no verb the row is a plain reminder that this was sent here, which is the whole
-/// complaint answered, and it is deliberately not a ghost button.
-///
-/// Ported from the `Handoff` component in `apps/web/src/kiosk/WeeklyPlanning.tsx`. The
-/// routed half is iOS AHEAD of the web (which records routing but never shows it on the
-/// destination step), recorded as a web follow-up rather than an accident.
+/// THE SHELL OWNS THIS, NOT THE TEN STEPS — the box is identical everywhere, the shell
+/// already refetches after every write, and each step's own affordances are what act on
+/// what is in it. It holds two GROUPED halves that take different answers: parked notes
+/// (free text, tagged for a step) and routed loose ends (real things step 1 addressed
+/// here, which carry a verb only — routing wrote nothing to any module, so there is no
+/// bookkeeping to answer). Why, and the web's missing routed half:
+/// docs/product/weekly-planning-plan.md § "The parked-note handoff belongs to the shell".
 ///
 /// The caller must give this an `.id(step.key)` (the shell does): `hidden` and `made` are
 /// per-row local state and a step change has to start them empty.
-/// WHICH WORDS A HANDOFF ANSWER CARRIES: the in-place edit when there is one, otherwise the
-/// note as stored.
-///
-/// A one-line rule that lives outside the view on purpose — the banner is SwiftUI and this
-/// app has no view tests, so the only way to pin the behaviour that was wrong (rendering the
-/// edit while sending the original) is to make the decision testable on its own.
+/// Which words a handoff answer carries: the in-place edit when there is one, otherwise
+/// the note as stored. Outside the view because this app has no view tests, and sending
+/// the stored note while showing the edited one is the mistake worth pinning down.
 enum PlanningHandoffWords {
     static func of(_ note: WaffledAPI.PlanningStepHandoff, edited: [String: String]) -> String {
         edited[note.id] ?? note.note
@@ -277,8 +233,8 @@ struct PlanningHandoffBanner: View {
                     // the wrong note.
                     // THE EDITED WORDS, not the stored ones. The banner renders
                     // `words(note)`, so a note corrected in place shows its correction —
-                    // and this used to hand `note.note` to the composer anyway, discarding
-                    // that correction at the one moment the note becomes a real thing.
+                    // never `note.note`, which would discard the correction at the one moment
+                    // the note becomes a real thing.
                     verb.run(words(note)) { created in
                         // A CANCELLED composer settles nothing. Ticking the note off would
                         // throw away the only record that it still needs doing, on the
@@ -294,8 +250,8 @@ struct PlanningHandoffBanner: View {
                 answer(note.id, "done")
             }
             // FIX IT INSTEAD OF ANSWERING IT. "I have no way to edit the item or change the
-            // category and I should" — before this, a typo or the wrong tag could only be
-            // cleared with Drop, which is supposed to mean "it was never really a thing".
+            // A typo or the wrong tag is fixed here, in place. Drop is reserved for "it was
+            // never really a thing", so it cannot double as the repair.
             answerButton("Edit", tint: WF.ink2, filled: false, key: note.id) {
                 editError = nil
                 editing = note.id

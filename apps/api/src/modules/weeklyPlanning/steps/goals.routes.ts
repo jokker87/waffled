@@ -27,9 +27,9 @@ export function registerGoalsStepRoutes(api: Api): void {
     await requireModule(tenant, 'goals')
     // Ownership, not just shape. `readFocus` reads `planning_session_steps` by session id
     // alone (that table is scoped only through `planning_sessions`), so a well-formed id
-    // from another household used to reach their goals-step data. Less to leak here than
-    // step 1 had — goal ids that cannot match this household's lists — but the same hole,
-    // and the same one-line guard the recap and kids reads already use.
+    // from another household would otherwise reach their goals-step data. Less to leak here than
+    // step 1 had — goal ids that cannot match this household's lists — but the same hole, and
+    // the same one-line guard the recap and kids reads use.
     const asked = uuidOrNull(req.query?.sessionId)
     const session = asked ? await getSessionById(tenant.householdId, asked) : null
     return getGoalsStepView(tenant, session ? asked : null)

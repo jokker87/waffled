@@ -204,7 +204,7 @@ export interface SessionStep extends StepDef {
   // 1-based position in the CATALOG — `i + 1` over all ten steps, unavailable ones
   // included. NOT what the "2 of 9" counter shows: both clients derive that from the
   // runnable list, because a household with meals off would otherwise see "4 of 9" with
-  // no step 3. (This comment used to say the opposite and misled the iOS port.)
+  // no step 3.
   number: number
   // False ⇒ the step's module is off, or the household turned the step off. The
   // session steps over it and the agenda sheet doesn't list it.
@@ -218,11 +218,8 @@ export interface SessionStep extends StepDef {
    *
    * This exists because they didn't. `planning_parked_items.step_key` names a
    * DESTINATION ("which step is going to look at this"), written both by step 1's triage
-   * and by step 3's park bar, and for a while nothing read it: only steps 1, 3 and 10
-   * touched the table at all, so a note tagged for Meals or Tasks vanished until the
-   * recap's last call. It was reported exactly that way — "I added a bunch to the park it
-   * thing, expecting to go over them in the appropriate step but I never saw them again,
-   * where did they go?"
+   * and every step's handoff banner reads it. A note tagged for Meals or Tasks surfaces on that
+   * step, rather than waiting for the recap's last call.
    *
    * It lives on the SESSION VIEW rather than in each step's own read for three reasons:
    * the banner is identical on every step, the shell already refetches this after every

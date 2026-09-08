@@ -317,6 +317,20 @@ happened to end in Done" — leave the step and come back and it reads 0. A prov
 cannot fail that way. The crumbs recap *does* read are the ones that ARE the decision and have
 no module row: the goals focus map and the kids' answers.
 
+**Grouping by the module a decision lives in is not cosmetic** — Calendar · Meals + Lists ·
+Chores + Rhythms · Goals · Family Night · Kids. A group names the place you would go to change
+the thing, which is what makes each line a pointer; three steps folding into Calendar (calendar,
+horizon and connection all write `events`) is that grouping working. A group with no decisions is
+absent rather than zeroed, and if its step was answered anyway it moves to "left alone on
+purpose". A module that is off contributes no group and is never named.
+
+**Three things look like decisions and are not**, and recap excludes all three: an *unpinned*
+family-night part is the rotation's suggestion, so reporting it would put a name on the record
+nobody chose; a goal group carries `focusGoalId` even unsettled, because the step pre-selects an
+already-featured goal — a flag found lying around, not an answer, so only `settled` counts; and a
+step still `pending` is unreached rather than "left alone on purpose", so only `skipped` and the
+deliberate non-answers are outcomes.
+
 ### The finished week is read back, and the tick-list is the second reading
 
 The saved record started as ten green ticks against ten step names. That says the session

@@ -307,7 +307,7 @@ describe('KidsStep · answering', () => {
     await waitFor(() => expect(w.getByRole('radio', { name: /Extra Thing/ })).toBeTruthy())
 
     // Going back to their own answer is an EDIT. An empty box discards what a nine year
-    // old just dictated and makes the chip look inert — which is how it was reported.
+    // old just dictated and makes the chip look inert.
     fireEvent.click(w.getByRole('radio', { name: /Extra Thing/ }))
     const again = await screen.findByLabelText(/something else/i)
     expect((again as HTMLInputElement).value).toBe('Extra Thing')

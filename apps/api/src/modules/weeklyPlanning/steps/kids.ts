@@ -1,38 +1,18 @@
 // Weekly Planning · step 9 (Kids) — "What's your week about?"
 //
-// THE ONE STEP THE KIDS THEMSELVES READ. A nine-year-old and a six-year-old are standing
-// at the board, so there is a card each — both on one screen, no per-kid navigation for a
-// family of two — and two questions on it: one thing to focus on, and one thing to look
-// forward to.
+// THE ONE STEP THE KIDS THEMSELVES READ: a card each, with one thing to focus on and one
+// thing to look forward to. BOTH ANSWERS ARE PICKED FROM WHAT ALREADY EXISTS — their own
+// goals and overdue chores, and events already on their week. There is no catalog of
+// age-appropriate suggestions and there must not be one; the moment this step invents an
+// option it stops being a read over the family's own week.
 //
-// BOTH ANSWERS ARE PICKED FROM THINGS THAT ALREADY EXIST. That is the design, and it is
-// the whole reason this file is (nearly) a read:
+// It writes to no module: nothing owns "Wally's one thing this week", so the answers live
+// on `planning_session_steps.data` as `{ kids: { <personId>: { focus, forward } } }` — a
+// real route write, not `setDecisionData`, because the read-back has to survive a remount.
 //
-//   · the FOCUS options come out of that child's own goals, their own overdue chores and
-//     the standing chores they already carry. "＋ Something else" is the escape hatch, not
-//     the main path — a kid should recognise their week in the list, not have to invent it.
-//   · the LOOK-FORWARD-TO options are events already on their week. Never a text box first.
-//   · the card also shows their week and their star count, because the kid at the board
-//     wants to see their own week.
-//
-// The mock's third focus option ("Homework before screens", "Dressed before breakfast")
-// carries NO line under it, and that is the tell: it is a standing chore they already own.
-// Nothing is late about it and nothing is behind — so there is nothing to say. There is no
-// catalog of age-appropriate suggestions here and there must not be one: the moment this
-// step invents an option it stops being a read over the family's own week.
-//
-// WHAT IT WRITES. Nothing in any module. Nothing owns "Wally's one thing this week" —
-// setting `is_featured` would be step 6 speaking for step 9, and a chore is not completed
-// by being named — so the two answers live on `planning_session_steps.data` as
-// `{ kids: { <personId>: { focus, forward } } }`. No new table (see the plan doc), and a
-// REAL route write rather than `setDecisionData`, because the second frame is the
-// read-back and it has to survive a remount, a refresh and the iPad picking up where the
-// phone left off.
-//
-// NO `requiresModule` IN THE CATALOG, deliberately: the step reads goals AND chores, which
-// a household toggles separately, so gating on either would delete the step for a family
-// that runs the other. A module that is off contributes nothing instead — the same rule
-// looseEnds' header states. Events are never gated; stars follow `rewardsEnabled`.
+// NO `requiresModule` IN THE CATALOG, deliberately: this reads goals AND chores, which a
+// household toggles separately, so gating on either would delete the step for a family
+// that runs the other. An off module contributes nothing instead.
 import type { PoolClient } from 'pg'
 import { query, getPool } from '../../../platform/db'
 import { moduleEnabled, rewardsEnabled, type ModuleKey } from '../../../platform/modules'

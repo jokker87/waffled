@@ -542,9 +542,9 @@ function NightColumn({ night, auto, disabled, onOpen }: {
 //
 // The library still comes through `useRecipes` — the hook fetches when the picker
 // mounts and refetches on the `recipes` bus topic. That is deliberate and must stay:
-// the list used to be cached in this file's module state behind `if (recipes) return`,
-// and an EMPTY library is a truthy `[]`, so a household that opened the picker before
-// adding its first recipe was told "no recipes yet" for the rest of the page's life.
+// It must NOT be cached in this file's module state behind `if (recipes) return`: an EMPTY
+// library is a truthy `[]`, so a household that opened the picker before adding its first recipe
+// would be told "no recipes yet" for the rest of the page's life.
 function NightPicker({ night, onClose, onPick, onPickMeal, onClear }: {
   night: PlanningMealsNight
   onClose: () => void

@@ -175,9 +175,9 @@ export function paceFor(goal: Goal, a: Activity | undefined): Pace | null {
 // the same clock as the "3 of 5" the goals screen shows for this week. The interval comes
 // from a CASE, never from concatenating a column into a cast.
 //
-// It used to say it mirrored that rule while actually using bare `date_trunc('week', …)`,
-// which is MONDAY-only. On a Sunday-start household (the default) Sunday's log landed in
-// the wrong period, so this line disagreed with the goals screen about the same habit.
+// Never a bare `date_trunc('week', …)`: that is MONDAY-only, so on a Sunday-start household (the
+// default) Sunday's log lands in the wrong period and this disagrees with the goals screen about
+// the same habit.
 async function recentActivity(householdId: string): Promise<Map<string, Activity>> {
   const { rows } = await query<ActivityRow>(
     `with local as (select id, timezone, week_start, (now() at time zone timezone)::date as today

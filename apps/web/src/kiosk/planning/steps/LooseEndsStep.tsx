@@ -74,9 +74,8 @@ const routeKey = (r: { kind: string; id: string }) => `${r.kind}:${r.id}`
 // WHO ALREADY HAS IT — one piece, both modes.
 //
 // Deliberately not two lookalikes: this file renders a row in the card deck AND in see-all,
-// and this codebase has been bitten three times by a component copied because the original
-// was local to one place. The avatar-wash idiom is the Tasks board's own (`chore-ava` with
-// the person's colour at 22 alpha), so a face reads the same here as it does there.
+// The avatar-wash idiom is the Tasks board's own (`chore-ava` with the person's colour at 22
+// alpha, via `avTint`), so a face reads the same here as it does there.
 //
 // Nothing at all when nobody has it: an empty chip on every row would be noise on the mode
 // that already carries the most, and "no owner" is already legible as the absence.
@@ -333,10 +332,9 @@ function Body({ step, sessionId, weekStart, setDecisionData, busy }: StepBodyPro
   // Group B captures. So step 1 does create parked items after all: the board is where
   // "one more thing" goes when it belongs to no module yet.
   //
-  // Built once and rendered in BOTH modes. It used to be card-mode only, which made
-  // "See all" — the screen that reads as the fuller one — the single place you could
-  // not drop a note. In see-all it sits inside the Parked section rather than at the
-  // foot of the screen, so what it adds to is never in question.
+  // Built once and rendered in BOTH modes — "See all" reads as the fuller screen, so it cannot
+  // be the one place you may not drop a note. There it sits inside the Parked section rather
+  // than at the foot of the screen, so what it adds to is never in question.
   // WHICH LISTS THIS STEP ASKS ABOUT.
   //
   // The friction is right here: you are looking at the fourth week of "Learn the banjo"

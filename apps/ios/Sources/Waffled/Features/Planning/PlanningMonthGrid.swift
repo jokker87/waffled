@@ -12,10 +12,10 @@ import SwiftUI
 //
 // The chips-and-"+N more" argument from the web does not port, and it should not: the web
 // caps its month's height and draws two event chips per day because a flex child there
-// SHRINKS to fit, and squashed chips is what this step was reported for twice. An iOS cell
-// is a fixed 44pt box with a dot row — there is no chip that can be compressed — and
-// "+N more" is already the whole cell: tapping a day selects it, and the panel underneath
-// lists everything on it. Same behaviour, one fewer thing to get wrong.
+// SHRINKS to fit there, and squashed chips are worse than none. An iOS cell is a fixed 44pt box
+// with a dot row — there is no chip that can be compressed — and "+N more" is already the whole
+// cell: tapping a day selects it, and the panel underneath lists everything on it. Same
+// behaviour, one fewer thing to get wrong.
 
 /// One day cell, fully resolved BEFORE the grid renders. Date maths, day-key formatting
 /// and colour resolution all happen once per month build rather than 42× per render — the

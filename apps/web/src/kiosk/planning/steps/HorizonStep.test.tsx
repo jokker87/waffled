@@ -505,9 +505,9 @@ describe('Horizon scan · the park bar', () => {
     renderStep()
     // Asserting the DISTINCTION, not the sentence: the first wording ("＋ on a day adds a
     // real event · the bar above parks a note that isn't an event yet") named two
-    // mechanisms and was reported as unreadable. What has to survive a rewrite is that
-    // the screen still tells you one writes a calendar event, the other does not, and
-    // where a parked note comes back.
+    // What has to survive a rewrite is that the screen still tells you one writes a calendar
+    // event and the other does not, and where a parked note comes back — not any particular
+    // wording of it.
     const note = await screen.findByText(/real\s+calendar\s+event/i)
     expect(note).toBeInTheDocument()
     expect(note.textContent).toMatch(/stays off the calendar/i)
@@ -548,9 +548,8 @@ describe('Horizon scan · looking further out', () => {
 
 describe('Horizon scan · fixing a note that is already parked', () => {
   // "parked in this session - I have no way to edit the item or change the category and
-  // I should." Before this the board was a receipt: the only repair for a typo or for the
-  // wrong chip was to drop the note and type it again, and Drop is supposed to mean "it
-  // was never really a thing".
+  // A parked note's words and its tag are both fixable in place. Drop is reserved for "it was
+  // never really a thing", so it cannot double as the repair for a typo.
   const NOTE = {
     id: 'n1',
     note: 'by the poster bored',

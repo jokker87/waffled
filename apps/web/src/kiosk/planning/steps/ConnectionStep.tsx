@@ -80,8 +80,9 @@ function durationWords(min: number): string {
 /**
  * Which pairings the step draws, IN THE SERVER'S OWN ORDER.
  *
- * `slice(0, ROWS)` was reported as a disappearing act: "I added a custom time … the
- * events did save but they didn't populate on the connection tab." The board is ranked
+ * `slice(0, ROWS)` must never hide a pairing you have just given time to. The board is ranked by
+ * how long it has been since it was just those two, and that ranking reads only history BEFORE
+ * the planned week — so giving a pairing time INSIDE the week does not
  * by how long it has been since it was just those two, and that ranking reads only
  * history BEFORE the planned week — so giving a pairing time INSIDE the week does not
  * move it up, and a pairing ranked fourth stayed invisible no matter what you had just

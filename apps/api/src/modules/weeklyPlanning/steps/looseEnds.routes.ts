@@ -35,10 +35,10 @@ export function registerLooseEndsStepRoutes(api: Api): void {
   // easier to reason about and to test.
   api.get('/api/weekly-planning/loose-ends', tenantRoute(async (tenant, req: Request) => {
     const weekStart = await resolveWeekStart(tenant.householdId, req.query?.weekStart)
-    // HOUSEHOLD-SCOPED, and it wasn't. `?sessionId=` used to go straight through to
-    // `listRoutes`, which selects from `planning_session_steps` by `session_id` alone —
-    // that table has no `household_id` of its own, it is scoped only through
-    // `planning_sessions`. So another household's id read THEIR routes, and every entry
+    // HOUSEHOLD-SCOPED. `?sessionId=` must be checked against this household before it reaches
+    // `listRoutes`, which selects from `planning_session_steps` by `session_id` alone — that
+    // table has no `household_id` of its own, it is scoped only through `planning_sessions`.
+    // Unchecked, another household's id reads THEIR routes, and every entry
     // carries a `title`: the wording of another family's chores, list items and notes. A
     // malformed id reached Postgres as `uuid = 'nope'` and 500'd.
     //
@@ -79,8 +79,8 @@ export function registerLooseEndsStepRoutes(api: Api): void {
     return { item: result.item }
   }))
 
-  // FIX WHAT YOU JUST WROTE. A typo, or the wrong tag chip, used to be repairable only by
-  // dropping the note and re-typing it — and a drop is meant to MEAN something. Both
+  // FIX WHAT YOU JUST WROTE. A typo, or the wrong tag chip, is repairable in place; Drop is
+  // reserved for "it was never really a thing".
   // fields are read for PRESENCE, so an omitted key leaves that half alone while
   // `stepKey: null` is the real answer "No tag".
   //

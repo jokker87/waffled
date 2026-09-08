@@ -344,10 +344,9 @@ describe('Weekly planning · step 5 · Connection', () => {
   })
 
   it('remembers a linked time, rather than losing it on the next visit', async () => {
-    // The acknowledgement used to be deliberately local — it "changes a sentence,
-    // nothing else". A LINK is not a sentence: it is the answer to this pairing, and a
-    // step that forgets it the moment you walk away is the complaint this module has
-    // already collected twice.
+    // A LINK is the answer to this pairing, not just a sentence that changes — and a step that
+    // forgets its answer the moment you walk away is the complaint this module has already
+    // collected twice.
     const { steps } = mockApi()
     renderStep()
     const kl = await row('p2-p4')

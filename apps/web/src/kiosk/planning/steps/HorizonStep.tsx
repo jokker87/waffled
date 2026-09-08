@@ -50,10 +50,9 @@ import '../../../styles/planning-horizon.css'
 function useHorizon(sessionId: string) {
   const [tags, setTags] = useState<HorizonTag[]>([])
   const [parked, setParked] = useState<HorizonNote[]>([])
-  // A failed read used to reject unhandled and leave `parked` empty, so the "Parked in this
-  // session" board just didn't appear — notes somebody had written a moment earlier were
-  // invisible AND uneditable, with nothing on screen saying the read had failed. An empty
-  // board and an unreadable one look identical, so they must not be the same state.
+  // A failed read must SAY so rather than leaving `parked` empty: an empty board and an
+  // unreadable one look identical on screen, so they must not be the same state — notes written
+  // a moment earlier would be invisible and uneditable with nothing explaining why.
   const [readFailed, setReadFailed] = useState(false)
   useEffect(() => {
     let alive = true

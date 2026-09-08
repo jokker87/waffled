@@ -62,11 +62,9 @@ interface StepState {
   typing: { personId: string; which: 'focus' | 'forward' } | null
   // WHAT THEY TYPED BUT NEVER SAVED, keyed `<personId>:<which>`.
   //
-  // "I added a custom 'something else' and then clicked an existing one and the one I
-  // wrote disappeared, is that expected?" Half of it was: picking an existing option
-  // IS a change of answer, and only one option can be the chosen one. The other half
-  // was not — the typing had been saved nowhere, so going back for it was the only way
-  // to get it, and an empty box said it was gone for good.
+  // Picking an existing option IS a change of answer, and only one option can be the chosen one
+  // — but the typed draft is kept, so going back to "something else" still holds what a nine-
+  // year-old dictated. An empty box would say it was gone for good.
   //
   // Kept out of `view` on purpose: a draft is not an answer, it never reaches the
   // server, and it lives exactly as long as the step is on screen.
