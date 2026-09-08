@@ -126,9 +126,13 @@ uses bash because it is throwaway and the point is to learn, not to build.
 - Port collisions (Homebrew Postgres on 5432, another app on 8080) are detected at first
   start; the runtime picks the next free port and records it in `runtime.json`. The public
   port is stable after first run because other devices depend on it.
-- **Bonjour.** The runtime advertises `_waffled._tcp` with the household name in the TXT
-  record. The iOS app grows a "Find your Waffled server" first-run screen (needs
-  `NSBonjourServices` + `NSLocalNetworkUsageDescription`; see the iOS capability-gate notes).
+- **Bonjour.** The runtime advertises `_waffled._tcp` on the public Caddy port with the
+  household name as the instance name (or "Waffled on \<computer\>" before setup, or when
+  there is more than one household), and a TXT record carrying `txtvers`, `name`, `url`,
+  `port`, `version` and `setup`. An install with no household yet advertises `setup=1`, so
+  a phone that finds it can say "finish setup on your Mac". The iOS app grows a "Find your
+  Waffled server" first-run screen (needs `NSBonjourServices` +
+  `NSLocalNetworkUsageDescription`; see the iOS capability-gate notes).
   Note: this does **not** give us `waffled.local`. Devices will see the Mac's own hostname
   (`kevins-mac-mini.local`). Discovery makes that irrelevant for the iOS app; the menu shows
   the address for everything else.
@@ -230,8 +234,12 @@ uses bash because it is throwaway and the point is to learn, not to build.
 - Sparkle vs a home-grown updater. Sparkle for the app bundle is the obvious choice; the
   question is whether the *runtime* updates independently of the app (Plex does not; keep it
   one unit unless a reason appears).
-- Whether to bind Bonjour advertisement into the runtime (Go, cross-platform later) or the
-  Swift app (`NWListener` is trivial). Leaning runtime.
+- ~~Whether to bind Bonjour advertisement into the runtime (Go, cross-platform later) or the
+  Swift app (`NWListener` is trivial).~~ **Resolved: the runtime**, by supervising
+  `/usr/bin/dns-sd -R` as one more child rather than linking a responder. It registers
+  through the system mDNSResponder (a second responder on 5353 is the classic macOS flake),
+  keeps `go.mod` stdlib-only, deregisters when killed, and means the server advertises
+  itself whether it was started by the app, by launchd or from Terminal.
 
 ---
 
@@ -282,7 +290,18 @@ Throwaway bash under `infra/native/spike/`. Purpose: **learn**, not build.
    --json|logs|doctor`, data dir layout from §3, ordered supervision with health gates,
    `runtime.json`, next-free-port selection, manifest verification before start. Cold start
    under 20 s against the 60 s criterion; warm restart about 2 s.
-2. Bonjour advertisement.
+2. *(done — PR #TBD)* Bonjour advertisement. Once Caddy is answering, the runtime
+   registers `_waffled._tcp` on the public port by supervising `/usr/bin/dns-sd -R` as one
+   more child — through the system mDNSResponder, so nothing new binds 5353 and `go.mod`
+   stays stdlib-only — and withdraws it first on the way down. The instance name is the
+   household's when there is exactly one, else "Waffled on \<computer\>", and an install
+   with no household yet advertises `setup=1` so a phone can offer to finish setup instead
+   of a sign-in; that flips to the household's name, without a restart, the moment the
+   wizard creates one. `status --json` grows an additive `bonjour` block and `doctor`
+   browses for our own registration, which is how a household learns that the firewall or
+   the Local Network privacy prompt is what is hiding the server. A failed advertisement is
+   never fatal: it is advisory, absent from the services array, and a household that cannot
+   be discovered still has a completely working server.
 3. *(done — PR #186)* `backup|restore`, the nightly schedule and `backup_runs`.
    `waffled-runtime backup` takes a custom-format `pg_dump` into `backups/` with a JSON
    sidecar recording the migration level, keeps the last 14, and writes the same

@@ -20,7 +20,7 @@ so support can say "run `waffled-runtime doctor` and paste the output".
 waffled-runtime start [--foreground] [--bundle DIR] [--data DIR]
 waffled-runtime stop [--timeout 2m]
 waffled-runtime status [--json]
-waffled-runtime logs [service] [-f] [-n N]      # postgres migrate api powersync caddy runtime
+waffled-runtime logs [service] [-f] [-n N]      # postgres migrate api powersync caddy bonjour runtime
 waffled-runtime backup [--out FILE] [--keep N]
 waffled-runtime backup --install-schedule | --uninstall-schedule
 waffled-runtime restore FILE [--yes]
@@ -61,6 +61,10 @@ postgres ──▶ init databases ──▶ migrate ──▶ api ──▶ powe
 Stop walks it backwards, ending with `pg_ctl stop -m fast`. Every step is idempotent:
 `start` against a running stack is a no-op, and a start interrupted halfway repairs
 itself on the next one.
+
+Once Caddy answers, the Bonjour advertiser starts — after the sequence, not inside it,
+because an advertisement is a promise that something is there to reach. It is withdrawn
+first on the way down, and it cannot fail a start (see [Bonjour](#bonjour)).
 
 Two details worth knowing:
 
@@ -197,6 +201,82 @@ Plan §5 replaces Compose's private network with loopback binding. Where that st
 The integration test records the last two as named gaps that turn into passes — and tell
 you to delete the exemption — the day either is fixed.
 
+## Bonjour
+
+The server advertises itself on the local network as **`_waffled._tcp`**, on the public
+Caddy port — the only port another device should ever reach. This is how the iOS "Find
+your Waffled server" screen (plan §7 Phase 4) finds a Mac nobody has typed an address for.
+
+It runs `/usr/bin/dns-sd -R` as **one more supervised child**, started once Caddy is
+answering and stopped first on the way down. That is a deliberate choice over a Go mDNS
+library: registering through the system mDNSResponder means nothing new binds 5353 (a
+second responder beside it is the classic macOS flake), `go.mod` stays stdlib-only, and
+the registration is withdrawn automatically when the process is killed — so the
+advertisement cannot outlive the server, even if the supervisor is killed outright.
+
+It is **advisory**. It is not in `Children()`, not in `Order`, not in `PortChecks`, and not
+in the `services` array `status` emits, so a Bonjour failure can never make a working
+server look broken or turn the menu-bar icon red. A household that cannot be discovered
+still has a server every browser and every device typing the address in can reach.
+
+### The TXT contract
+
+This is what a client parses. Keys are added, never renamed or repurposed — a shipped iOS
+build will be reading them long after this runtime has moved on.
+
+| Key | Value |
+|---|---|
+| `txtvers` | `1`. A client that finds a version it does not know should ignore the record rather than guess. |
+| `name` | The instance name, repeated in the TXT so a client need not un-escape the DNS-SD instance label. |
+| `url` | The address to open: the LAN URL (`http://192.168.1.5:8080`), or `http://<host>.local:<port>` when this Mac has no routable address. |
+| `port` | The public Caddy port, as decimal text. Also the SRV port. |
+| `version` | The bundle's Waffled version, so a client can refuse a server too old to talk to. |
+| `setup` | `1` on an install with **no household yet** — a phone that finds it should say "finish setup on your Mac" rather than offer to sign in. `0` otherwise. |
+
+Byte limits are enforced where the wire imposes them: the instance name is truncated to 63
+bytes and each `key=value` to 255, both on a rune boundary, because household names are
+typed by people. Values are passed as argv straight to `execve` and are **not** escaped: a
+household called `Kevin's Home` travels as one argument with real spaces in it.
+
+### The instance name, and `setup`
+
+- Exactly one household → **the household's name** (`The Seinfelds`).
+- Zero households → **`Waffled on <computer name>`** (`scutil --get ComputerName`, falling
+  back to the hostname) and `setup=1`.
+- More than one household, or a household whose name is blank → the same machine fallback,
+  with `setup=0`: no single name is *the* household's name.
+- **The database could not be asked** → the machine fallback and `setup=0`. This is the
+  case worth being careful about: `setup=1` sends someone to a wizard, and a busy psql is
+  not a reason to send them back to one they already finished. `setup=1` is only ever
+  advertised on a positive read of an empty install.
+
+The name is computed at start, and then re-checked once a minute **only while the install
+has no household** — the one transition a person watches happen, since creating a household
+changes the name and the flag together. Polling stops for good the moment a household
+exists, so a settled install pays nothing.
+
+**The limitation that leaves:** renaming a household later does not change what is
+advertised until the next restart. That is deliberate — a rename is rare, a restart fixes
+it, and the alternative is a psql fork every minute forever on every install.
+
+There is still no `waffled.local`: devices resolve this Mac by **its own** hostname
+(`kevins-mac-mini.local`), which is exactly why discovery exists.
+
+### Where to look when it does not work
+
+`status` reports what this Mac *asked for*. Whether the rest of the house can see it is a
+different question, so `doctor` browses for our own registration and, when it does not
+answer, names the two things that are almost always responsible: the firewall, and (on
+Sonoma and later) the Local Network privacy permission.
+
+`doctor` browses with `dns-sd -t <seconds>` rather than killing the command on a deadline.
+That is load-bearing, not tidiness: dns-sd block-buffers its stdout down a pipe, so a
+browse that ends by being killed comes back empty and would report an empty network on a
+Mac that is advertising perfectly well.
+
+A registration that mDNSResponder renamed on a collision (`The Seinfelds (2)`, because a
+neighbour advertised first) still counts as ours.
+
 ## The bundle contract
 
 The runtime refuses to execute anything until the bundle matches its `manifest.json`:
@@ -287,6 +367,29 @@ Postgres would go blank at the only moment it mattered. `backup_runs` is the sam
 mirrored for the api, which can only be asked when the api is up anyway. For the same
 reason `scheduleInstalled` is a `stat` of the plist rather than a `launchctl print` — the
 menu-bar app polls this, and a process spawn per poll is not free.
+
+So is the `bonjour` block:
+
+```jsonc
+"bonjour": {
+  "advertised": true,
+  "name": "The Seinfelds",         // "" while nothing is on the network
+  "service": "_waffled._tcp",      // constant, reported even when stopped
+  "port": 8080,                    // the public Caddy port
+  "host": "kevins-mac-mini.local",
+  "error": ""                      // why nothing is advertised, when something went wrong
+}
+```
+
+`schema` stays at **1** for this one too. Nothing here feeds `state`: `advertised: false`
+is never on its own a reason to draw a red icon.
+
+`status` usually runs in a **different process** from the supervisor, so the advertisement
+is recorded in `bonjour.json` beside `runtime.json` — written atomically, with the
+supervisor's pid in it. Every field is trusted only while that pid is alive: a supervisor
+that was SIGKILLed leaves the file behind, but mDNSResponder withdrew the registration when
+the dns-sd child died with it, so the block must report nothing rather than name a
+household that is not on the network.
 
 ## Backup and restore
 
@@ -430,7 +533,9 @@ round-trip), port selection against genuinely occupied ports, `runtime.json`
 round-tripping, the Caddyfile rewrite (both `api:3000` occurrences, paths with spaces,
 and a drift alarm that rewrites the repo's *real* `infra/compose/caddy/Caddyfile`),
 manifest verification against tampered/extra/missing/retargeted fixtures, process
-supervision, log rotation, and the status contract.
+supervision, log rotation, the status contract, and the Bonjour advertisement (which name
+wins, what `setup` means, the TXT keys and their byte limits, and the argv handed to
+dns-sd).
 
 The integration tests (build tag `integration`, skipped without `WAFFLED_BUNDLE`) run the
 real bundle into a temp data directory **whose path contains a space**:
@@ -445,6 +550,13 @@ real bundle into a temp data directory **whose path contains a space**:
 - `TestDetachedStartStop` — builds the real binary and drives `start` → `status --json`
   → `doctor` → `stop`, which is the only test that exercises the daemonize path.
 - `TestATamperedBundleIsRefused` — a bundle that does not match its manifest never runs.
+- `TestTheStackAdvertisesItselfOnBonjour` — reads the advertisement back off the network
+  with `dns-sd -Z`: the six TXT keys, `setup=1` on an install with no household, the url
+  and port pointing at the public port, and the instance gone again after `stop`. It
+  matches the instance by **port**, never by name: the Mac running the test may already be
+  running a real Waffled, and mDNSResponder renames a colliding instance rather than
+  refusing it. The network assertions skip with a clear message where multicast or
+  mDNSResponder is unavailable (CI runners); the child lifecycle is asserted regardless.
 - `TestBackupAndRestoreRoundTrip` — write a row, back up, destroy it, restore, and find
   it again with every service green. It reads `backup_runs` back with the api's **own
   query**, so a drifted column shows up here rather than as a blank panel in System
@@ -467,6 +579,9 @@ real bundle into a temp data directory **whose path contains a space**:
   objects still exist, so the migration fails and nothing ever reaches the gate. It then
   asserts the restored state is the **pre-migration** one specifically, since a snapshot
   taken a moment too late would still restore something and still look like it worked.
+- `TestTheAdvertisementFollowsSetupBeingFinished` lives there for the same kind of reason:
+  watching `setup=1` flip to the household's own name in seconds rather than a minute means
+  shortening `bonjourSetupPoll`, which is unexported and never written in production.
 
 Run the integration suite with `-p 1`: without it Go runs packages concurrently and two
 stacks race for the same ports.
@@ -485,7 +600,7 @@ The plan's Phase 2 exit criterion is under 60s; the test fails if a cold start e
 
 ## Not this task
 
-Bonjour advertisement and the updater are deliberately absent, with seams left for them.
+The updater is deliberately absent, with a seam left for it.
 The updater's flow — snapshot → stop → swap the runtime → migrate → health → restore on
 failure — is the sequence `start` already runs, so it should reuse `ensurePostgres`,
 `snapshotBeforeMigrate`, `rollbackTo`, `replaceDatabase` and `backup.CheckRestorable`
@@ -497,6 +612,10 @@ other.
 ## Portability
 
 Standard library only — no third-party dependencies, no cgo. macOS-specific behaviour
-(the default data directory, the Time Machine exclusion) sits behind `//go:build darwin`
-with a no-op sibling, so the core still cross-compiles for the Windows work parked in
-plan §9.
+(the default data directory, the Time Machine exclusion, the dns-sd client) sits behind
+`//go:build darwin` with a no-op sibling, so the core still cross-compiles for the Windows
+work parked in plan §9. `internal/bonjour`'s non-darwin `Tool()` returns `""` and the
+supervisor then skips advertising and says so in `status` — never an error, because a
+server no phone can discover still serves everything that has its address. Windows has
+`dns-sd.exe` only where Bonjour for Windows is installed and Linux would register through
+Avahi; both are later decisions, and that file is the seam.
