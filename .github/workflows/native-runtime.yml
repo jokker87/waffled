@@ -20,7 +20,8 @@
 #
 # Two jobs, split for cost as well as speed:
 #   - runtime-go (ubuntu-latest) is the fast gate: gofmt, vet, unit tests. No bundle, no
-#     network beyond the Go toolchain — seconds, on the cheapest runner.
+#     network beyond the Go toolchain — seconds, on the cheapest runner. runtime-macos
+#     `needs` it, so a formatting or unit failure costs one ubuntu minute, not a macOS run.
 #   - runtime-macos needs an Apple-silicon host because the bundle IS arm64 darwin binaries
 #     (Postgres, Caddy, the built PowerSync service) — there is no cross-build path, and
 #     macOS minutes cost 10x an ubuntu minute. It downloads/builds the ~660 MB bundle
@@ -101,6 +102,8 @@ jobs:
 
   runtime-macos:
     name: macOS bundle build + boot from empty data dir
+    # Gate on the cheap job: a gofmt/vet/unit failure should never burn macOS minutes.
+    needs: runtime-go
     # macos-15 is the current Apple-silicon (arm64) GitHub-hosted runner — confirmed against
     # actions/runner-images (macos-15 / macos-15-xlarge = arm64; the Intel image is the
     # differently-labelled macos-15-large/-intel). Pinned to the specific OS version rather
