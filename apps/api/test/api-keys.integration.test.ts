@@ -238,6 +238,50 @@ describe('hyphenated sibling routes are reachable with the right scope', () => {
   })
 })
 
+// Currency conversions are half of the currencies surface (10 ⭐ → 1 💵) and sit in
+// the same file as /api/currencies, but only /api/currencies was ever given to the
+// `rewards` resource — so a key could manage the denominations and not the rates
+// between them. A headless client needs both.
+describe('currency conversions answer to the rewards scope', () => {
+  const BOGUS = '00000000-0000-4000-8000-000000000000'
+  let rewardsRead = ''
+  let rewardsWrite = ''
+  let otherKey = '' // a key for an unrelated resource
+
+  const msg = (res: { body: string }): string => JSON.parse(res.body).message as string
+
+  beforeAll(async () => {
+    const mintKey = async (name: string, scopes: string[]): Promise<string> =>
+      JSON.parse((await call('POST', '/api/api-keys', kevin, { name, scopes })).body).key as string
+    rewardsRead = await mintKey('rewards-r', ['rewards:read'])
+    rewardsWrite = await mintKey('rewards-w', ['rewards:write'])
+    otherKey = await mintKey('photos-r', ['photos:read'])
+    // A conversion needs two currencies; the household seeds only the default Stars.
+    await call('POST', '/api/currencies', kevin, { label: 'Bucks', symbol: '💵' })
+  })
+
+  it('reads with rewards:read and writes only with rewards:write', async () => {
+    expect((await keyCall('GET', '/api/conversions', rewardsRead)).statusCode).toBe(200)
+
+    // An unrelated key is refused for a MISSING SCOPE, not as an unexposed path.
+    const wrong = await keyCall('GET', '/api/conversions', otherKey)
+    expect(wrong.statusCode).toBe(403)
+    expect(msg(wrong)).toMatch(/missing the required scope: rewards:read/)
+
+    const rate = { fromCurrency: 'stars', toCurrency: 'bucks', fromAmount: 10, toAmount: 1 }
+    const denied = await keyCall('POST', '/api/conversions', rewardsRead, rate)
+    expect(denied.statusCode).toBe(403)
+    expect(msg(denied)).toMatch(/missing the required scope: rewards:write/)
+
+    const created = await keyCall('POST', '/api/conversions', rewardsWrite, rate)
+    expect(created.statusCode).toBe(201)
+    expect(JSON.parse(created.body).conversion).toMatchObject({ fromCurrency: 'stars', toCurrency: 'bucks' })
+
+    // Reaches the handler (the route's own 404), rather than the scope gate's 403.
+    expect((await keyCall('DELETE', `/api/conversions/${BOGUS}`, rewardsWrite)).statusCode).toBe(404)
+  })
+})
+
 // ── the catalog covers every live route, or the route says why not ──────────────
 // The bug above was silent because nothing tied API_SCOPES to the actual route
 // table. This walks lambda-api's own table (app.routes() → [method, path, …]), so
@@ -263,9 +307,8 @@ const NOT_KEY_REACHABLE: Array<{ why: string; prefixes: string[] }> = [
   // `lists` resource. Listed here only so this guard is green without duplicating
   // that change — DELETE this entry when #180 merges.
   { why: 'PENDING — fixed by PR #180, which gives this prefix to `lists`', prefixes: ['/api/list-items'] },
-  // Plausible gaps, left alone on purpose: closing either is a product call that
-  // widens what a key can touch, not a fix for the boundary bug above.
-  { why: 'GAP? conversions sit beside /api/currencies but were never given to `rewards`', prefixes: ['/api/conversions'] },
+  // Left alone on purpose: exposing rhythms means a whole new scope resource, not
+  // another prefix, so it is being scoped as its own piece of work.
   { why: 'GAP? rhythms would need a whole new scope resource, not another prefix', prefixes: ['/api/rhythms'] },
 ]
 

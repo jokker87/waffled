@@ -54,7 +54,7 @@ paths a key can reach at all — the live list is also served from `GET /api/api
 | `lists` | `/api/lists` · `/api/pantry-staples` |
 | `pantry` | `/api/pantry` |
 | `chores` | `/api/chores` · `/api/chore-instances` · `/api/chore-proofs` |
-| `rewards` | `/api/rewards` · `/api/redemptions` · `/api/balances` · `/api/currencies` |
+| `rewards` | `/api/rewards` · `/api/redemptions` · `/api/balances` · `/api/currencies` · `/api/conversions` |
 | `meals` | `/api/recipes` · `/api/meals` |
 | `calendar` | `/api/events` |
 | `goals` | `/api/goals` · `/api/goal-lists` |
@@ -70,8 +70,8 @@ part of the grocery board and the route sits behind the `lists` module gate.
 Everything else always 403s for a key — auth and self-service account, household creation and
 invites, api-keys, `/api/kiosk` and the `/api/waffled-bites` device routes, permissions,
 powersync, capture, media, countdowns, family-night, goal-calendar, the rest of `/api/calendar`
-(Google + ICS feeds), today-layout, rhythms, currency conversions, health and updates. Writes
-under a read-only resource are refused too, so `POST /api/persons/:id/award` and
+(Google + ICS feeds), today-layout, rhythms, health and updates. Writes under a read-only
+resource are refused too, so `POST /api/persons/:id/award` and
 `/saving-toward` stay session-only even though they belong to the rewards feature. In-route
 capability **and** module checks still apply on top of the scope, so a key can never do more
 than its owner person can.
