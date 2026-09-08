@@ -290,7 +290,14 @@ describe('currency conversions answer to the rewards scope', () => {
 //
 // Adding a route family? Either give its prefix to a resource in API_SCOPES, or add
 // it here with the reason it must stay session/device-only.
-const NOT_KEY_REACHABLE: Array<{ why: string; prefixes: string[] }> = [
+//
+// `pending` marks an entry that is NOT a deliberate exclusion — it is parked, waiting
+// on other work. It changes nothing about how the entry is checked (both tests below
+// treat it exactly like any other); it only makes the "this is now stale, delete it"
+// failure say which branch of work landed.
+type NotKeyReachable = { why: string; prefixes: string[]; pending?: string }
+
+const NOT_KEY_REACHABLE: NotKeyReachable[] = [
   { why: 'public liveness probe', prefixes: ['/healthz'] },
   { why: 'echoes the token sub — tells a key nothing it does not already know', prefixes: ['/api/me'] },
   { why: 'login, OIDC, invites and self-service account are session-only', prefixes: ['/api/auth', '/auth', '/api/account', '/api/households'] },
@@ -305,8 +312,9 @@ const NOT_KEY_REACHABLE: Array<{ why: string; prefixes: string[] }> = [
   // Parked, not deliberate: /api/list-items is the same boundary bug (it is a lists
   // route that /api/lists cannot match), and PR #180 already adds its prefix to the
   // `lists` resource. Listed here only so this guard is green without duplicating
-  // that change — DELETE this entry when #180 merges.
-  { why: 'PENDING — fixed by PR #180, which gives this prefix to `lists`', prefixes: ['/api/list-items'] },
+  // that change. No TODO needed: the moment #180 gives it a scope, the staleness test
+  // below goes red and names this entry.
+  { why: 'PENDING — fixed by PR #180, which gives this prefix to `lists`', prefixes: ['/api/list-items'], pending: 'PR #180' },
   // Left alone on purpose: exposing rhythms means a whole new scope resource, not
   // another prefix, so it is being scoped as its own piece of work.
   { why: 'GAP? rhythms would need a whole new scope resource, not another prefix', prefixes: ['/api/rhythms'] },
@@ -324,5 +332,33 @@ describe('scope catalog covers the route table', () => {
       .map(([method, path]) => `${method} ${path}`)
 
     expect(orphans).toEqual([])
+  })
+
+  // The test above passes a route that has EITHER a scope OR an allowlist entry, so it
+  // cannot notice an entry that has outlived its reason: give an allowlisted path a
+  // real scope and the route drops out via `scopeForRequest` while its entry sits here
+  // forever, still claiming a key is kept out of something a key can now reach. That
+  // rot turns the allowlist from a record of deliberate exclusions into a list of
+  // possibly-false claims, so assert the other direction too — every entry must still
+  // describe something genuinely outside the catalog.
+  it('has no stale allowlist entry — every listed prefix is still unscoped', async () => {
+    const { scopeForRequest } = await import('../src/modules/api-keys/api-keys')
+    const routes = (app.routes() as string[][]).map(([method, path]) => [method, path] as const)
+    const under = (prefix: string, path: string) => path === prefix || path.startsWith(prefix + '/')
+
+    const stale = NOT_KEY_REACHABLE.flatMap((entry) =>
+      entry.prefixes
+        .filter((prefix) => routes.some(([method, path]) => under(prefix, path) && scopeForRequest(method, path)))
+        .map((prefix) =>
+          entry.pending
+            ? `${prefix}: ${entry.pending} has landed and given this a scope — DELETE its entry (and the comment above it) from NOT_KEY_REACHABLE`
+            : `${prefix}: now covered by API_SCOPES, so it is no longer excluded from anything — DELETE its entry from NOT_KEY_REACHABLE`
+        )
+    )
+
+    // Assert on the joined text, not the array: vitest collapses a long string inside
+    // an array to "expected [ Array(1) ]", which would hide the very instruction this
+    // test exists to give. As a string it prints in full.
+    expect(stale.join('\n')).toBe('')
   })
 })
