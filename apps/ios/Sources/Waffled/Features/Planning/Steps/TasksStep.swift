@@ -413,7 +413,7 @@ struct TasksStepView: View {
                 // note on the type.
                 canDelete: false,
                 onSave: { choreId, body in await model.saveFromComposer(choreId: choreId, body: body) },
-                onDelete: { _ in })
+                onDelete: { _, _ in "Deleting isn’t part of planning a week." })
 
         case let .edit(chore, owner):
             if let instance = chore.asChoreInstance(owner: owner) {
@@ -430,12 +430,11 @@ struct TasksStepView: View {
                     // initialiser.
                     canDelete: false,
                     onSave: { choreId, body in await model.saveFromComposer(choreId: choreId, body: body) },
-                    onDelete: { choreId in
-                        Task {
-                            try? await WaffledAPI().deleteChore(id: choreId)
-                            reload()
-                        }
-                    })
+                    // Main's editor now reports a failure back through onDelete, so the
+                    // signature is (id, body) async -> String?. Unreachable either way
+                    // (canDelete: false above removes the button); kept honest rather than
+                    // silently deleting from a step that does not offer it.
+                    onDelete: { _, _ in "Deleting isn’t part of planning a week." })
             }
         }
     }

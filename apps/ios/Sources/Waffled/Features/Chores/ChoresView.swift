@@ -987,6 +987,16 @@ struct ChoreEditSheet: View {
     /// The household's reward currencies, likewise snapshotted (was `sync.currencies`).
     let currencies: [WaffledAPI.Currency]
     let target: ChoresView.ChoreEditorTarget
+    /// Whether editing may also DELETE the chore. True for the Chores screen, which is
+    /// where a chore's existence is managed.
+    ///
+    /// Weekly Planning's Tasks step passes false, and the reason is worth keeping: deleting
+    /// a chore reaches far outside the week being planned, and the Meals step's shopping
+    /// trip is itself a chore on that very board which other steps resolve by id. A step
+    /// whose question is only "who is doing what this week" has no business offering to
+    /// remove the thing from existence. (The web's `ChoreModal` takes `canDelete` for the
+    /// same reason.)
+    var canDelete: Bool = true
     /// Persist the chore. Returns nil on success, else a user-facing error message
     /// (so the sheet stays open and shows why, instead of dismissing on a silent fail).
     let onSave: (String?, [String: JSONValue]) async -> String?
@@ -1019,19 +1029,25 @@ struct ChoreEditSheet: View {
     @State private var scopeAction: ChoreScopeAction?
     @FocusState private var titleFocused: Bool
 
+    /// `prefillTitle` is for a caller that already knows what the task is. Weekly Planning's
+    /// parked-note handoff turns a note somebody wrote into a task, and making them retype
+    /// their own words is what makes such a button not worth pressing. Ignored when editing
+    /// — an existing chore's title is its own.
     init(assignableMembers: [SyncedMember], currencies: [WaffledAPI.Currency],
          target: ChoresView.ChoreEditorTarget, initialDate: Date = Date(),
+         prefillTitle: String? = nil, canDelete: Bool = true,
          onSave: @escaping (String?, [String: JSONValue]) async -> String?,
          onDelete: @escaping (String, [String: JSONValue]) async -> String?) {
         self.assignableMembers = assignableMembers; self.currencies = currencies
-        self.target = target; self.onSave = onSave; self.onDelete = onDelete
+        self.target = target; self.canDelete = canDelete
+        self.onSave = onSave; self.onDelete = onDelete
         switch target {
         case let .new(pid):
             editChoreId = nil
             editInstanceId = nil
             editStatus = nil
             originalRrule = nil
-            _title = State(initialValue: ""); _emoji = State(initialValue: "")
+            _title = State(initialValue: prefillTitle ?? ""); _emoji = State(initialValue: "")
             _personId = State(initialValue: pid); _stars = State(initialValue: 1)
             _currencyKey = State(initialValue: nil)
             // Default a new chore to a one-off due on the day you're currently viewing —
@@ -1240,7 +1256,7 @@ struct ChoreEditSheet: View {
                             .padding(.horizontal, 4)
                     }
 
-                    if editing {
+                    if editing && canDelete {
                         Button {
                             if confirmDelete {
                                 if originalRrule != nil { scopeAction = .delete }
