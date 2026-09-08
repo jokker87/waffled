@@ -309,6 +309,17 @@ version, git sha, migration level, database and collation. A dump does not other
 what it is — `pg_restore`'s table of contents names the `pgmigrations` table but not its
 rows — so without it, answering "what schema is this?" means unpacking the whole file.
 
+**One backup runs at a time**, enforced by an `flock` on `backups/.lock` held for the
+whole run. The 03:00 launchd job and a "Back up now" click can land in the same second,
+and dump names are second-resolution — so without it both runs computed the same file and
+the same `.part` beside it, one unlinking the other's in-progress dump and either of them
+able to rename a half-written file onto the canonical backup name while `status` and
+`doctor` called it healthy and current. A second run **waits** rather than failing (it
+takes its own dump a moment later; a clean refusal would have to be recorded as a failed
+nightly backup and shown as one), and the dump's name is chosen *under* the lock so two
+queued runs cannot collide. `flock` rather than a pidfile because the kernel drops it when
+a process dies — a stale lock at 03:00 on a Mac nobody is sitting at is not recoverable.
+
 **Backup works with the server stopped.** If nothing is running it starts Postgres alone,
 dumps, and stops it again, leaving the machine as it found it. The alternative — refusing
 unless the stack is up — would make the nightly job silently useless on exactly the Macs

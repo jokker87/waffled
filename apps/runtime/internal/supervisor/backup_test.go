@@ -2,9 +2,11 @@ package supervisor
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -96,6 +98,79 @@ func TestRetentionKeepsEverythingWithinTheLimit(t *testing.T) {
 
 	if got := dumpsIn(t, dir); len(got) != 3 {
 		t.Errorf("%d dumps left, want all 3 — a failed backup deleted a good one: %v", len(got), got)
+	}
+}
+
+// Two backups must never run at once. The nightly launchd job and a "Back up now" click
+// can land in the same second, and the dump name is only second-resolution: without a
+// lock both runs compute the same `.part` path, one deletes the other's in-progress dump,
+// and whichever renames first promotes a half-written file to the canonical backup name
+// while status and doctor report it as healthy and current.
+func TestBackupsAreSerialised(t *testing.T) {
+	s := backupSupervisor(t)
+
+	var mu sync.Mutex
+	inside, maxInside := 0, 0
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			release, err := s.lockBackups(ctx, s.plan.Layout.Backups)
+			if err != nil {
+				t.Errorf("lockBackups: %v", err)
+				return
+			}
+			defer release()
+			mu.Lock()
+			inside++
+			if inside > maxInside {
+				maxInside = inside
+			}
+			mu.Unlock()
+			time.Sleep(150 * time.Millisecond)
+			mu.Lock()
+			inside--
+			mu.Unlock()
+		}()
+	}
+	wg.Wait()
+
+	if maxInside != 1 {
+		t.Errorf("%d backups held the lock at once, want 1", maxInside)
+	}
+}
+
+// And the lock has to be around the whole of Backup, not merely available to it. Held
+// from outside, Backup must wait rather than get as far as touching the dump files —
+// so what it reports here is the wait giving up, never the failure that comes later.
+func TestBackupWaitsForALockSomeoneElseHolds(t *testing.T) {
+	s := backupSupervisor(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	release, err := s.lockBackups(ctx, s.plan.Layout.Backups)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+
+	waitCtx, waitCancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer waitCancel()
+	_, err = s.Backup(waitCtx, BackupOptions{})
+	if err == nil {
+		t.Fatal("a second backup ran while another held the lock")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("the second backup failed with %v, want the wait for the lock to time out — "+
+			"anything else means it got past the lock", err)
+	}
+	// A backup that never started must not be recorded as one that failed: the nightly
+	// job colliding with a manual click would otherwise turn System Health red.
+	if d := backup.Describe(s.plan.Layout.Backups, false); d.LastError != "" {
+		t.Errorf("waiting for the lock was recorded as a backup failure: %q", d.LastError)
 	}
 }
 

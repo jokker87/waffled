@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/kevinpsites/waffled/apps/runtime/internal/backup"
@@ -49,10 +50,24 @@ func (s *Supervisor) Backup(ctx context.Context, opts BackupOptions) (path strin
 		return "", fmt.Errorf("create %s: %w", dir, err)
 	}
 
+	// One backup at a time, machine-wide. Taken BEFORE the failure is recorded below, so
+	// a run that only ever waited is not written down as a backup that failed — the
+	// nightly job meeting a "Back up now" click would otherwise turn System Health red
+	// for no reason.
+	release, err := s.lockBackups(ctx, dir)
+	if err != nil {
+		return "", err
+	}
+	defer release()
+
+	// The name is chosen under the lock, so two runs that queued up cannot both land on
+	// the same second-resolution filename. The same instant goes in the sidecar; `started`
+	// stays the pre-lock one, because how long the backup took includes the waiting.
+	takenAt := time.Now()
 	out := opts.Out
 	generated := out == ""
 	if generated {
-		out = filepath.Join(dir, backup.DumpName(started))
+		out = filepath.Join(dir, backup.DumpName(takenAt))
 	} else if abs, aerr := filepath.Abs(out); aerr == nil {
 		out = abs
 	}
@@ -110,7 +125,7 @@ func (s *Supervisor) Backup(ctx context.Context, opts BackupOptions) (path strin
 
 	size := fileSize(out)
 	if generated {
-		s.writeSidecar(ctx, out, db, size, started)
+		s.writeSidecar(ctx, out, db, size, takenAt)
 	}
 	s.closeBackupRun(ctx, db, runID, filepath.Base(out), size, started, nil)
 
@@ -121,6 +136,55 @@ func (s *Supervisor) Backup(ctx context.Context, opts BackupOptions) (path strin
 	s.log.Infof("backed up %s to %s (%.1f MB in %s)", db, out,
 		float64(size)/(1<<20), time.Since(started).Round(100*time.Millisecond))
 	return out, nil
+}
+
+// lockBackups takes the exclusive, machine-wide backup lock and returns the function
+// that gives it back.
+//
+// Two backups can genuinely coincide: the 03:00 launchd job and a "Back up now" click,
+// or two Macs' worth of habits in one household. Dump names are second-resolution, so
+// two runs in the same second computed the same file and the same `.part` beside it —
+// one would unlink the other's in-progress dump, and whichever renamed first could
+// promote a half-written file to the canonical backup name while `status` and `doctor`
+// reported it as healthy and current. A backup that is quietly truncated is worse than
+// no backup, because it is believed.
+//
+// flock, not a pidfile: it is held by the open file description, so the kernel releases
+// it if the process is killed — a lock that outlived a crash would need someone to
+// notice and delete it, at 03:00, on a Mac nobody is sitting at. The second run WAITS
+// rather than failing: it then takes its own dump a moment later, where a clean refusal
+// would have to be recorded as a failed nightly backup and shown as one.
+func (s *Supervisor) lockBackups(ctx context.Context, dir string) (func(), error) {
+	path := filepath.Join(dir, ".lock")
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("open the backup lock %s: %w", path, err)
+	}
+	announced := false
+	for {
+		err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if err == nil {
+			return func() {
+				// Closing releases it too; unlocking first keeps the pair explicit.
+				_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+				_ = f.Close()
+			}, nil
+		}
+		if !errors.Is(err, syscall.EWOULDBLOCK) {
+			_ = f.Close()
+			return nil, fmt.Errorf("lock %s: %w", path, err)
+		}
+		if !announced {
+			s.log.Infof("another backup is already running; waiting for it to finish")
+			announced = true
+		}
+		select {
+		case <-ctx.Done():
+			_ = f.Close()
+			return nil, fmt.Errorf("waiting for the backup already in progress: %w", ctx.Err())
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
 }
 
 // dumpTo writes the dump under a temporary name and renames it into place.
