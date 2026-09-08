@@ -13,8 +13,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"time"
+
+	"github.com/kevinpsites/waffled/apps/runtime/internal/atomicfile"
 )
 
 // Schema is bumped only for a breaking change to the file's shape. A file claiming a
@@ -81,7 +82,8 @@ func Load(path string) (*State, bool, error) {
 	return &s, true, nil
 }
 
-// Save writes runtime.json atomically and readably.
+// Save writes runtime.json atomically and readably, through atomicfile — fsynced before
+// the rename, because the ports in here are what every device in the household points at.
 func Save(path string, s *State) error {
 	if s.Schema == 0 {
 		s.Schema = Schema
@@ -92,26 +94,7 @@ func Save(path string, s *State) error {
 	}
 	raw = append(raw, '\n')
 
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".runtime.json-*")
-	if err != nil {
-		return fmt.Errorf("write %s: %w", path, err)
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
-	if _, err := tmp.Write(raw); err != nil {
-		tmp.Close()
-		return fmt.Errorf("write %s: %w", path, err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("write %s: %w", path, err)
-	}
-	if err := os.Chmod(tmpName, 0o644); err != nil {
-		return fmt.Errorf("write %s: %w", path, err)
-	}
-	if err := os.Rename(tmpName, path); err != nil {
-		return fmt.Errorf("write %s: %w", path, err)
-	}
-	return nil
+	return atomicfile.WriteFile(path, raw, 0o644)
 }
 
 func randomID() (string, error) {

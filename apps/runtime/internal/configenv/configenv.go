@@ -19,8 +19,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
+
+	"github.com/kevinpsites/waffled/apps/runtime/internal/atomicfile"
 )
 
 // The keys this binary reads or writes. Everything else in the file is passed through.
@@ -130,9 +131,9 @@ func (e *Env) All() map[string]string {
 	return out
 }
 
-// Save writes the file atomically at 0600. It rewrites via a temp file in the same
-// directory so a crash mid-write cannot leave a half-written secret store, and it
-// tightens the mode even if the existing file had been loosened.
+// Save writes the file atomically at 0600, through atomicfile: a temp file in the same
+// directory, fsynced before the rename, so neither a crash nor a power cut can leave a
+// half-written secret store. It tightens the mode even if the file had been loosened.
 func (e *Env) Save(path string) error {
 	var buf bytes.Buffer
 	for _, l := range e.lines {
@@ -145,29 +146,7 @@ func (e *Env) Save(path string) error {
 		}
 		buf.WriteByte('\n')
 	}
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, ".config.env-*")
-	if err != nil {
-		return fmt.Errorf("write %s: %w", path, err)
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName) // no-op once the rename succeeds
-	if err := tmp.Chmod(0o600); err != nil {
-		tmp.Close()
-		return fmt.Errorf("write %s: %w", path, err)
-	}
-	if _, err := tmp.Write(buf.Bytes()); err != nil {
-		tmp.Close()
-		return fmt.Errorf("write %s: %w", path, err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("write %s: %w", path, err)
-	}
-	if err := os.Rename(tmpName, path); err != nil {
-		return fmt.Errorf("write %s: %w", path, err)
-	}
-	// Rename preserves the temp file's mode, but be explicit — this file holds every secret.
-	return os.Chmod(path, 0o600)
+	return atomicfile.WriteFile(path, buf.Bytes(), 0o600)
 }
 
 // EnsureSecrets fills in any missing secret and the Postgres role/database defaults,
