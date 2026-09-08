@@ -22,24 +22,14 @@ import SwiftUI
 /// `WF.tabBarClearance` here.
 /// WHO ALREADY HAS IT — one view, both modes.
 ///
-/// Not two lookalikes: this step renders a row in the card deck AND in see-all, and this
-/// app has been bitten three times by a component copied because the original was local to
-/// one place. The wash-behind-the-avatar treatment is the Tasks board's own, so a face
-/// reads the same in a planning row as it does on the chores board.
-///
-/// `Color(hexString:)` rather than a `WF` token on purpose: this is real `persons.color_hex`
-/// data — an identity colour, not a theme surface — which is the documented exception to
-/// the never-hardcode-a-colour rule.
+/// A face and a name: who already has this loose end. Used by both row shapes this step
+/// draws — the card deck and see-all.
 struct PlanningOwnerChip: View {
     let owner: WaffledAPI.LooseEndOwner
 
     var body: some View {
         HStack(spacing: 5) {
-            Text(owner.avatarEmoji ?? "🙂")
-                .font(.system(size: 11))
-                .frame(width: 18, height: 18)
-                .background((owner.colorHex.flatMap { Color(hexString: $0) } ?? WF.ink3).opacity(0.13))
-                .clipShape(Circle())
+            Avatar(colorHex: owner.colorHex, emoji: owner.avatarEmoji ?? "🙂", size: 18)
             Text(owner.name)
                 .font(.system(size: 12, weight: .bold)).foregroundStyle(WF.ink2)
                 .lineLimit(1)

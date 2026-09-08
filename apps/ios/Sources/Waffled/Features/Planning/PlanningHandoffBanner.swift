@@ -345,9 +345,7 @@ struct PlanningHandoffBanner: View {
         _ label: String, tint: Color, filled: Bool,
         key: String, action: @escaping () -> Void
     ) -> some View {
-        // `PlanningPillButton` IS this capsule, lifted into the editor's file so the box
-        // and the editor that opens inside it cannot end up with two of them.
-        PlanningPillButton(
+        WaffledPillButton(
             label: label, tint: tint, filled: filled,
             disabled: busy, working: working == key, action: action)
     }

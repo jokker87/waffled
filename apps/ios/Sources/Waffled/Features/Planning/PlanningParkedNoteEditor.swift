@@ -27,38 +27,6 @@ struct PlanningParkedTag: Identifiable, Equatable, Sendable {
     var id: String { stepKey }
 }
 
-/// The planning session's inline capsule answer — "Make a task", "Drop it", "Save".
-///
-/// Extracted from `PlanningHandoffBanner`'s own `answerButton`, which is now this: the
-/// gold box and the note editor sit inside one another and a second, subtly different
-/// capsule between them would be visible from across the room. `.buttonStyle(.plain)` and
-/// an explicit foreground on purpose — the default style dims and re-tints its label while
-/// pressed, which reads as the control changing state.
-struct PlanningPillButton: View {
-    let label: String
-    var tint: Color = WF.primary
-    var filled: Bool = false
-    var disabled: Bool = false
-    /// Dimmed while this row's own write is in flight, rather than merely disabled.
-    var working: Bool = false
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Text(label)
-                .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(filled ? .white : tint)
-                .padding(.horizontal, 13).padding(.vertical, 7)
-                .background(filled ? tint : WF.card)
-                .overlay(Capsule().strokeBorder(filled ? .clear : WF.hair, lineWidth: 1))
-                .clipShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .disabled(disabled || working)
-        .opacity(working ? 0.5 : 1)
-    }
-}
-
 /// A tag chip — the park bar's, and now the editor's.
 ///
 /// `.buttonStyle(.plain)` and an explicit foreground for the same reason as above: a
@@ -165,10 +133,10 @@ struct PlanningParkedNoteEditor: View {
             }
 
             HStack(spacing: 8) {
-                PlanningPillButton(
+                WaffledPillButton(
                     label: "Save", filled: true,
                     disabled: disabled || trimmed.isEmpty, working: saving, action: save)
-                PlanningPillButton(label: "Cancel", tint: WF.ink2, disabled: saving) {
+                WaffledPillButton(label: "Cancel", tint: WF.ink2, disabled: saving) {
                     focused = false
                     onCancel()
                 }

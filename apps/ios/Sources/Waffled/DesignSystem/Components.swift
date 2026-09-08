@@ -107,6 +107,37 @@ struct Avatar: View {
     }
 }
 
+/// A small capsule button — an inline answer next to the thing it answers ("Make a task",
+/// "Drop it", "Save"). `filled` makes it the affirmative of a pair.
+///
+/// `.buttonStyle(.plain)` with an explicit foreground: the default style dims and re-tints
+/// its label while pressed, which reads as the control changing state rather than being
+/// touched.
+struct WaffledPillButton: View {
+    let label: String
+    var tint: Color = WF.primary
+    var filled: Bool = false
+    var disabled: Bool = false
+    /// Dimmed while this row's own write is in flight, rather than merely disabled.
+    var working: Bool = false
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(label)
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(filled ? .white : tint)
+                .padding(.horizontal, 13).padding(.vertical, 7)
+                .background(filled ? tint : WF.card)
+                .overlay(Capsule().strokeBorder(filled ? .clear : WF.hair, lineWidth: 1))
+                .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled || working)
+        .opacity(working ? 0.5 : 1)
+    }
+}
+
 /// A centered loading spinner with the standard Waffled tint + breathing room. Use this
 /// for the first-load state of any list screen so the spinner sits consistently across
 /// the app instead of each screen picking its own padding.
