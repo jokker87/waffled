@@ -476,30 +476,52 @@ func (s *Supervisor) snapshotBeforeMigrate(ctx context.Context) (string, error) 
 
 // rollbackTo restores a snapshot after a migration left the api unable to start.
 //
-// It stops the api first: it may be running but failing its health check, and restoring
-// under a live connection pool would fight it for the database.
+// It clears the database's writers first, in reverse dependency order. The api may be
+// running but failing its health check, and restoring under a live connection pool would
+// fight it for the database.
+//
+// PowerSync is stopped too, and it is not a formality. On this path it is normally not
+// running — the start sequence reaches it only after the api's health gate, the gate
+// whose failure brought us here — but a PowerSync left behind by a supervisor that died
+// IS running, holding an active logical replication slot, and startChild's orphan reap is
+// downstream of the gate so it never fires in time. An active slot cannot be dropped, and
+// a rollback that cannot drop it leaves the household on the migrated schema their build
+// cannot serve, holding an unused snapshot. Killing the process first also stops it
+// racing us: terminating its backend while it is alive only has it reconnect and take the
+// slot again.
 func (s *Supervisor) rollbackTo(ctx context.Context, snapshot string) error {
 	s.log.Warnf("the api did not come up after migrating; rolling back to %s", snapshot)
 
-	s.mu.Lock()
-	c := s.children[services.API]
-	s.mu.Unlock()
-	if c != nil {
-		if err := c.stop(stopGrace); err != nil {
-			s.log.Warnf("could not stop the api before rolling back: %v", err)
-		}
-		s.mu.Lock()
-		delete(s.children, services.API)
-		s.mu.Unlock()
-	} else if s.serviceRunning(services.API) {
-		_ = s.stopOrphan(services.API)
-	}
+	s.stopService(services.PowerSync)
+	s.stopService(services.API)
 
 	if err := s.replaceDatabase(ctx, snapshot); err != nil {
 		return err
 	}
 	s.log.Infof("rolled back to %s", snapshot)
 	return nil
+}
+
+// stopService stops one service whether this process started it or a previous one did.
+// The two cases look different — a child we hold, versus a pid in a pidfile — and the
+// caller of a rollback cannot know which it has.
+func (s *Supervisor) stopService(name string) {
+	s.mu.Lock()
+	c := s.children[name]
+	s.mu.Unlock()
+	if c != nil {
+		if err := c.stop(stopGrace); err != nil {
+			s.log.Warnf("could not stop %s before rolling back: %v", name, err)
+		}
+		s.mu.Lock()
+		delete(s.children, name)
+		s.mu.Unlock()
+		return
+	}
+	if s.serviceRunning(name) {
+		s.log.Infof("stopping %s (started by a previous run)", name)
+		_ = s.stopOrphan(name)
+	}
 }
 
 // ── restore ─────────────────────────────────────────────────────────────────────────
@@ -676,8 +698,7 @@ func (s *Supervisor) restorePlain(ctx context.Context, db, file string) error {
 	return nil
 }
 
-// dropReplicationSlots removes every logical slot on a database. They are inactive by
-// now — PowerSync is stopped — and pg_drop_replication_slot refuses an active one.
+// dropReplicationSlots removes every logical slot on a database.
 func (s *Supervisor) dropReplicationSlots(ctx context.Context, db string) error {
 	out, err := s.QueryScalar(ctx, "postgres",
 		"select slot_name from pg_replication_slots where database = "+quoteLiteral(db))
@@ -689,12 +710,56 @@ func (s *Supervisor) dropReplicationSlots(ctx context.Context, db string) error 
 			continue
 		}
 		s.log.Infof("dropping replication slot %s so PowerSync rebuilds from the restored data", name)
-		if _, err := s.QueryScalar(ctx, "postgres",
-			"select pg_drop_replication_slot("+quoteLiteral(name)+")"); err != nil {
-			return fmt.Errorf("drop the replication slot %s: %w", name, err)
+		if err := s.dropReplicationSlot(ctx, name); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+// dropReplicationSlot disconnects whatever still holds one slot and drops it, retrying
+// while the walsender lets go.
+//
+// pg_drop_replication_slot refuses an ACTIVE slot outright, and the caller cannot assume
+// there is nobody on it: a PowerSync orphaned by a supervisor that died is still
+// streaming. The callers stop that process first, but stopping it is asynchronous —
+// pg_terminate_backend only asks a backend to exit and returns before it has, exactly as
+// dropDatabase below documents for DROP DATABASE, so the same shape applies. Anything
+// that is not the slot being busy fails at once; retrying it would not help.
+func (s *Supervisor) dropReplicationSlot(ctx context.Context, name string) error {
+	const attempts = 20
+	var lastOut string
+	var lastErr error
+	for i := 0; i < attempts; i++ {
+		// Re-asked every time: a walsender can reconnect between the terminate and the
+		// drop, which is the normal case while a process is still shutting down.
+		if _, err := s.QueryScalar(ctx, "postgres",
+			"select pg_terminate_backend(active_pid) from pg_replication_slots where slot_name = "+
+				quoteLiteral(name)+" and active"); err != nil {
+			s.log.Warnf("could not disconnect the holder of the replication slot %s: %v", name, err)
+		}
+		out, err := s.runOneShot(ctx,
+			s.plan.PsqlCommand("postgres", "select pg_drop_replication_slot("+quoteLiteral(name)+")"),
+			time.Minute)
+		if err == nil {
+			return nil
+		}
+		lastOut, lastErr = out, err
+		// Someone else dropped it — a restore racing a rollback, or PowerSync tidying up
+		// on its way out. The slot is gone, which is all this asked for.
+		if strings.Contains(out, "does not exist") {
+			return nil
+		}
+		if !strings.Contains(out, "is active") {
+			break // a different failure; retrying will not help
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
+	return fmt.Errorf("drop the replication slot %s: %w\n%s", name, lastErr, tail(lastOut, 10))
 }
 
 // dropDatabase terminates whatever is still connected and drops it, retrying while

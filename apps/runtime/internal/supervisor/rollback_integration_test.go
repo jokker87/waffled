@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/kevinpsites/waffled/apps/runtime/internal/backup"
+	"github.com/kevinpsites/waffled/apps/runtime/internal/services"
 )
 
 func integrationSupervisor(t *testing.T) (*Supervisor, string) {
@@ -263,6 +264,121 @@ func TestBackupWorksWithTheServerStopped(t *testing.T) {
 	}
 	if side.Collation == "" {
 		t.Error("the sidecar records no collation, which is what a cross-machine restore needs")
+	}
+}
+
+// TestRollbackSurvivesAnOrphanPowerSyncHoldingTheSlot covers the state a rollback is most
+// likely to meet in the wild and least likely to be tested against: a PowerSync left
+// running by a supervisor that died, holding an ACTIVE logical replication slot.
+//
+// The order of the start sequence is what makes it reachable. PowerSync is adopted (and
+// so reaped) inside startChild — but that runs AFTER the api's health gate, which is the
+// gate whose failure triggers the rollback. So on the path that matters PowerSync has
+// never been touched, its slot is active, and pg_drop_replication_slot refuses an active
+// slot outright. Failing here is the worst outcome the whole snapshot mechanism has: a
+// household left on a migrated schema their build cannot serve, holding a rollback point
+// that was not used.
+//
+// A second Supervisor over the same data directory is exactly what that crash looks like:
+// the processes are running, and nothing in this process owns them.
+func TestRollbackSurvivesAnOrphanPowerSyncHoldingTheSlot(t *testing.T) {
+	s, data := integrationSupervisor(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	defer cancel()
+	t.Cleanup(func() {
+		stopCtx, c := context.WithTimeout(context.Background(), 3*time.Minute)
+		defer c()
+		_ = s.Stop(stopCtx)
+	})
+
+	if err := s.Start(ctx); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	db := s.plan.Env.PostgresDB()
+
+	// The premise: PowerSync is replicating, so the slot is genuinely active. Without
+	// this the test would pass for the wrong reason.
+	slot := waitForActiveSlot(t, ctx, s, db)
+	t.Logf("PowerSync holds replication slot %s, active", slot)
+
+	// Something to roll back to. Any dump does — this is about what rollbackTo has to get
+	// past, not about what it restores, which the test above already pins.
+	snapshot, err := s.Backup(ctx, BackupOptions{})
+	if err != nil {
+		t.Fatalf("take the dump to roll back to: %v", err)
+	}
+
+	// The crash itself: this supervisor stops watching what it started. The processes stay
+	// up and their pidfiles stay behind, which is all a dead supervisor leaves. Without
+	// this the test's own first supervisor would fight the second one, restarting the api
+	// and PowerSync the moment the rollback stopped them — something no crashed process
+	// does, and it would make the result a race rather than an answer.
+	abandonChildren(s)
+
+	s2, err := New(Options{BundleDir: s.plan.Bundle, DataDir: data, Log: NewLogger(&tw{t}, false)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s2.rollbackTo(ctx, snapshot); err != nil {
+		t.Fatalf("the rollback failed with an orphan PowerSync holding the slot — this is the "+
+			"household left on a schema their build cannot serve: %v", err)
+	}
+
+	// It must have succeeded for the right reason. If PowerSync were still alive it would
+	// reconnect and re-take the slot, and a pass here would be a race that happened to
+	// land the right way this time.
+	if s2.serviceRunning(services.PowerSync) {
+		t.Error("PowerSync is still running after the rollback, so the slot it holds can come back")
+	}
+	left, err := s2.QueryScalar(ctx, "postgres",
+		"select count(*) from pg_replication_slots where database = "+quoteLiteral(db))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(left) != "0" {
+		t.Errorf("%s replication slot(s) survived the rollback; PowerSync would resume from a "+
+			"WAL position that no longer describes this database", strings.TrimSpace(left))
+	}
+}
+
+// abandonChildren disarms restart supervision without touching the processes: the
+// children keep running, their pidfiles stay, and nothing is watching them any more.
+// That is precisely the state a supervisor that was killed leaves behind, and the only
+// way to reach it from inside one process.
+func abandonChildren(s *Supervisor) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, c := range s.children {
+		c.mu.Lock()
+		c.stopping = true
+		c.mu.Unlock()
+	}
+}
+
+// waitForActiveSlot blocks until PowerSync has an active logical slot on db, and returns
+// its name. PowerSync creates it a moment after its health gate opens, so the wait is
+// about start-up timing rather than flakiness — never finding one means the test's premise
+// is gone and it would otherwise prove nothing.
+func waitForActiveSlot(t *testing.T, ctx context.Context, s *Supervisor, db string) string {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Minute)
+	for {
+		out, err := s.QueryScalar(ctx, "postgres",
+			"select slot_name from pg_replication_slots where database = "+quoteLiteral(db)+" and active")
+		if err == nil {
+			if name := strings.TrimSpace(out); name != "" {
+				return strings.Split(name, "\n")[0]
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("PowerSync never took an active replication slot; this test needs one to " +
+				"be testing anything")
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-time.After(time.Second):
+		}
 	}
 }
 

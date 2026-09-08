@@ -363,7 +363,13 @@ a database can legitimately hold a later migration while an earlier one is still
 If any are, it dumps to `backups/pre-migrate-<version>-<stamp>.dump` first.
 
 If the api then fails its health gate, that snapshot is **restored automatically** and
-the start fails, naming the file. A first run takes no snapshot: there is nothing yet to
+the start fails, naming the file. The rollback stops **PowerSync as well as the api**
+before it touches the database. PowerSync has normally not been started at that point —
+the start sequence reaches it only after the gate that just failed — but one left behind
+by a supervisor that died is still streaming, and an *active* replication slot cannot be
+dropped, so the rollback would fail exactly where it matters most. Dropping a slot also
+terminates whatever holds it and retries while the walsender lets go, the same shape
+`DROP DATABASE` already needed. A first run takes no snapshot: there is nothing yet to
 lose. A snapshot that *cannot* be taken stops the start, matching `run_pre_upgrade_backup`
 in the repo-root `waffled` script — going through a schema change with no way back and
 finding out afterwards is the failure this exists to prevent.
