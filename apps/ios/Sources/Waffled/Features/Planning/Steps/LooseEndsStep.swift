@@ -23,9 +23,17 @@ import SwiftUI
 struct LooseEndsStepView: View {
     let props: PlanningStepProps
 
+    /// Who is running the session — for the lists chooser's gate. The viewer's own
+    /// capabilities, read the same way every other gated control in this app reads them,
+    /// so there is one answer to "may I" rather than a flag on the payload as well.
+    @Environment(SyncManager.self) private var sync
+
     @State private var model = PlanningLooseEndsModel()
     @State private var group: LooseEndGroup = .notDone
     @State private var seeAll = false
+    @State private var chooser = false
+    /// The list whose switch is mid-write, so only that row dims.
+    @State private var ruling: String?
     @State private var note = ""
     @FocusState private var noteFocused: Bool
 
@@ -44,6 +52,13 @@ struct LooseEndsStepView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            // WHICH LISTS THIS STEP ASKS ABOUT. Under the note rather than in the bar:
+            // the bar already carries the group switch and "See all", and a third control
+            // on a phone-width row is how this screen ended up "taking up 50% of the
+            // screen" the first time. Only under "not done" — the parked board has no
+            // lists behind it — and only for somebody who may make the choice.
+            if showChooser { listsButton }
+
             if let message = model.errorMessage {
                 DismissibleErrorBanner(message: message) { model.clearError() }
             }
@@ -55,6 +70,7 @@ struct LooseEndsStepView: View {
             // In card mode the capture bar belongs to group B's deck, so it shows with it.
             if group == .parked && !seeAll { captureBar }
         }
+        .sheet(isPresented: $chooser) { listsSheet }
         // One key for both: a new session or a new week is a different set of loose ends.
         .task(id: "\(props.sessionId)|\(props.weekStart)") {
             model.resetForWeek()
@@ -124,6 +140,97 @@ struct LooseEndsStepView: View {
                 .font(.system(size: 13, weight: .bold))
                 .foregroundStyle(WF.ai)
                 .buttonStyle(.plain)
+        }
+    }
+
+    // MARK: - Which lists this step asks about
+
+    /// Absent entirely rather than disabled: a control that opens an empty sheet, or one
+    /// that refuses on save, is worse than no control.
+    ///
+    /// `planning.manage` is adult-by-default and NOT admin — "any adult can run weekly
+    /// planning and choose what lists should matter vs not" — so the person driving the
+    /// session on a Sunday evening can do this without going to Settings, which is
+    /// admin-only and on the other side of the app.
+    private var showChooser: Bool {
+        sync.can("planning.manage")
+            && !model.listCandidates.isEmpty
+            && (seeAll || group == .notDone)
+    }
+
+    private var listsButton: some View {
+        Button {
+            chooser = true
+        } label: {
+            HStack(spacing: 6) {
+                Text("Which lists?").font(.system(size: 13, weight: .bold))
+                Text(listsSummary).font(.system(size: 12, weight: .semibold)).foregroundStyle(WF.ink3)
+            }
+            .foregroundStyle(WF.ai)
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// "2 of 3" — said here rather than in the sheet, because the whole point of the line
+    /// is to tell you something is being left out before you open anything.
+    private var listsSummary: String {
+        let all = model.listCandidates
+        let on = all.filter(\.relevant).count
+        return on == all.count ? "asking about all \(all.count)" : "asking about \(on) of \(all.count)"
+    }
+
+    private var listsSheet: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    Text("This step asks about anything still unchecked from before this week. Turn off a list that’s meant to stay open — a someday list, a wishlist — and it stops coming up every session. Your grocery list is never asked about: it rebuilds itself from the meal plan.")
+                        .font(.system(size: 12.5)).foregroundStyle(WF.ink3)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    WaffledCard(padding: 4) {
+                        VStack(spacing: 0) {
+                            ForEach(Array(model.listCandidates.enumerated()), id: \.element.id) { i, list in
+                                if i > 0 { Divider().background(WF.hair) }
+                                HStack(spacing: 11) {
+                                    Text([list.emoji, list.name].compactMap { $0 }.joined(separator: " "))
+                                        .font(.system(size: 15, weight: .semibold)).foregroundStyle(WF.ink)
+                                    Spacer(minLength: 8)
+                                    Toggle("", isOn: Binding(
+                                        get: { list.relevant },
+                                        set: { on in rule(list.id, on) }))
+                                        .labelsHidden().tint(WF.primary)
+                                        .disabled(disabled || ruling != nil)
+                                        .accessibilityLabel("Ask about \(list.name) in the weekly planning session")
+                                }
+                                .padding(.horizontal, 11).padding(.vertical, 11)
+                                .opacity(ruling == list.id ? 0.5 : 1)
+                            }
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(16)
+            }
+            .background(WF.canvas)
+            .navigationTitle("Lists it asks about")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { chooser = false }.font(.system(size: 15, weight: .bold))
+                }
+            }
+        }
+    }
+
+    /// The write, then the step's own re-read — a list ruled out takes its cards out of
+    /// the deck with it, and which cards those were is the server's answer.
+    private func rule(_ id: String, _ on: Bool) {
+        guard ruling == nil else { return }
+        ruling = id
+        Task {
+            _ = await model.ruleList(
+                id, relevant: on, weekStart: props.weekStart, sessionId: props.sessionId)
+            ruling = nil
         }
     }
 

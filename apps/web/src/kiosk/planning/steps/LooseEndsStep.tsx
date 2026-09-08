@@ -11,6 +11,9 @@ import {
   type LooseEndGroup,
   type LooseEndRoute,
   type LooseEndsView,
+  useHousehold,
+  can,
+  weeklyPlanningApi,
 } from '../../../lib/api'
 import type { PlanningStepModule, StepBodyProps } from '../registry'
 import '../../../styles/planning-looseEnds.css'
@@ -111,6 +114,13 @@ function Deck({ item, choices, quiet, busy }: {
 }
 
 function Body({ step, sessionId, weekStart, setDecisionData, busy }: StepBodyProps) {
+  // WHO IS RUNNING THE SESSION, for the lists chooser below. Read the same way the Tasks
+  // step reads `chore.manage` — the viewer's own capabilities, not a flag on the payload,
+  // so there is one answer to "may I" in this app rather than two.
+  const { person } = useHousehold()
+  const canRuleLists = can(person, 'planning.manage')
+  const [chooser, setChooser] = useState(false)
+  const [ruling, setRuling] = useState<string | null>(null)
   const [view, setView] = useState<LooseEndsView | null>(null)
   const [loading, setLoading] = useState(true)
   const [group, setGroup] = useState<LooseEndGroup>('notDone')
@@ -302,6 +312,69 @@ function Body({ step, sessionId, weekStart, setDecisionData, busy }: StepBodyPro
   // "See all" — the screen that reads as the fuller one — the single place you could
   // not drop a note. In see-all it sits inside the Parked section rather than at the
   // foot of the screen, so what it adds to is never in question.
+  // WHICH LISTS THIS STEP ASKS ABOUT.
+  //
+  // The friction is right here: you are looking at the fourth week of "Learn the banjo"
+  // off a someday list. Sending somebody to Settings → Modules to silence it is the
+  // ejection this module exists to avoid — and that panel is admin-only, which whoever
+  // sat down to run the session on a Sunday evening may well not be. `planning.manage`
+  // (adult by default) is the gate instead.
+  //
+  // Sparse on the wire: only the switch that moved. The server merges, so sending the
+  // whole map would rule lists back in behind another device's back. Then the step
+  // RE-READS rather than guessing which cards would have gone — the deck is the server's
+  // answer, and a list ruled out mid-session takes its cards with it.
+  const candidates = view?.lists ?? []
+  const showChooser = canRuleLists && candidates.length > 0
+  const ruleList = async (id: string, on: boolean) => {
+    if (ruling || busy) return
+    setRuling(id)
+    try {
+      await weeklyPlanningApi.setConfig({ lists: { [id]: on } })
+      await load()
+    } catch {
+      setError('Couldn’t save that just now.')
+    } finally {
+      setRuling(null)
+    }
+  }
+
+  const listChooser = (
+    <div className="modal-overlay" onClick={() => setChooser(false)}>
+      <div className="modal wp-le-lists" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Lists it asks about">
+        <div className="wp-le-lists-t wf-serif">Lists it asks about</div>
+        <div className="wp-le-lists-s">
+          This step asks about anything still unchecked from before this week. Turn off a list
+          that’s meant to stay open — a someday list, a wishlist — and it stops coming up every
+          session. Your grocery list is never asked about: it rebuilds itself from the meal plan.
+        </div>
+        {candidates.map((l) => {
+          const on = l.relevant
+          return (
+            <button
+              key={l.id}
+              type="button"
+              className="wp-le-lists-row"
+              disabled={busy || ruling !== null}
+              onClick={() => ruleList(l.id, !on)}
+            >
+              <span className="wp-le-lists-n">{[l.emoji, l.name].filter(Boolean).join(' ')}</span>
+              <span
+                className={`toggle ${on ? 'on' : ''}`}
+                role="switch"
+                aria-checked={on}
+                aria-label={`Ask about ${l.name} in the weekly planning session`}
+              />
+            </button>
+          )
+        })}
+        <button type="button" className="btn btn-primary wp-le-lists-done" onClick={() => setChooser(false)}>
+          Done
+        </button>
+      </div>
+    </div>
+  )
+
   const captureBar = (
     <form className="wp-le-capture" onSubmit={park}>
       <span className="wp-le-capture-p" aria-hidden>＋</span>
@@ -352,6 +425,14 @@ function Body({ step, sessionId, weekStart, setDecisionData, busy }: StepBodyPro
         <button type="button" className="wp-le-seeall" aria-pressed={seeAll} onClick={() => setSeeAll((v) => !v)}>
           {seeAll ? 'One at a time' : 'See all'}
         </button>
+        {/* Absent entirely for someone who may not make the choice, and for a household
+            with nothing to choose between — rather than a control that opens an empty
+            sheet or refuses on save. */}
+        {showChooser && (
+          <button type="button" className="wp-le-lists-open" onClick={() => setChooser(true)}>
+            Which lists?
+          </button>
+        )}
       </div>
 
       {/* The switch is the entire explanation of the two kinds, so the note goes with
@@ -480,6 +561,7 @@ function Body({ step, sessionId, weekStart, setDecisionData, busy }: StepBodyPro
 
       {/* In card mode it belongs to group B's deck, so it shows with it. */}
       {group === 'parked' && !seeAll && captureBar}
+      {chooser && showChooser && listChooser}
     </div>
   )
 }

@@ -132,6 +132,27 @@ extension WaffledAPI {
         /// the cleared state's "We checked your …" line — so it never claims to have
         /// checked a module that is off.
         let sources: [String]
+        /// The lists this step COULD ask about, with how each currently stands — the
+        /// chooser in the step renders off this rather than fetching the config as well.
+        /// The server derives `sources` above from the same value, so the two cannot
+        /// disagree. OPTIONAL because a server predating the setting sends no key.
+        let lists: [PlanningListCandidate]?
+
+        init(
+            weekStart: String, notDone: [LooseEnd], parked: [LooseEnd],
+            counts: LooseEndCounts, destinations: LooseEndDestinations,
+            routes: [LooseEndRoute], sources: [String],
+            lists: [PlanningListCandidate]? = nil
+        ) {
+            self.weekStart = weekStart
+            self.notDone = notDone
+            self.parked = parked
+            self.counts = counts
+            self.destinations = destinations
+            self.routes = routes
+            self.sources = sources
+            self.lists = lists
+        }
     }
 
     /// FOUR fields, not one. (The web client under-types this as `{ ok }`.)

@@ -74,6 +74,19 @@ export interface LooseEndRoute {
   to: string
 }
 
+/**
+ * A list the loose-ends step could ask about. Grocery (it rebuilds itself from the meal
+ * plan) and templates (unchecked by design) are never candidates, so a chooser rendering
+ * these cannot offer a switch that does nothing.
+ */
+export interface PlanningListCandidate {
+  id: string
+  name: string
+  emoji: string | null
+  /** How it currently stands — false only when the household has ruled it out. */
+  relevant: boolean
+}
+
 export interface LooseEndsView {
   weekStart: string
   notDone: LooseEnd[]
@@ -88,6 +101,13 @@ export interface LooseEndsView {
   // Friendly names of the modules actually read, for the cleared state's "we
   // checked…" line — so it never claims to have checked a module that is off.
   sources: string[]
+  /**
+   * The lists this step COULD ask about (the `list_type = 'custom'` allowlist, resolved
+   * server-side) with how each currently stands. The chooser in the step renders off
+   * this, and `sources` above is derived from the same value, so the two cannot disagree.
+   * Optional only for a server that predates it.
+   */
+  lists?: PlanningListCandidate[]
 }
 
 // What each group is called on screen, plus the two lengths of explanation it needs.

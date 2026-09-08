@@ -68,6 +68,8 @@ interface LooseEndsPayload {
   destinations: { notDone: Destination[]; parked: Destination[] }
   routes: Route[]
   sources: string[]
+  // The lists this step could ask about, with how each currently stands.
+  lists?: { id: string; name: string; emoji: string | null; relevant: boolean }[]
 }
 
 const read = async (qs = ''): Promise<LooseEndsPayload> =>
@@ -607,6 +609,25 @@ describe('loose ends · which lists the household wants asked about', () => {
     expect(view.sources).not.toContain('lists')
     // The other three are unaffected — they were never part of this.
     expect(view.sources).toEqual(['chores', 'rhythms', 'goals'])
+  })
+
+  // The STEP gets them too, on its own read. The chooser lives in the step now — "we want
+  // the lists election to be in the weekly planning loose ends step" — and a step that had
+  // to fetch the config as well would be two reads describing one thing, free to disagree.
+  // Same server-side helper as the config read, so they cannot.
+  it('rides along with the step’s own read, so the step needn’t ask twice', async () => {
+    const view = await read()
+    const names = (view.lists ?? []).map((l) => l.name)
+    expect(names).toContain('Someday')
+    expect(names).not.toContain('Grocery')
+    // And it agrees with the sources line computed off the same value.
+    expect(view.sources).toContain('lists')
+  })
+
+  it('reports a ruled-out list to the step as ruled out', async () => {
+    await setLists({ [mutedId]: false })
+    const row = ((await read()).lists ?? []).find((l) => l.id === mutedId)
+    expect(row?.relevant).toBe(false)
   })
 
   it('offers the lists it could ask about, and no list it would never have asked about', async () => {

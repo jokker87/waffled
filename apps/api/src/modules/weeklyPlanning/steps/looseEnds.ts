@@ -117,6 +117,11 @@ export interface LooseEndsView {
   // line. Reflects the household's toggles, so it never claims to have checked a
   // module that is off.
   sources: string[]
+  // The lists this step COULD ask about, with how each currently stands — so the chooser
+  // in the step renders off the step's own read rather than fetching the config as well.
+  // Same helper the config read uses, so the two cannot disagree, and the same value
+  // `sources` is derived from below.
+  lists: PlanningListCandidate[]
 }
 
 // A defensive ceiling per source. The step is a deck with a see-all escape hatch, so
@@ -843,6 +848,7 @@ export async function getLooseEnds(householdId: string, weekStart: string, sessi
       .filter(([k]) => enabled(settings, k)
         && (k !== 'lists' || listCandidates.length === 0 || askableLists.length > 0))
       .map(([, label]) => label),
+    lists: listCandidates,
   }
 }
 

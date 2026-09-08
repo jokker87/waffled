@@ -1,6 +1,8 @@
 // Weekly Planning — HTTP routes (/api/weekly-planning). Logic in weeklyPlanning.ts.
 import createAPI, { type Request, type Response } from 'lambda-api'
 import { moduleRoutes } from '../../platform/route-guards'
+import { requireAdmin } from '../households/households'
+import { requireCapability } from '../../platform/permissions'
 import {
   getView,
   getConfig,
@@ -23,6 +25,11 @@ type Api = ReturnType<typeof createAPI>
 
 // Every route here is gated by the optional `weeklyPlanning` module (403 when off).
 const { tenantRoute, adminRoute } = moduleRoutes('weeklyPlanning')
+
+// Which config fields are the household's SHAPE of the session — admin-only — and which
+// are choices the session itself offers whoever is running it. Named here rather than
+// inline so the split is one list to read, and so a field added later has to pick a side.
+const ADMIN_FIELDS = ['dayOfWeek', 'time', 'showOnToday', 'steps'] as const
 
 export function registerWeeklyPlanningRoutes(api: Api): void {
   // Each step's own reads live in their own file and are registered here as a list, so
@@ -50,10 +57,18 @@ export function registerWeeklyPlanningRoutes(api: Api): void {
     return { config, steps: STEPS, lists }
   }))
 
-  // When the session happens, which steps this household runs. Admin-only, like the
-  // other module configs.
-  api.put('/api/weekly-planning/config', adminRoute(async (tenant, req: Request) => {
+  // When the session happens and which steps run — admin, like the other module configs.
+  // WHICH LISTS THE FIRST STEP ASKS ABOUT IS NOT: it is a choice the session offers, and
+  // "any adult can run weekly planning and choose what lists should matter vs not", so it
+  // takes `planning.manage` (adult by default) instead. One route and one merge, two
+  // gates — this is the hand-written carve-out shape route-guards.ts documents.
+  //
+  // A MIXED BODY IS REFUSED WHOLE. Applying the half the caller is allowed and dropping
+  // the rest would report success for a save that half happened.
+  api.put('/api/weekly-planning/config', tenantRoute(async (tenant, req: Request) => {
     const body = (req.body ?? {}) as Partial<WeeklyPlanningConfig>
+    if (ADMIN_FIELDS.some((f) => f in body)) requireAdmin(tenant)
+    if (body.lists && typeof body.lists === 'object') await requireCapability(tenant, 'planning.manage')
     const patch: Partial<WeeklyPlanningConfig> = {}
     if (typeof body.dayOfWeek === 'number') patch.dayOfWeek = body.dayOfWeek
     // A bad time is dropped rather than 400'd — the rest of the patch is still honest.

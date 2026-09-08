@@ -135,6 +135,98 @@ describe('weekly planning · config', () => {
   })
 })
 
+// WHO MAY RULE A LIST IN OR OUT.
+//
+// "it shouldn't be admin gated, maybe adult gated but any adult can run weekly planning
+// and choose what lists should matter vs not." Which is right: running the session is not
+// an admin act, and the person driving it on a Sunday evening is whoever sat down.
+//
+// So `lists` is gated by a CAPABILITY (`planning.manage`, adult-by-default) while the rest
+// of the config — when the session happens, which steps run — stays admin-only. Same
+// route, two gates, because it is one settings object and one merge.
+describe('weekly planning · who may rule a list in or out', () => {
+  let adultT = ''
+  let kidT = ''
+  let listId = ''
+
+  const put = (token: string, body: unknown) => call('PUT', '/api/weekly-planning/config', token, body)
+  const config = async () => JSON.parse((await call('GET', '/api/weekly-planning/config', kevin)).body)
+
+  beforeAll(async () => {
+    const { query } = await import('../src/platform/db')
+    const member = async (name: string, memberType: string, sub: string) => {
+      const p = await query<{ id: string }>(
+        `insert into persons (household_id, name, member_type, is_admin) values ($1,$2,$3,false) returning id`,
+        [householdId, name, memberType]
+      )
+      await query(
+        `insert into identities (household_id, person_id, provider, auth0_user_id, email_verified) values ($1,$2,'password',$3,true)`,
+        [householdId, p.rows[0].id, sub]
+      )
+      return mint(sub)
+    }
+    adultT = await member('Elaine', 'adult', 'dev|elaine')
+    kidT = await member('Wally', 'kid', 'dev|wally')
+    const l = await query<{ id: string }>(
+      `insert into lists (household_id, name, list_type) values ($1,'Someday','custom') returning id`,
+      [householdId]
+    )
+    listId = l.rows[0].id
+  })
+
+  it('lets an adult who is not an admin rule a list out', async () => {
+    const r = await put(adultT, { lists: { [listId]: false } })
+    expect(r.statusCode).toBe(200)
+    expect((await config()).config.lists[listId]).toBe(false)
+    // …and back in, because a one-way switch is a trap.
+    expect((await put(adultT, { lists: { [listId]: true } })).statusCode).toBe(200)
+    expect((await config()).config.lists[listId]).toBe(true)
+  })
+
+  it('refuses a kid — this is a household decision, not a personal one', async () => {
+    expect((await put(kidT, { lists: { [listId]: false } })).statusCode).toBe(403)
+    expect((await config()).config.lists[listId]).toBe(true)
+  })
+
+  it('still keeps the session schedule and the step list admin-only', async () => {
+    expect((await put(adultT, { dayOfWeek: 3 })).statusCode).toBe(403)
+    expect((await put(adultT, { steps: { calendar: false } })).statusCode).toBe(403)
+    const c = (await config()).config
+    expect(c.dayOfWeek).not.toBe(3)
+    expect(c.steps.calendar).toBeUndefined()
+  })
+
+  // A body that mixes the two is refused WHOLE. Applying the half they are allowed and
+  // dropping the rest would be a silent lie about what was saved.
+  it('refuses a mixed body outright rather than applying half of it', async () => {
+    const before = (await config()).config
+    const r = await put(adultT, { lists: { [listId]: false }, dayOfWeek: 4 })
+    expect(r.statusCode).toBe(403)
+    const after = (await config()).config
+    expect(after.lists[listId]).toBe(true)
+    expect(after.dayOfWeek).toBe(before.dayOfWeek)
+  })
+
+  it('lets an admin do both in one write, as before', async () => {
+    const r = await put(kevin, { lists: { [listId]: false }, dayOfWeek: 2 })
+    expect(r.statusCode).toBe(200)
+    const c = (await config()).config
+    expect(c.lists[listId]).toBe(false)
+    expect(c.dayOfWeek).toBe(2)
+    // Put the household back for the tests after this one.
+    await put(kevin, { lists: { [listId]: true }, dayOfWeek: 0 })
+  })
+
+  // The capability is new, so every existing household has to keep working: nothing is
+  // stored against it, and `getPermissions` starts from the defaults.
+  it('grants it to adults by default, and shows up as something an admin can grant', async () => {
+    const perms = JSON.parse((await call('GET', '/api/permissions', kevin)).body)
+    expect(perms.capabilities).toContain('planning.manage')
+    expect(perms.permissions.adult['planning.manage']).toBe(true)
+    expect(perms.permissions.kid['planning.manage']).toBe(false)
+  })
+})
+
 describe('weekly planning · the session record', () => {
   let sessionId: string
 

@@ -382,10 +382,50 @@ sources deliberately don't get one.
   same case — that sentence is vacuous rather than false, and it is what the line has
   always said — so only a household that used the setting loses the word.
 
-The switches live in Settings → Modules → Weekly Planning on both clients, beside the
-per-step ones. Deliberately not in the step itself: `PUT /config` is admin-only like every
-other module config, so an in-session affordance would 403 for whoever happened to be
-driving.
+**The switches went in the STEP, and that meant a new gate.** They shipped first in
+Settings → Modules → Weekly Planning, reasoning that `PUT /config` is admin-only like
+every other module config. That was the wrong trade and was corrected immediately:
+
+> "I think we want the lists election to be in the weekly planning loose ends step, and it
+> shouldn't be admin gated, maybe adult gated but any adult can run weekly planning and
+> choose what lists should matter vs not."
+
+Right on both halves. The friction is *in* the step — you are looking at the fourth week of
+"Learn the banjo" — and sending somebody to a Settings panel on the other side of the app is
+the ejection this module exists to avoid. Worse, that panel is admin-only, and **running a
+session is not an admin act**: whoever sat down on a Sunday evening is who needs the switch.
+
+So `planning.manage`, a new capability, adult-true by default and grantable to a teen by an
+admin like every other. Three things made that cheap:
+
+- `getPermissions` builds from `DEFAULT_PERMISSIONS` and only overrides keys the stored
+  matrix actually carries, so every existing household's adults hold it the moment it
+  exists — no migration, and nothing silently lost.
+- The gate is a SPLIT ON ONE ROUTE, not a second route: `PUT /config` is now `tenantRoute`
+  with `requireAdmin` for the session's shape (`dayOfWeek`/`time`/`showOnToday`/`steps`) and
+  `requireCapability('planning.manage')` for `lists`. One writer, one merge — a second route
+  would be a second place that has to get the shallow-jsonb merge right. A body mixing the
+  two is refused WHOLE, because applying the half the caller is allowed would report success
+  for a save that half happened.
+- iOS needed nothing: its member sheet lists a hardcoded SUBSET of capabilities (it already
+  omits `goal.manage`), so a seventh one does not break an exhaustive map there. Web's
+  `CAPABILITY_LABELS` *is* exhaustive, which is a type error rather than a blank column —
+  the good kind of coupling.
+
+The candidates ride on the STEP's own read (`LooseEndsView.lists`) rather than the step
+fetching the config as well: one read, and `sources` is derived from the same value, so the
+sentence and the switches cannot disagree.
+
+**The chooser re-reads the deck after a write** rather than working out which cards would
+have gone. A list ruled out takes its cards with it and the server owns that answer; a
+client filtering on a `detail` string would be a second implementation of the rule. The
+copy is "Which lists? · asking about 2 of 3", so what is being left out is legible before
+you open anything.
+
+Deliberately NOT built: a per-card "stop asking about this list" shortcut. It is the
+tempting version — the card in front of you names the list — but muting from a card is a
+list-wide write triggered from one item, and the cards vanishing mid-deck moves
+"3 of 7" under the user's hand. A step-level chooser answers the ask without that.
 
 ### The parked-note handoff belongs to the shell
 

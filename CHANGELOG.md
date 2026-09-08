@@ -201,14 +201,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   much you park. The note explaining the difference between adding an event and parking a
   note has been rewritten, too.
 
-- **You choose which of your lists the planning session asks about.** The session's first
-  step gathers what's still open — overdue chores, late rhythms, short habits and anything
-  left unchecked on your lists — but a list that is *meant* to stay open, a someday list or
-  a wishlist, isn't a loose end, and the same items came back every single week. Settings →
-  Modules → Weekly Planning now has a switch per list: turn one off and the session stops
-  asking about it. Lists you say nothing about keep counting exactly as before, chores and
-  rhythms are never affected (they are late by definition), and your grocery list was never
-  asked about anyway — it rebuilds itself from the meal plan.
+- **You choose which of your lists the planning session asks about — in the session.** The
+  first step gathers what's still open — overdue chores, late rhythms, short habits and
+  anything left unchecked on your lists — but a list that is *meant* to stay open, a someday
+  list or a wishlist, isn't a loose end, and the same items came back every single week.
+  **Which lists?** in that step opens a switch per list: turn one off and it stops coming up,
+  and the deck re-reads on the spot so its cards go with it. **Any adult can do it** — you
+  don't have to be an admin, because whoever sat down to run the session is who needs it
+  (an admin can grant the same to a teen under Settings → Family & People → Permissions).
+  Lists you say nothing about keep counting exactly as before, chores and rhythms are never
+  affected (they are late by definition), and your grocery list was never asked about
+  anyway — it rebuilds itself from the meal plan. The same switches are in Settings →
+  Modules → Weekly Planning for setting it up outside a session.
 
 - **A finished week reads the week back, instead of ticking off the steps.** Saving a
   planning session used to leave you looking at ten green ticks against ten step names —

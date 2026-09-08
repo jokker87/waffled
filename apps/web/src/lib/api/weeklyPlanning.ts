@@ -63,18 +63,11 @@ export interface WeeklyPlanningConfig {
   lists: Record<string, boolean>
 }
 
-/**
- * A list the loose-ends step could ask about — the `list_type = 'custom'` allowlist,
- * resolved server-side. Grocery (it rebuilds itself from the meal plan) and templates
- * (unchecked by design) are not candidates and never appear here, so a client rendering
- * these as switches cannot offer one that does nothing.
- */
-export interface PlanningListCandidate {
-  id: string
-  name: string
-  emoji: string | null
-  relevant: boolean
-}
+// Defined once, in the step's own api file: the same server helper answers both this
+// module's config read and step 1's, so one type describes both. Imported for use below
+// AND re-exported, since callers reach for it from either place.
+import type { PlanningListCandidate } from './planning/looseEnds'
+export type { PlanningListCandidate }
 
 export interface WeeklyPlanningView {
   config: WeeklyPlanningConfig

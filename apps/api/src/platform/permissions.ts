@@ -7,17 +7,22 @@ import { AuthError } from './auth'
 import { query } from './db'
 import type { Tenant } from '../modules/households/households'
 
-export type Capability = 'chore.manage' | 'chore.approve' | 'reward.manage' | 'reward.approve' | 'reward.grant' | 'goal.manage'
-export const CAPABILITIES: Capability[] = ['chore.manage', 'chore.approve', 'reward.manage', 'reward.approve', 'reward.grant', 'goal.manage']
+// `planning.manage` is the odd one out and worth a line: it does not gate RUNNING a weekly
+// planning session — anybody in the household can do that — only the household-wide
+// choices the session offers, currently which of your lists its first step asks about.
+// Adult-by-default like the rest, because "any adult can run weekly planning and choose
+// what lists should matter vs not", and grantable to a teen by an admin like the rest.
+export type Capability = 'chore.manage' | 'chore.approve' | 'reward.manage' | 'reward.approve' | 'reward.grant' | 'goal.manage' | 'planning.manage'
+export const CAPABILITIES: Capability[] = ['chore.manage', 'chore.approve', 'reward.manage', 'reward.approve', 'reward.grant', 'goal.manage', 'planning.manage']
 
 export type MemberRole = 'adult' | 'teen' | 'kid'
 export const ROLES: MemberRole[] = ['adult', 'teen', 'kid']
 
 // adult = full rights; teen/kid = nothing until an admin grants it.
 export const DEFAULT_PERMISSIONS: Record<MemberRole, Record<Capability, boolean>> = {
-  adult: { 'chore.manage': true, 'chore.approve': true, 'reward.manage': true, 'reward.approve': true, 'reward.grant': true, 'goal.manage': true },
-  teen: { 'chore.manage': false, 'chore.approve': false, 'reward.manage': false, 'reward.approve': false, 'reward.grant': false, 'goal.manage': false },
-  kid: { 'chore.manage': false, 'chore.approve': false, 'reward.manage': false, 'reward.approve': false, 'reward.grant': false, 'goal.manage': false },
+  adult: { 'chore.manage': true, 'chore.approve': true, 'reward.manage': true, 'reward.approve': true, 'reward.grant': true, 'goal.manage': true, 'planning.manage': true },
+  teen: { 'chore.manage': false, 'chore.approve': false, 'reward.manage': false, 'reward.approve': false, 'reward.grant': false, 'goal.manage': false, 'planning.manage': false },
+  kid: { 'chore.manage': false, 'chore.approve': false, 'reward.manage': false, 'reward.approve': false, 'reward.grant': false, 'goal.manage': false, 'planning.manage': false },
 }
 
 function isObject(v: unknown): v is Record<string, unknown> {

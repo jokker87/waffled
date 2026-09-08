@@ -233,6 +233,9 @@ private final class LooseEndsFeed {
     var parkCalls: [(note: String, sessionId: String)] = []
     /// What the next route call should answer with.
     var routesAfterWrite: [WaffledAPI.LooseEndRoute] = []
+    /// Lists ruled in or out through the step's chooser.
+    var listRulings: [(id: String, relevant: Bool)] = []
+    var ruleListFails = false
 
     init(snapshot: WaffledAPI.LooseEndsView) { self.snapshot = snapshot }
 }
@@ -247,7 +250,8 @@ private func looseEnd(
 private func looseEndsView(
     notDone: [WaffledAPI.LooseEnd],
     parked: [WaffledAPI.LooseEnd] = [],
-    routes: [WaffledAPI.LooseEndRoute] = []
+    routes: [WaffledAPI.LooseEndRoute] = [],
+    lists: [WaffledAPI.PlanningListCandidate]? = nil
 ) -> WaffledAPI.LooseEndsView {
     WaffledAPI.LooseEndsView(
         weekStart: "2026-09-06",
@@ -263,7 +267,8 @@ private func looseEndsView(
                 WaffledAPI.LooseEndDestination(to: "tasks", label: "Make it a task", hint: "Someone owns it this week", primary: true)
             ]),
         routes: routes,
-        sources: ["chores", "lists"])
+        sources: ["chores", "lists"],
+        lists: lists)
 }
 
 @MainActor
@@ -283,6 +288,10 @@ private func model(_ feed: LooseEndsFeed) -> PlanningLooseEndsModel {
             feed.resolveCalls.append((kind, id, action, sessionId))
             if feed.resolveFails { throw LooseEndsFailure.refused }
             return WaffledAPI.LooseEndResolution(ok: true, kind: kind, id: id, action: action)
+        },
+        ruleList: { id, relevant in
+            feed.listRulings.append((id, relevant))
+            if feed.ruleListFails { throw LooseEndsFailure.refused }
         },
         parkNote: { note, sessionId in
             feed.parkCalls.append((note, sessionId))
@@ -676,5 +685,80 @@ private func model(_ feed: LooseEndsFeed) -> PlanningLooseEndsModel {
 
     private func route(kind: String, id: String, title: String, to: String) -> WaffledAPI.LooseEndRoute {
         WaffledAPI.LooseEndRoute(kind: kind, id: id, title: title, source: "notDone", to: to)
+    }
+}
+
+// WHICH LISTS THIS STEP ASKS ABOUT — chosen in the step, by whoever is running it.
+//
+// "I think we want the lists election to be in the weekly planning loose ends step, and it
+// shouldn't be admin gated, maybe adult gated but any adult can run weekly planning and
+// choose what lists should matter vs not."
+@MainActor
+@Suite struct PlanningLooseEndsListChoiceTests {
+    private let session = "33333333-3333-4333-8333-333333333333"
+    private let repairs = WaffledAPI.PlanningListCandidate(
+        id: "l1", name: "Repairs", emoji: "🔧", relevant: true)
+    private let someday = WaffledAPI.PlanningListCandidate(
+        id: "l2", name: "Someday", emoji: "💭", relevant: true)
+
+    private func loaded(_ feed: LooseEndsFeed) async -> PlanningLooseEndsModel {
+        let m = model(feed)
+        await m.load(weekStart: "2026-09-06", sessionId: session)
+        return m
+    }
+
+    @Test func theCandidatesComeOffTheStepsOwnRead() async {
+        let feed = LooseEndsFeed(snapshot: looseEndsView(notDone: [], lists: [repairs, someday]))
+        let m = await loaded(feed)
+        #expect(m.listCandidates.map(\.name) == ["Repairs", "Someday"])
+        // One read, not two: the step does not also fetch the config.
+        #expect(feed.fetchCount == 1)
+    }
+
+    // Sparse on the wire — the server merges, so sending the whole map would rule lists
+    // back in behind another device's back.
+    @Test func rulingOneListOutSendsOnlyThatList() async {
+        let feed = LooseEndsFeed(snapshot: looseEndsView(notDone: [], lists: [repairs, someday]))
+        let m = await loaded(feed)
+
+        let ok = await m.ruleList("l2", relevant: false, weekStart: "2026-09-06", sessionId: session)
+
+        #expect(ok)
+        #expect(feed.listRulings.count == 1)
+        #expect(feed.listRulings.first?.id == "l2")
+        #expect(feed.listRulings.first?.relevant == false)
+    }
+
+    // The deck is the SERVER's answer. A list ruled out takes its cards with it, and this
+    // client does not try to work out which ones those were.
+    @Test func rulingAListOutRereadsTheDeck() async {
+        let feed = LooseEndsFeed(snapshot: looseEndsView(notDone: [], lists: [repairs, someday]))
+        let m = await loaded(feed)
+        #expect(feed.fetchCount == 1)
+
+        _ = await m.ruleList("l2", relevant: false, weekStart: "2026-09-06", sessionId: session)
+
+        #expect(feed.fetchCount == 2)
+    }
+
+    @Test func aRefusedRulingSaysSoAndChangesNothing() async {
+        let feed = LooseEndsFeed(snapshot: looseEndsView(notDone: [], lists: [repairs, someday]))
+        feed.ruleListFails = true
+        let m = await loaded(feed)
+
+        let ok = await m.ruleList("l2", relevant: false, weekStart: "2026-09-06", sessionId: session)
+
+        #expect(ok == false)
+        #expect(m.errorMessage != nil)
+        // No re-read: nothing changed, so asking again would only hide the failure.
+        #expect(feed.fetchCount == 1)
+    }
+
+    // A server that has never heard of the setting sends no key, and the chooser hides
+    // itself rather than showing an empty sheet.
+    @Test func noCandidatesMeansNothingToChooseBetween() async {
+        let feed = LooseEndsFeed(snapshot: looseEndsView(notDone: []))
+        let m = await loaded(feed)
+        #expect(m.listCandidates.isEmpty)
     }
 }

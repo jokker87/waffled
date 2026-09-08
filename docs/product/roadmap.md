@@ -278,10 +278,12 @@ Legend: ✅ done · 🟡 partial / in progress · 🚧 planned · ⛔ dropped (s
   opens with step 10's own read-back (the seven days, what the session changed grouped by
   module, the last call, what was left alone) instead of a tick-list of step names, which
   survives underneath as the record of what was skipped on purpose — and **which of your
-  lists step 1 asks about is now a household choice** (Settings → Modules → Weekly
-  Planning), an opt-out map where absent means relevant, so a long-lived "someday" list
-  stops coming up every session while overdue chores, late rhythms and short habits still
-  always count. Design:
+  lists step 1 asks about is now a household choice**, made IN the step by whoever is
+  running the session (an opt-out map where absent means relevant, so a long-lived
+  "someday" list stops coming up every session while overdue chores, late rhythms and
+  short habits still always count). It is gated by a new `planning.manage` capability that
+  every adult holds by default rather than by admin — running a session is not an admin
+  act — with the same switches still in Settings → Modules → Weekly Planning. Design:
   `Weekly Planning v4` canvas; plan: `docs/product/weekly-planning-plan.md`.
 
 - **Waffled-Bites (kid companion device)** — the pairing system and the parent-facing

@@ -19,6 +19,8 @@
      Frame    — .wp-le .wp-le-bar .wp-le-note .wp-le-err .wp-le-empty
      Switch   — .wp-le-switch .wp-le-tab .wp-le-n .wp-le-seeall .wp-le-all-t
                 (the switch renders in CARD mode only — see-all groups by heading)
+     Lists    — .wp-le-lists-open + .wp-le-lists .wp-le-lists-t/-s/-row/-n/-done
+                (which lists this step asks about, chosen in the step)
      Deck     — .wp-le-deck .wp-le-pos .wp-le-stack .wp-le-card
                 .wp-le-kind .wp-le-t .wp-le-d
      Choices  — .wp-le-choices .wp-le-choice (.primary .route .settle .quiet)
@@ -77,6 +79,41 @@
   font: inherit; font-size: 12.5px; font-weight: 700; color: var(--ink-3); white-space: nowrap;
 }
 .wp-le-seeall:hover { color: var(--ink); }
+
+/* WHICH LISTS THIS STEP ASKS ABOUT — the opener sits beside "See all" and reads like it
+   (same quiet weight), because both are step-level escape hatches rather than answers to
+   the card in front of you. No `margin-left: auto`: "See all" already claims that, and a
+   second one would push this off the row's end. */
+.wp-le-lists-open {
+  background: none; border: 0; padding: 6px 2px; cursor: pointer;
+  font: inherit; font-size: 12.5px; font-weight: 700; color: var(--ink-3); white-space: nowrap;
+}
+
+.wp-le-lists-open:hover { color: var(--ink); }
+
+/* The sheet. `.modal-overlay` + `.modal` are the shared vocabulary; only what is specific
+   to a row of lists lives here. */
+.wp-le-lists { max-width: 460px; padding: 22px 22px 18px; }
+
+.wp-le-lists-t { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
+
+.wp-le-lists-s {
+  margin-top: 6px; font-size: 12.5px; font-weight: 600; color: var(--ink-2); line-height: 1.55;
+}
+
+.wp-le-lists-row {
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  margin-top: 2px; padding: 12px 0; background: none; border: 0; border-bottom: 1px solid var(--hair-2);
+  cursor: pointer; font: inherit; text-align: left;
+}
+
+.wp-le-lists-row:first-of-type { margin-top: 12px; }
+
+.wp-le-lists-row:disabled { opacity: 0.6; cursor: default; }
+
+.wp-le-lists-n { flex: 1; min-width: 0; font-size: 15px; font-weight: 650; color: var(--ink); }
+
+.wp-le-lists-done { width: 100%; justify-content: center; margin-top: 16px; }
 
 /* The switch IS the explanation of the two kinds, so the note sits right under it. */
 .wp-le-note { flex: none; font-size: 12.5px; font-weight: 600; color: var(--ink-3); line-height: 1.5; }

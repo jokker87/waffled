@@ -186,6 +186,10 @@ final class PlanningLooseEndsModel {
         _ kind: String, _ id: String, _ action: String, _ sessionId: String
     ) async throws -> WaffledAPI.LooseEndResolution
     typealias ParkNote = (_ note: String, _ sessionId: String) async throws -> WaffledAPI.PlanningParkedItem
+    /// Rule one list in or out. SPARSE by construction — one list per call — because the
+    /// server merges the map and a whole one built here would rule lists back in behind
+    /// another device's back.
+    typealias RuleList = (_ listId: String, _ relevant: Bool) async throws -> Void
 
     private(set) var view: WaffledAPI.LooseEndsView?
     /// A FAILED fetch keeps the previous value and still counts as loaded — the shared
@@ -217,6 +221,7 @@ final class PlanningLooseEndsModel {
     private let routeLooseEnd: RouteLooseEnd
     private let resolveLooseEnd: ResolveLooseEnd
     private let parkNote: ParkNote
+    private let ruleListCall: RuleList
 
     init(
         fetchLooseEnds: @escaping FetchLooseEnds = { weekStart, sessionId in
@@ -230,6 +235,9 @@ final class PlanningLooseEndsModel {
             try await WaffledAPI().resolvePlanningLooseEnd(
                 kind: kind, id: id, action: action, sessionId: sessionId)
         },
+        ruleList: @escaping RuleList = { listId, relevant in
+            _ = try await WaffledAPI().setWeeklyPlanningConfig(lists: [listId: relevant])
+        },
         parkNote: @escaping ParkNote = { note, sessionId in
             try await WaffledAPI().parkPlanningNote(note: note, sessionId: sessionId)
         }
@@ -237,6 +245,7 @@ final class PlanningLooseEndsModel {
         self.fetchLooseEnds = fetchLooseEnds
         self.routeLooseEnd = routeLooseEnd
         self.resolveLooseEnd = resolveLooseEnd
+        self.ruleListCall = ruleList
         self.parkNote = parkNote
     }
 
@@ -364,6 +373,30 @@ final class PlanningLooseEndsModel {
         guard !text.isEmpty else { return false }
         return await guarded {
             _ = try await self.parkNote(text, sessionId)
+            await self.reload(weekStart: weekStart, sessionId: sessionId)
+        }
+    }
+
+    /// The lists this step could ask about. Empty is a real answer — a household with no
+    /// custom lists has nothing to choose between, so the chooser hides itself rather than
+    /// opening an empty sheet — and so is a server that predates the setting.
+    var listCandidates: [WaffledAPI.PlanningListCandidate] { view?.lists ?? [] }
+
+    /// Rule one list in or out, from inside the step.
+    ///
+    /// WHY THE STEP AND NOT SETTINGS: the friction is here, on the fourth week of "Learn
+    /// the banjo" off a someday list, and Settings → Modules is admin-only — which
+    /// whoever sat down to run the session may well not be. The route takes
+    /// `planning.manage` (adult by default) instead.
+    ///
+    /// THEN IT RE-READS. A list ruled out takes its cards out of the deck with it, and
+    /// working out WHICH cards those were is the server's job, not a guess made here from
+    /// a `detail` string. `guarded` skips the reload when the write itself failed, so a
+    /// refusal never looks like it took.
+    @discardableResult
+    func ruleList(_ listId: String, relevant: Bool, weekStart: String, sessionId: String) async -> Bool {
+        await guarded {
+            try await self.ruleListCall(listId, relevant)
             await self.reload(weekStart: weekStart, sessionId: sessionId)
         }
     }

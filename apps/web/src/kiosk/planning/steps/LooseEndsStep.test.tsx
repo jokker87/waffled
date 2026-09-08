@@ -72,6 +72,11 @@ const VIEW = {
   },
   routes: [] as { kind: string; id: string; title: string; source: string; to: string }[],
   sources: ['chores', 'lists', 'rhythms', 'goals'],
+  // The lists this step could ask about, as the step's own read now carries them.
+  lists: [
+    { id: 'l1', name: 'Around the house', emoji: '🏠', relevant: true },
+    { id: 'l2', name: 'Someday', emoji: '💭', relevant: true },
+  ],
 }
 
 const calls: { url: string; method: string; body: Record<string, unknown> | null }[] = []
@@ -79,14 +84,37 @@ const calls: { url: string; method: string; body: Record<string, unknown> | null
 // A stateful double: routing really records a route and hides the item on the next
 // read, and settling really removes it — because that is the point. A double that
 // replayed the same view couldn't tell a route from a no-op.
-function mockApi(initial: Record<string, unknown> = VIEW) {
+function mockApi(initial: Record<string, unknown> = VIEW, opts: { capabilities?: string[] } = {}) {
   calls.length = 0
-  const state = JSON.parse(JSON.stringify(initial)) as typeof VIEW
+  const state = JSON.parse(JSON.stringify(initial)) as typeof VIEW & {
+    lists?: { id: string; name: string; emoji: string | null; relevant: boolean }[]
+  }
   globalThis.fetch = vi.fn(async (url: string, init?: RequestInit) => {
     const u = String(url)
     const method = init?.method ?? 'GET'
     const body = init?.body ? JSON.parse(String(init.body)) : null
     calls.push({ url: u, method, body })
+
+    // Who is looking. The chooser is capability-gated, so the step has to know — and the
+    // fallthrough below would otherwise hand `useHousehold` the loose-ends view.
+    if (u.includes('/api/household')) {
+      return {
+        ok: true,
+        json: async () => ({
+          provisioned: true,
+          household: { id: 'h1', name: 'Sites' },
+          person: { id: 'p1', name: 'Kevin', capabilities: opts.capabilities ?? ['planning.manage'] },
+        }),
+      }
+    }
+    // Ruling a list in or out. Merged server-side, so only the switch that moved is sent.
+    if (method === 'PUT' && u.includes('/api/weekly-planning/config')) {
+      for (const [id, on] of Object.entries((body?.lists ?? {}) as Record<string, boolean>)) {
+        const row = (state.lists ?? []).find((l) => l.id === id)
+        if (row) row.relevant = on
+      }
+      return { ok: true, json: async () => ({ config: { lists: body?.lists ?? {} } }) }
+    }
 
     if (method === 'POST' && u.endsWith('/loose-ends/route')) {
       state.routes = state.routes.filter((r) => !(r.kind === body.kind && r.id === body.id))
@@ -145,6 +173,7 @@ function renderStep(over: Partial<StepBodyProps> = {}) {
 const routeCalls = () => calls.filter((c) => c.url.endsWith('/loose-ends/route'))
 const resolveCalls = () => calls.filter((c) => c.url.endsWith('/loose-ends/resolve'))
 const parkCalls = () => calls.filter((c) => c.url.endsWith('/loose-ends/parked'))
+const configCalls = () => calls.filter((c) => c.method === 'PUT' && c.url.includes('/weekly-planning/config'))
 
 describe('loose ends · routing, which is the step', () => {
   it('shows one card whose choices are DESTINATIONS, with the reason under each name', async () => {
@@ -153,8 +182,11 @@ describe('loose ends · routing, which is the step', () => {
     expect(await screen.findByText('Take the bins out')).toBeInTheDocument()
     expect(screen.getByText('3 days late')).toBeInTheDocument()
     // The read is scoped to the week AND the session — the session is where routes live.
-    expect(calls[0].url).toContain('weekStart=2026-09-06')
-    expect(calls[0].url).toContain('sessionId=s1')
+    // Named rather than taken as `calls[0]`: the step also reads who is looking (for the
+    // lists chooser), and which request lands first is not this assertion's point.
+    const read = calls.find((c) => c.method === 'GET' && c.url.includes('/loose-ends'))!
+    expect(read.url).toContain('weekStart=2026-09-06')
+    expect(read.url).toContain('sessionId=s1')
     // One at a time: the second item is not on screen.
     expect(screen.queryByText('Return the library books')).not.toBeInTheDocument()
     for (const label of ['Tasks', 'Calendar', 'Kids', 'Goals']) {
@@ -449,5 +481,71 @@ describe('loose ends · the crumb on the record', () => {
     // answered, so it MUST include the routes or the final write would erase them.
     expect(Object.keys(last).sort()).toEqual(['answered', 'left', 'routes'])
     expect(last.routes).toEqual([{ kind: 'chore', id: 'c1', title: 'Take the bins out', source: 'notDone', to: 'tasks' }])
+  })
+})
+
+// WHICH LISTS THIS STEP ASKS ABOUT — chosen here, in the step, by whoever is running it.
+//
+// "I think we want the lists election to be in the weekly planning loose ends step, and it
+// shouldn't be admin gated, maybe adult gated but any adult can run weekly planning and
+// choose what lists should matter vs not."
+//
+// The friction is here: you are looking at "Learn the banjo" off a someday list for the
+// fourth week running. Sending you to Settings → Modules to silence it is the ejection
+// this module exists to avoid — and Settings is admin-only, which the person driving the
+// session on a Sunday evening may well not be.
+describe('loose ends · which lists it asks about', () => {
+  const openChooser = async () => {
+    fireEvent.click(await screen.findByRole('button', { name: /Which lists/i }))
+    return screen.findByText('Lists it asks about')
+  }
+
+  it('lets whoever is running the session rule a list out, without leaving the step', async () => {
+    mockApi()
+    renderStep()
+    await openChooser()
+
+    fireEvent.click(screen.getByLabelText('Ask about Someday in the weekly planning session'))
+
+    // Only the switch that moved: the map is sparse and the server merges it, so sending
+    // the whole thing would rule other lists back in behind another device's back.
+    await waitFor(() => expect(configCalls()).toHaveLength(1))
+    expect(configCalls()[0].body).toEqual({ lists: { l2: false } })
+  })
+
+  it('re-reads the deck afterwards, so the cards it stops asking about actually go', async () => {
+    mockApi()
+    renderStep()
+    await openChooser()
+    fireEvent.click(screen.getByLabelText('Ask about Someday in the weekly planning session'))
+    // The step's own read is what decides the deck — the chooser writes and then asks
+    // again rather than guessing which cards would have gone.
+    await waitFor(() => expect(calls.filter((c) => c.method === 'GET' && c.url.includes('/loose-ends')).length)
+      .toBeGreaterThan(1))
+  })
+
+  it('names each list the way the list itself is named', async () => {
+    mockApi()
+    renderStep()
+    await openChooser()
+    expect(screen.getByText(/🏠 Around the house/)).toBeTruthy()
+    expect(screen.getByText(/💭 Someday/)).toBeTruthy()
+  })
+
+  // A kid running the session sees the deck and can triage it; the household-wide choice
+  // is not theirs to make.
+  it('is not offered to someone without the capability', async () => {
+    mockApi(VIEW, { capabilities: [] })
+    renderStep()
+    await screen.findByText('Take the bins out')
+    expect(screen.queryByRole('button', { name: /Which lists/i })).toBeNull()
+  })
+
+  // Nothing to choose between ⇒ no control, rather than an empty sheet.
+  it('is absent when the household keeps no list it could ask about', async () => {
+    mockApi({ ...VIEW, lists: [] })
+    renderStep()
+    await screen.findByText('Take the bins out')
+    expect(screen.queryByRole('button', { name: /Which lists/i })).toBeNull()
   })
 })
