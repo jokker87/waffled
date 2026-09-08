@@ -201,10 +201,15 @@ without which `postgres` dies at dyld time, and PowerSync's `node_modules` is a 
 pnpm farm.
 
 Verifying the real bundle (36,456 files, 1,338 symlinks, 580 MB) takes ~1.5s, so the
-result is memoized in `bundle-verified.json`, keyed on the bundle path plus the sha256 of
-`manifest.json` itself. That key changes whenever the build, the git sha, or any listed
-hash changes, so the memo can never wave through a bundle that differs from the verified
-one. A warm start pays 35ms.
+result is memoized in `bundle-verified.json`, keyed on three things: the bundle path, the
+sha256 of `manifest.json`, and a stat fingerprint (size + mtime) of every path that
+manifest lists. The manifest hash alone would not be enough — it changes with the build,
+but a bundled file altered in place leaves it untouched — so the fingerprint is what lets
+the memo claim the bundle has not changed since it was verified. Any listed file that has
+been changed, replaced or removed misses the memo and pays the full walk, which then
+refuses it. The fingerprint costs ~115ms warm (36k lstats, no content read), so a warm
+start pays ~145ms rather than the 35ms it paid when the memo was only trusting
+`manifest.json` — still a tenth of the 1.5s full walk, and now actually load-bearing.
 
 Versions shown by `status` come from the manifest, not from running `--version`. The
 api is given `GIT_SHA` and `BUILD_TIME` from it too, so System Health reports real

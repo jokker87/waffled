@@ -242,8 +242,10 @@ func TestVerifyCachedSkipsTheSecondWalk(t *testing.T) {
 	}
 }
 
-// A cache entry must never let a tampered bundle through: the key includes the hash of
-// manifest.json, and a swapped bundle at the same path changes it.
+// A swapped build at the same path must invalidate the memo: the key includes the hash
+// of manifest.json, which changes with the git sha. That is only half the guarantee —
+// a file altered without touching the manifest is covered by the stat fingerprint, in
+// manifest_cache_test.go.
 func TestVerifyCachedIsInvalidatedByADifferentBundle(t *testing.T) {
 	root := fixture(t)
 	cache := filepath.Join(t.TempDir(), "bundle-verified.json")

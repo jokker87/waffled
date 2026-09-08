@@ -287,8 +287,11 @@ func Verify(root string) (*Manifest, error) {
 
 // cacheEntry remembers that a particular bundle build at a particular path verified.
 type cacheEntry struct {
-	Root         string `json:"root"`
-	ManifestSHA  string `json:"manifestSha256"`
+	Root        string `json:"root"`
+	ManifestSHA string `json:"manifestSha256"`
+	// FilesDigest fingerprints what was on disk at that moment — see treeDigest. An
+	// entry without one was written by an older build and is never trusted.
+	FilesDigest  string `json:"filesDigest"`
 	BuiltAt      string `json:"builtAt"`
 	GitSha       string `json:"gitSha"`
 	VerifiedAt   string `json:"verifiedAt"`
@@ -296,11 +299,38 @@ type cacheEntry struct {
 	SymlinkCount int    `json:"symlinkCount"`
 }
 
+// treeDigest fingerprints the bundle as it is on disk right now: the size and mtime of
+// every path the manifest lists, files and symlinks alike, in a fixed order. It hashes
+// no content — one lstat per entry, about 115 ms warm across the real bundle's 36,456
+// files, against ~1.5 s to rehash 580 MB — but it is what makes the memo honest. A path
+// that has gone missing changes the digest rather than being skipped.
+func treeDigest(root string, m *Manifest) string {
+	h := sha256.New()
+	add := func(rel string) {
+		st, err := os.Lstat(filepath.Join(root, rel))
+		if err != nil {
+			fmt.Fprintf(h, "%s\x00missing\n", rel)
+			return
+		}
+		fmt.Fprintf(h, "%s\x00%d\x00%d\n", rel, st.Size(), st.ModTime().UnixNano())
+	}
+	for _, rel := range sortedFileKeys(m.Files) {
+		add(rel)
+	}
+	for _, rel := range sortedStringKeys(m.Symlinks) {
+		add(rel)
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
 // VerifyCached is Verify with a memo. Hashing 580 MB across 36k files costs seconds, and
-// a warm `start` should not pay it. The key is the bundle path plus the sha256 of
-// manifest.json — which changes whenever the build, the git sha, or any listed hash
-// changes — so the memo can never wave through a bundle that differs from the verified
-// one. It reports whether the answer came from the cache.
+// a warm `start` should not pay it. The key is the bundle path, the sha256 of
+// manifest.json, and a stat fingerprint of every path that manifest lists. The manifest
+// hash alone was not enough: it changes with the build, but a file altered in place
+// leaves it untouched, so any tampered binary rode through every warm start. With the
+// fingerprint, a bundled file that has been changed, replaced or removed since the last
+// verify misses the memo and pays the full walk — which then refuses it. It reports
+// whether the answer came from the cache.
 func VerifyCached(root, cachePath string) (*Manifest, bool, error) {
 	manifestSHA, err := hashFile(filepath.Join(root, FileName))
 	if err != nil {
@@ -314,9 +344,9 @@ func VerifyCached(root, cachePath string) (*Manifest, bool, error) {
 	if raw, err := os.ReadFile(cachePath); err == nil {
 		var entry cacheEntry
 		if json.Unmarshal(raw, &entry) == nil &&
-			entry.Root == absRoot && entry.ManifestSHA == manifestSHA.SHA256 {
+			entry.Root == absRoot && entry.ManifestSHA == manifestSHA.SHA256 && entry.FilesDigest != "" {
 			m, err := Load(root)
-			if err == nil {
+			if err == nil && treeDigest(root, m) == entry.FilesDigest {
 				return m, true, nil
 			}
 		}
@@ -328,7 +358,8 @@ func VerifyCached(root, cachePath string) (*Manifest, bool, error) {
 	}
 	entry := cacheEntry{
 		Root: absRoot, ManifestSHA: manifestSHA.SHA256,
-		BuiltAt: m.BuiltAt, GitSha: m.GitSha,
+		FilesDigest: treeDigest(root, m),
+		BuiltAt:     m.BuiltAt, GitSha: m.GitSha,
 		VerifiedAt:   nowRFC3339(),
 		FileCount:    m.FileCount,
 		SymlinkCount: m.SymlinkCount,
