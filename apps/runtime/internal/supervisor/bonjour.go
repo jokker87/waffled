@@ -34,10 +34,16 @@ const (
 	// runs on a ticker beside a live server, and a hung psql must not still be holding
 	// the goroutine when the next tick arrives.
 	bonjourCensusTimeout = 5 * time.Second
-	// bonjourSetupPoll is how often an install with no household re-asks whether one has
-	// appeared. See startBonjour for why the polling stops the moment one has.
-	bonjourSetupPoll = 60 * time.Second
 )
+
+// bonjourSetupPoll is how often an install with no household re-asks whether one has
+// appeared. See startBonjour for why the polling stops the moment one has.
+//
+// It is a variable, not a constant, only so the integration test can watch the
+// setup→named transition happen for real in seconds rather than sitting out a minute of
+// wall clock. It is unexported and never written in production, so — like
+// Supervisor.waitHealthy — there is no knob here that a household could trip.
+var bonjourSetupPoll = 60 * time.Second
 
 // bonjourState is what the running supervisor records about its advertisement, so that
 // `status` — a different process, polled every second by the menu-bar app — can report
@@ -231,12 +237,14 @@ func (s *Supervisor) stopBonjourChild() {
 	delete(s.children, services.Bonjour)
 	s.mu.Unlock()
 	if c != nil {
+		s.log.Infof("withdrawing the Bonjour advertisement")
 		if err := c.stop(stopGrace); err != nil {
 			s.log.Warnf("%v", err)
 		}
 		return
 	}
 	if s.serviceRunning(services.Bonjour) {
+		s.log.Infof("withdrawing the Bonjour advertisement left by a previous run")
 		if err := s.stopOrphan(services.Bonjour); err != nil {
 			s.log.Warnf("%v", err)
 		}
