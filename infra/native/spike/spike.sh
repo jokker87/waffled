@@ -218,7 +218,7 @@ init_postgres() {
   ( umask 077; printf '%s\n' "$POSTGRES_PASSWORD" > "$pwfile" )
   # Superuser = POSTGRES_USER, like the postgres:16 image; scram from the first byte.
   "$PG_HOME/bin/initdb" -D "$PGDATA" -U "$POSTGRES_USER" --pwfile="$pwfile" \
-    --auth=scram-sha-256 --encoding=UTF8 --locale=C >> "$LOGS/postgres.log" 2>&1 \
+    --auth=scram-sha-256 --encoding=UTF8 --locale=en_US.UTF-8 >> "$LOGS/postgres.log" 2>&1 \
     || { rm -f "$pwfile"; die "initdb failed — see $LOGS/postgres.log"; }
   rm -f "$pwfile"
   # Everything compose passes on the `postgres` command line, plus loopback-only.

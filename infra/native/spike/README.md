@@ -86,6 +86,13 @@ All of the following passed on a fresh data dir (`reset` → `up` → browser), 
   (`scripts/hydrate-symlinks.js`, driven by `native/pg-symlinks.json`) recreates the 17
   symlinks. `npm pack` + `tar` skips postinstall, so the script runs it by hand. Forget it and
   `postgres --version` dies at dyld time.
+- **Gotcha 3 — collation: `--locale=C` was wrong; the Docker cluster is `en_US.utf8`.** The
+  first run of this spike passed `--locale=C` to `initdb`. The `postgres:16` image initializes
+  its cluster with `en_US.utf8` (verified on the live stack: `select datcollate from pg_database`
+  → `en_US.utf8`), so text `ORDER BY` sorted differently natively, and a Docker → Mac
+  `pg_restore` would land on a different collation. Fixed to `--locale=en_US.UTF-8` (macOS
+  ships it; the bundled `initdb` accepts it and logs "initialized with locale
+  "en_US.UTF-8""). The Go runtime must do the same.
 - **Gotcha 2 — no `psql`, no `pg_dump`, no `pg_isready`.** `bin/` is exactly `initdb`,
   `pg_ctl`, `postgres`. Same for the zonky jar (`embedded-postgres-binaries-darwin-arm64v8
   16.15.0`, 59 MB jar / 298 MB unpacked, identical EDB signature, also just those three).
@@ -231,7 +238,8 @@ RSS at steady state, one browser client connected (`ps -o rss`):
    notarization anyway. Do the `pg-symlinks.json` symlink hydration at package time, not at
    first run.
 2. **Postgres bring-up in Go** is exactly what `spike.sh` does: `initdb -U <user>
-   --pwfile --auth=scram-sha-256`, append the conf block, write `pg_hba.conf`, `pg_ctl -w
+   --pwfile --auth=scram-sha-256 --encoding=UTF8 --locale=en_US.UTF-8` (match the
+   `postgres:16` image's `en_US.utf8` so Docker → Mac restores keep their collation), append the conf block, write `pg_hba.conf`, `pg_ctl -w
    start`, then `CREATE DATABASE` + `00-init.sql` over `pgx` (keep the `\gexec` handling or
    just inline the two statements — that file only creates `pgcrypto` and
    `powersync_storage`). Use `unix_socket_directories=<datadir>`.
