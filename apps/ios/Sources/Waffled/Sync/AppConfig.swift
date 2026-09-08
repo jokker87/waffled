@@ -173,6 +173,10 @@ enum DemoHooks {
     static var pantryItem: String? { AppConfig.env("WAFFLED_PANTRY_ITEM") }
     /// Initial Meals section for verification: week | month | recipes.
     static var mealsSection: String? { AppConfig.env("WAFFLED_MEALS_SECTION") }
+    /// Start step 1 in SEE-ALL rather than the card deck (verification). See-all is the
+    /// mode with the most per-row content — kind, detail and owner on one line — and it is
+    /// behind a tap, which the simulator cannot perform.
+    static var looseEndsSeeAll: Bool { AppConfig.env("WAFFLED_LE_SEEALL") == "1" }
     /// Open step 1's "Which lists?" chooser on launch (verification). The sheet is behind
     /// a tap in the loose-ends step and the simulator has no tap API, so without this the
     /// switches cannot be looked at headlessly at all.

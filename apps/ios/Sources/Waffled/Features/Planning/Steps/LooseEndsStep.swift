@@ -20,6 +20,35 @@ import SwiftUI
 /// The body is content-sized on the assumption that the SHELL owns the scroll view (it
 /// owns the chrome, the counter and the footer) — hence no `ScrollView` and no
 /// `WF.tabBarClearance` here.
+/// WHO ALREADY HAS IT — one view, both modes.
+///
+/// Not two lookalikes: this step renders a row in the card deck AND in see-all, and this
+/// app has been bitten three times by a component copied because the original was local to
+/// one place. The wash-behind-the-avatar treatment is the Tasks board's own, so a face
+/// reads the same in a planning row as it does on the chores board.
+///
+/// `Color(hexString:)` rather than a `WF` token on purpose: this is real `persons.color_hex`
+/// data — an identity colour, not a theme surface — which is the documented exception to
+/// the never-hardcode-a-colour rule.
+struct PlanningOwnerChip: View {
+    let owner: WaffledAPI.LooseEndOwner
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Text(owner.avatarEmoji ?? "🙂")
+                .font(.system(size: 11))
+                .frame(width: 18, height: 18)
+                .background((owner.colorHex.flatMap { Color(hexString: $0) } ?? WF.ink3).opacity(0.13))
+                .clipShape(Circle())
+            Text(owner.name)
+                .font(.system(size: 12, weight: .bold)).foregroundStyle(WF.ink2)
+                .lineLimit(1)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(owner.name) has this")
+    }
+}
+
 struct LooseEndsStepView: View {
     let props: PlanningStepProps
 
@@ -30,7 +59,8 @@ struct LooseEndsStepView: View {
 
     @State private var model = PlanningLooseEndsModel()
     @State private var group: LooseEndGroup = .notDone
-    @State private var seeAll = false
+    /// Verification only: `WAFFLED_LE_SEEALL` starts in see-all. See DemoHooks.
+    @State private var seeAll = DemoHooks.looseEndsSeeAll
     @State private var chooser = false
     /// The list whose switch is mid-write, so only that row dims.
     @State private var ruling: String?
@@ -283,7 +313,11 @@ struct LooseEndsStepView: View {
 
                 WaffledCard(padding: 16) {
                     VStack(alignment: .leading, spacing: 10) {
-                        SectionLabel(text: LooseEndCopy.kindLabel(item.kind))
+                        HStack(spacing: 8) {
+                            SectionLabel(text: LooseEndCopy.kindLabel(item.kind))
+                            if let owner = item.owner { PlanningOwnerChip(owner: owner) }
+                            Spacer(minLength: 0)
+                        }
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
                             if let emoji = item.emoji, !emoji.isEmpty {
                                 Text(emoji).font(.system(size: 20))
@@ -405,11 +439,25 @@ struct LooseEndsStepView: View {
                 HStack(alignment: .top, spacing: 8) {
                     Text(item.emoji.flatMap { $0.isEmpty ? nil : $0 } ?? "•")
                         .font(.system(size: 15))
-                    VStack(alignment: .leading, spacing: 2) {
+                    VStack(alignment: .leading, spacing: 3) {
                         Text(item.title).font(.system(size: 15, weight: .bold)).foregroundStyle(WF.ink)
                             .fixedSize(horizontal: false, vertical: true)
-                        if let detail = item.detail, !detail.isEmpty {
-                            Text(detail).font(.system(size: 12)).foregroundStyle(WF.ink3)
+                        // WHERE IT CAME FROM, and who has it. The card deck has always
+                        // named the kind; see-all dropped it, which is how a screen of
+                        // eleven rows ended up with a chore called "Groceries"
+                        // indistinguishable in kind from an unchecked list item.
+                        //
+                        // `ChipFlow` rather than an HStack: at phone width a long list
+                        // name plus a person's name has to wrap, and truncating the owner
+                        // would defeat the point of showing it.
+                        ChipFlow(spacing: 6, lineSpacing: 3) {
+                            Text(LooseEndCopy.kindLabel(item.kind).uppercased())
+                                .font(.system(size: 10.5, weight: .heavy)).tracking(0.5)
+                                .foregroundStyle(WF.ink3)
+                            if let detail = item.detail, !detail.isEmpty {
+                                Text(detail).font(.system(size: 12)).foregroundStyle(WF.ink3)
+                            }
+                            if let owner = item.owner { PlanningOwnerChip(owner: owner) }
                         }
                     }
                     Spacer(minLength: 0)

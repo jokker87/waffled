@@ -57,6 +57,8 @@ interface LooseEnd {
   title: string
   detail: string | null
   actions: string[]
+  // Who it already belongs to, when anything does.
+  owner?: { id: string; name: string; colorHex: string | null; avatarEmoji: string | null } | null
 }
 interface Destination { to: string; label: string; hint: string; primary?: boolean }
 interface Route { kind: string; id: string; title: string; source: string; to: string }
@@ -655,6 +657,121 @@ describe('loose ends · which lists the household wants asked about', () => {
     const c = (await config()).config
     expect(c.lists['ruled-by-nobody']).toBeUndefined()
     expect(Object.keys(c.lists)).not.toContain('')
+  })
+})
+
+// WHO EACH THING ALREADY BELONGS TO.
+//
+// "Some of these are already assigned an owner but we have no idea who." The deck showed
+// a title and how late it was, and nothing else — so a board of eleven rows could not tell
+// you whose bed was unmade. Routing something to Tasks when it already has an owner is a
+// different decision from routing something nobody has picked up.
+//
+// Resolved from ONE person map in `getLooseEnds` rather than joined per source: two of the
+// four sources (rhythms, goals) come back through another module's own reader and own no
+// SQL to join, and one payload with two mechanisms for the same field is how they drift.
+describe('loose ends · who each thing already belongs to', () => {
+  let ownedInstance = ''
+  let unownedInstance = ''
+  let ownedRhythm = ''
+  let soloGoal = ''
+  let familyGoal = ''
+  let elaineId = ''
+
+  // Its own fixtures throughout. The other suites in this file RESOLVE what they create
+  // — a rhythm gets re-anchored, a goal gets logged against — so leaning on their rows
+  // for an owner assertion reads as a passing test right up until it silently has
+  // nothing left to assert on. (It did: two assertions here found zero rows first time.)
+  beforeAll(async () => {
+    const week = await currentWeekStart()
+    const { rows: p } = await query(
+      `insert into persons (household_id, name, member_type, color_hex, avatar_emoji)
+       values ($1,'Elaine','adult','#7fc1e8','🧣') returning id`,
+      [householdId]
+    )
+    elaineId = p[0].id
+
+    const chore = async (title: string, personId: string | null) => {
+      const { rows: c } = await query(
+        `insert into chores (household_id, title, person_id, is_active) values ($1,$2,$3,true) returning id`,
+        [householdId, title, personId]
+      )
+      const { rows: i } = await query(
+        `insert into chore_instances (household_id, chore_id, person_id, due_on, status)
+         values ($1,$2,$3,$4::date,'pending') returning id`,
+        [householdId, c[0].id, personId, addDays(week, -4)]
+      )
+      return i[0].id as string
+    }
+    ownedInstance = await chore('Elaine has this one', elaineId)
+    unownedInstance = await chore('Nobody has this', null)
+
+    const { rows: r } = await query(
+      `insert into rhythms (household_id, title, person_id, satisfied_by, every, next_due_at, is_active)
+       values ($1,'Elaine’s air filter',$2,'completion','3 months', now() - interval '20 days', true)
+       returning id`,
+      [householdId, elaineId]
+    )
+    ownedRhythm = r[0].id
+
+    const habit = async (title: string, basis: string, people: string[]) => {
+      const { rows: g } = await query(
+        `insert into goals (household_id, title, goal_type, tracking_mode, habit_period,
+                            habit_target_per_period, target_basis, is_active)
+         values ($1,$2,'habit','each_tracks','week',3,$3,true) returning id`,
+        [householdId, title, basis]
+      )
+      for (const pid of people) {
+        await query(
+          `insert into goal_participants (household_id, goal_id, person_id) values ($1,$2,$3)`,
+          [householdId, g[0].id, pid]
+        )
+      }
+      return g[0].id as string
+    }
+    soloGoal = await habit('Elaine runs', 'per_person', [elaineId])
+    familyGoal = await habit('Everybody walks', 'family', [elaineId, ownerId])
+  })
+
+  it('names the person an overdue chore is assigned to', async () => {
+    const item = (await read()).notDone.find((x) => x.id === ownedInstance)
+    expect(item).toBeTruthy()
+    const owner = item!.owner!
+    expect(owner.id).toBe(elaineId)
+    expect(owner.name).toBe('Elaine')
+    // The colour and the avatar travel with the name so a client renders the person the
+    // way the rest of the app does, rather than inventing a chip of its own.
+    expect(owner.colorHex).toBe('#7fc1e8')
+    expect(owner.avatarEmoji).toBe('🧣')
+  })
+
+  it('names the person a rhythm belongs to', async () => {
+    const item = (await read()).notDone.find((x) => x.id === ownedRhythm)
+    expect(item).toBeTruthy()
+    expect(item!.owner?.name).toBe('Elaine')
+  })
+
+  // A habit with exactly one participant is that person's. A FAMILY habit — several
+  // participants, or a family target basis — belongs to everybody, and inventing an owner
+  // for it would be worse than leaving the slot empty.
+  it('names the one person a habit goal is for, and nobody for the family’s', async () => {
+    const view = await read()
+    expect(view.notDone.find((x) => x.id === soloGoal)?.owner?.name).toBe('Elaine')
+    expect(view.notDone.find((x) => x.id === familyGoal)?.owner ?? null).toBeNull()
+  })
+
+  // Up for grabs is a real state, not a missing name — and the deck has to be able to say
+  // so, because "nobody has this" is exactly the row worth routing.
+  it('leaves an unassigned chore ownerless rather than guessing', async () => {
+    const item = (await read()).notDone.find((x) => x.id === unownedInstance)
+    expect(item).toBeTruthy()
+    expect(item!.owner ?? null).toBeNull()
+  })
+
+  it('says nothing for an unchecked list item — a list has no owner', async () => {
+    const rows = (await read()).notDone.filter((x) => x.kind === 'list')
+    expect(rows.length).toBeGreaterThan(0)
+    for (const r of rows) expect(r.owner ?? null).toBeNull()
   })
 })
 

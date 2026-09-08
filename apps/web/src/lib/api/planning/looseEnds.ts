@@ -30,6 +30,18 @@ export type LooseEndKind = 'chore' | 'list' | 'rhythm' | 'goal' | 'parked'
 // The two answers that WRITE. Routing is not one of them — see the header.
 export type LooseEndAction = 'done' | 'drop'
 
+/**
+ * Who a loose end already belongs to. The colour and the avatar travel WITH the name so a
+ * row renders the person the way the rest of the app does, rather than resolving an id
+ * against another read.
+ */
+export interface LooseEndOwner {
+  id: string
+  name: string
+  colorHex: string | null
+  avatarEmoji: string | null
+}
+
 export interface LooseEnd {
   // Unique across kinds and stable across refetches — the list key, and what the deck
   // remembers as already answered.
@@ -47,6 +59,12 @@ export interface LooseEnd {
   // note can be dropped. The client renders what it's given rather than inferring from
   // `kind`, for the same reason the step catalog is server-owned.
   actions: LooseEndAction[]
+  /**
+   * Who already has it, or null for "nobody has this" — a real state, and exactly the row
+   * worth routing. Always null for a list item (a list has no owner) and for a parked note
+   * (whose byline is in `detail`).
+   */
+  owner: LooseEndOwner | null
 }
 
 // Where a card can send an item. A step, with the reason under its name — filtered by

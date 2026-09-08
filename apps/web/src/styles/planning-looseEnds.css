@@ -84,6 +84,28 @@
    (same quiet weight), because both are step-level escape hatches rather than answers to
    the card in front of you. No `margin-left: auto`: "See all" already claims that, and a
    second one would push this off the row's end. */
+/* WHO ALREADY HAS IT — one chip, both modes. Inline so it sits at the end of the meta
+   line rather than claiming a column of its own; `.chore-ava` is the Tasks board's own
+   avatar wash, reused so a face reads the same in both places. */
+.wp-le-owner {
+  display: inline-flex; align-items: center; gap: 5px; margin-left: 8px;
+  font-size: 12px; font-weight: 700; color: var(--ink-2); white-space: nowrap;
+}
+
+.wp-le-owner .chore-ava { width: 18px; height: 18px; font-size: 11px; }
+
+/* The see-all meta line: where it came from, its own detail, and whoever has it. `<s>` is
+   this file's existing sub-line element (never a strikethrough — see .wp-le-row-main s). */
+.wp-le-row-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+
+.wp-le-row-kind {
+  font-size: 10.5px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+/* On the card the kind label is its own line, so the chip sits beside it. */
+.wp-le-kind { display: flex; align-items: center; }
+
 .wp-le-lists-open {
   background: none; border: 0; padding: 6px 2px; cursor: pointer;
   font: inherit; font-size: 12.5px; font-weight: 700; color: var(--ink-3); white-space: nowrap;

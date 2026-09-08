@@ -42,6 +42,36 @@ extension WaffledAPI {
         /// Which of done/drop THIS item can take — decided per item by the server (a
         /// chore wanting photo proof can't be completed from a session with no camera).
         let actions: [String]
+        /// Who already has it, or nil for "nobody has this" — a real state, and exactly
+        /// the row worth routing. Always nil for a list item (a list has no owner) and for
+        /// a parked note (whose byline is in `detail`). OPTIONAL so a server predating it
+        /// still decodes.
+        let owner: LooseEndOwner?
+
+        init(
+            key: String, kind: String, id: String, title: String, emoji: String?,
+            detail: String?, actions: [String], owner: LooseEndOwner? = nil
+        ) {
+            self.key = key
+            self.kind = kind
+            self.id = id
+            self.title = title
+            self.emoji = emoji
+            self.detail = detail
+            self.actions = actions
+            self.owner = owner
+        }
+    }
+
+    /// Who a loose end already belongs to. The colour and the avatar arrive WITH the name
+    /// so a row paints the person the way the rest of the app does, rather than resolving
+    /// an id against the persons mirror — which planning cannot rely on, since the whole
+    /// module runs over REST and may be read while PowerSync is disconnected.
+    struct LooseEndOwner: Decodable, Sendable, Equatable {
+        let id: String
+        let name: String
+        let colorHex: String?
+        let avatarEmoji: String?
     }
 
     /// Where a card can send an item: a step, with the reason under its name. Filtered

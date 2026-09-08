@@ -70,6 +70,27 @@ interface Choice {
 
 const routeKey = (r: { kind: string; id: string }) => `${r.kind}:${r.id}`
 
+// WHO ALREADY HAS IT — one piece, both modes.
+//
+// Deliberately not two lookalikes: this file renders a row in the card deck AND in see-all,
+// and this codebase has been bitten three times by a component copied because the original
+// was local to one place. The avatar-wash idiom is the Tasks board's own (`chore-ava` with
+// the person's colour at 22 alpha), so a face reads the same here as it does there.
+//
+// Nothing at all when nobody has it: an empty chip on every row would be noise on the mode
+// that already carries the most, and "no owner" is already legible as the absence.
+function Owner({ owner }: { owner: LooseEnd['owner'] }) {
+  if (!owner) return null
+  return (
+    <span className="wp-le-owner">
+      <span className="chore-ava" style={{ background: `${owner.colorHex ?? '#A6A29B'}22` }} aria-hidden>
+        {owner.avatarEmoji ?? '🙂'}
+      </span>
+      {owner.name}
+    </span>
+  )
+}
+
 function Deck({ item, choices, quiet, busy }: {
   item: LooseEnd
   choices: Choice[]
@@ -81,7 +102,10 @@ function Deck({ item, choices, quiet, busy }: {
     // through rather than a form that happens to change.
     <div className="wp-le-stack">
       <div className="wp-le-card">
-        <div className="wp-le-kind">{KIND_LABEL[item.kind]}</div>
+        <div className="wp-le-kind">
+          {KIND_LABEL[item.kind]}
+          <Owner owner={item.owner} />
+        </div>
         <div className="wp-le-t">
           {item.emoji && <span className="wp-le-emoji" aria-hidden>{item.emoji}</span>}
           {item.title}
@@ -472,7 +496,16 @@ function Body({ step, sessionId, weekStart, setDecisionData, busy }: StepBodyPro
                       <span className="wp-le-emoji" aria-hidden>{item.emoji ?? '•'}</span>
                       <span className="wp-le-row-main">
                         <b>{item.title}</b>
-                        {item.detail && <s>{item.detail}</s>}
+                        {/* WHERE IT CAME FROM. The card deck has always said this; see-all
+                            dropped it, which is how eleven rows of bare titles ended up
+                            with a chore called "Groceries" indistinguishable in kind from
+                            an unchecked list item: "I dont know whether its a task or goal
+                            or what (where is it coming from?)". */}
+                        <s className="wp-le-row-meta">
+                          <span className="wp-le-row-kind">{KIND_LABEL[item.kind]}</span>
+                          {item.detail && <span>· {item.detail}</span>}
+                          <Owner owner={item.owner} />
+                        </s>
                       </span>
                       <span className="wp-le-row-acts">
                         {((g.key === 'notDone' ? view.destinations.notDone : view.destinations.parked)).map((d) => (

@@ -201,6 +201,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   much you park. The note explaining the difference between adding an event and parking a
   note has been rewritten, too.
 
+- **Every loose end now says where it came from and who already has it.** The session's
+  first step listed eleven bare titles: a chore called "Groceries" sat next to an unchecked
+  item on a list with nothing to tell them apart, and anything already assigned to somebody
+  gave no hint who. Each row now carries its source — **CHORE**, **LIST**, **RHYTHM**,
+  **GOAL** — and, where something has an owner, that person's name and face. A row with no
+  owner reads as exactly that: nobody has picked it up, which is usually the one worth
+  handing to somebody. An unchecked list item never shows an owner, because a list doesn't
+  have one.
+
 - **You choose which of your lists the planning session asks about — in the session.** The
   first step gathers what's still open — overdue chores, late rhythms, short habits and
   anything left unchecked on your lists — but a list that is *meant* to stay open, a someday

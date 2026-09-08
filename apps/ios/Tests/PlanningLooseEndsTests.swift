@@ -241,10 +241,12 @@ private final class LooseEndsFeed {
 }
 
 private func looseEnd(
-    key: String, kind: String, id: String, title: String, actions: [String]
+    key: String, kind: String, id: String, title: String, actions: [String],
+    owner: WaffledAPI.LooseEndOwner? = nil
 ) -> WaffledAPI.LooseEnd {
     WaffledAPI.LooseEnd(
-        key: key, kind: kind, id: id, title: title, emoji: nil, detail: nil, actions: actions)
+        key: key, kind: kind, id: id, title: title, emoji: nil, detail: nil,
+        actions: actions, owner: owner)
 }
 
 private func looseEndsView(
@@ -760,5 +762,61 @@ private func model(_ feed: LooseEndsFeed) -> PlanningLooseEndsModel {
         let feed = LooseEndsFeed(snapshot: looseEndsView(notDone: []))
         let m = await loaded(feed)
         #expect(m.listCandidates.isEmpty)
+    }
+}
+
+// WHO ALREADY HAS IT.
+//
+// "Some of these are already assigned an owner but we have no idea who." The colour and
+// the avatar arrive with the name because planning runs entirely over REST and may be read
+// while PowerSync is disconnected — so resolving a person id against the mirror is exactly
+// what this payload must not require.
+@Suite struct PlanningLooseEndOwnerTests {
+
+    @Test func decodesTheOwnerWithEverythingNeededToPaintIt() throws {
+        let json = Data("""
+        {
+          "key": "chore:1", "kind": "chore", "id": "1", "title": "Make your bed",
+          "emoji": "🛏️", "detail": "20 days late", "actions": ["done"],
+          "owner": { "id": "p2", "name": "Wally", "colorHex": "#25A368", "avatarEmoji": "🐢" }
+        }
+        """.utf8)
+        let end = try WaffledAPI.decoder.decode(WaffledAPI.LooseEnd.self, from: json)
+        #expect(end.owner?.name == "Wally")
+        #expect(end.owner?.colorHex == "#25A368")
+        #expect(end.owner?.avatarEmoji == "🐢")
+    }
+
+    // Nobody has it — a real state, and the row worth routing. Sent as an explicit null.
+    @Test func anUnownedItemDecodesAsNobody() throws {
+        let json = Data("""
+        { "key": "list:1", "kind": "list", "id": "1", "title": "Return the books",
+          "emoji": null, "detail": "on Around the house", "actions": ["done"], "owner": null }
+        """.utf8)
+        #expect(try WaffledAPI.decoder.decode(WaffledAPI.LooseEnd.self, from: json).owner == nil)
+    }
+
+    // A server predating the field sends no key at all. Swift's decoder is strict, so this
+    // is the case that would blank the whole step rather than drop one chip.
+    @Test func aPayloadWithoutTheFieldStillDecodes() throws {
+        let json = Data("""
+        { "key": "chore:1", "kind": "chore", "id": "1", "title": "Make your bed",
+          "emoji": null, "detail": null, "actions": ["done"] }
+        """.utf8)
+        let end = try WaffledAPI.decoder.decode(WaffledAPI.LooseEnd.self, from: json)
+        #expect(end.owner == nil)
+        #expect(end.title == "Make your bed")
+    }
+
+    // The owner rides through the model untouched — it is the server's word on who has it,
+    // never something this client resolves or re-labels.
+    @MainActor @Test func theModelCarriesTheOwnerToTheRow() async {
+        let owned = looseEnd(
+            key: "chore:1", kind: "chore", id: "1", title: "Make your bed", actions: ["done"],
+            owner: .init(id: "p2", name: "Wally", colorHex: "#25A368", avatarEmoji: "🐢"))
+        let feed = LooseEndsFeed(snapshot: looseEndsView(notDone: [owned]))
+        let m = model(feed)
+        await m.load(weekStart: "2026-09-06", sessionId: "33333333-3333-4333-8333-333333333333")
+        #expect(m.open(.notDone).first?.owner?.name == "Wally")
     }
 }

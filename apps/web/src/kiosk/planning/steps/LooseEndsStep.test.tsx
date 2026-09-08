@@ -42,13 +42,20 @@ const end = (over: Partial<Record<string, unknown>> = {}) => ({
   emoji: '🗑️',
   detail: '3 days late',
   actions: ['done'],
+  // Nobody by default; the fixtures that care say who.
+  owner: null as { id: string; name: string; colorHex: string | null; avatarEmoji: string | null } | null,
   ...over,
 })
+
+// The person an assigned row belongs to, shaped as the server sends it — colour and
+// avatar included, so the row renders the person the way the rest of the app does.
+const WALLY = { id: 'p2', name: 'Wally', colorHex: '#25A368', avatarEmoji: '🐢' }
 
 const VIEW = {
   weekStart: '2026-09-06',
   notDone: [
-    end(),
+    // A chore somebody already has, and a list item that cannot have an owner at all.
+    end({ owner: WALLY }),
     end({ key: 'list:l1', kind: 'list', id: 'l1', title: 'Return the library books', emoji: null, detail: 'on Around the house' }),
   ],
   parked: [
@@ -547,5 +554,56 @@ describe('loose ends · which lists it asks about', () => {
     renderStep()
     await screen.findByText('Take the bins out')
     expect(screen.queryByRole('button', { name: /Which lists/i })).toBeNull()
+  })
+})
+
+// WHERE A ROW COMES FROM, AND WHO ALREADY HAS IT.
+//
+// "I dont know whether its a task or goal or what (where is it coming from?)" and "some of
+// these are already assigned an owner but we have no idea who."
+//
+// The card deck has always labelled the kind; SEE-ALL dropped it, which is the mode the
+// report came from — eleven rows of bare titles, one of them a chore called "Groceries"
+// sitting next to an unchecked list item. The owner was missing from both modes.
+describe('loose ends · where a row comes from and who has it', () => {
+  it('labels every see-all row with the source it came from', async () => {
+    mockApi()
+    renderStep()
+    fireEvent.click(await screen.findByRole('button', { name: /See all/ }))
+
+    const chore = await screen.findByText('Take the bins out')
+    const row = chore.closest('.wp-le-row')!
+    expect(within(row as HTMLElement).getByText('Chore')).toBeTruthy()
+
+    const listItem = screen.getByText('Return the library books').closest('.wp-le-row')!
+    expect(within(listItem as HTMLElement).getByText('List')).toBeTruthy()
+  })
+
+  it('names the person a see-all row already belongs to', async () => {
+    mockApi()
+    renderStep()
+    fireEvent.click(await screen.findByRole('button', { name: /See all/ }))
+
+    const row = (await screen.findByText('Take the bins out')).closest('.wp-le-row')!
+    expect(within(row as HTMLElement).getByText('Wally')).toBeTruthy()
+  })
+
+  // The card is one item at a time, so the ambiguity is milder there — but "we have no
+  // idea who" was true of it too, and it is the same payload field.
+  it('names the person on the card as well', async () => {
+    mockApi()
+    renderStep()
+    const card = (await screen.findByText('Take the bins out')).closest('.wp-le-card')!
+    expect(within(card as HTMLElement).getByText('Wally')).toBeTruthy()
+  })
+
+  // Nothing rather than a placeholder: a list item cannot have an owner at all, and an
+  // empty chip on every row would be noise on the mode that already has the most of it.
+  it('shows no owner where there is none', async () => {
+    mockApi()
+    renderStep()
+    fireEvent.click(await screen.findByRole('button', { name: /See all/ }))
+    const row = (await screen.findByText('Return the library books')).closest('.wp-le-row')!
+    expect((row as HTMLElement).querySelector('.wp-le-owner')).toBeNull()
   })
 })

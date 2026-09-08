@@ -48,6 +48,22 @@ import { listGoals, logProgress } from '../../goals/goals.service'
 // The shape the step reads
 // ---------------------------------------------------------------------------
 
+// WHO A LOOSE END ALREADY BELONGS TO.
+//
+// Reported as "some of these are already assigned an owner but we have no idea who": the
+// deck showed a title and how late it was, so a board of eleven rows could not tell you
+// whose bed was unmade — and routing something that already has an owner is a different
+// decision from routing something nobody has picked up.
+//
+// The colour and the avatar travel WITH the name so each client renders the person the way
+// the rest of its app does, rather than inventing a chip of its own from an id.
+export interface LooseEndOwner {
+  id: string
+  name: string
+  colorHex: string | null
+  avatarEmoji: string | null
+}
+
 export type LooseEndKind = 'chore' | 'list' | 'rhythm' | 'goal' | 'parked'
 export type LooseEndGroup = 'notDone' | 'parked'
 
@@ -68,6 +84,10 @@ export interface LooseEnd {
   id: string
   title: string
   emoji: string | null
+  // Who it already belongs to, or null for "nobody has this" — which is a real state and
+  // exactly the row worth routing, not a missing value. Null throughout for a list item
+  // (a list has no owner) and for a parked note (whose byline is in `detail`).
+  owner: LooseEndOwner | null
   // The one line under the title: how late, which list, how short, or — for a parked
   // note — who wrote it, how long ago, and how many sessions have passed it over.
   // Composed here so web and iOS say the same thing.
@@ -123,6 +143,28 @@ export interface LooseEndsView {
   // `sources` is derived from below.
   lists: PlanningListCandidate[]
 }
+
+// What a source returns before owners are resolved: the item plus the id of whoever holds
+// it. Two of the four sources come back through ANOTHER module's reader (`listAttention`,
+// `listGoals`) and own no SQL to join `persons` in, so resolving per-source would mean two
+// mechanisms for one field in one payload — which is how they drift. One map, applied
+// once, in `getLooseEnds`.
+type SourceEnd = Omit<LooseEnd, 'owner'> & { ownerId: string | null }
+
+/// The household's people, by id. Small by construction: a household, not a table scan.
+async function peopleById(householdId: string): Promise<Map<string, LooseEndOwner>> {
+  const { rows } = await query<{ id: string; name: string; color_hex: string | null; avatar_emoji: string | null }>(
+    `select id, name, color_hex, avatar_emoji
+       from persons where household_id = $1 and deleted_at is null`,
+    [householdId]
+  )
+  return new Map(rows.map((r) => [r.id, {
+    id: r.id, name: r.name, colorHex: r.color_hex, avatarEmoji: r.avatar_emoji,
+  }]))
+}
+
+const withOwners = (items: SourceEnd[], people: Map<string, LooseEndOwner>): LooseEnd[] =>
+  items.map(({ ownerId, ...rest }) => ({ ...rest, owner: (ownerId && people.get(ownerId)) || null }))
 
 // A defensive ceiling per source. The step is a deck with a see-all escape hatch, so
 // twenty items is by design — two thousand is a runaway module, and paging a deck is
@@ -200,15 +242,18 @@ async function availableDestinations(
 
 // Overdue chore instances. `awaiting` is excluded on purpose — it has been done and is
 // sitting in the approvals queue, which is the approver's business, not the week's.
-async function overdueChores(householdId: string, today: string): Promise<LooseEnd[]> {
+async function overdueChores(householdId: string, today: string): Promise<SourceEnd[]> {
   const { rows } = await query<{
     id: string
     due_on: string
     requires_photo: boolean
     title: string
     emoji: string | null
+    person_id: string | null
   }>(
-    `select ci.id, ci.due_on::text as due_on, ci.requires_photo, c.title, c.emoji
+    // `ci.person_id`, not the chore's: an instance can be reassigned for the day, and the
+    // instance is what is actually late.
+    `select ci.id, ci.due_on::text as due_on, ci.requires_photo, c.title, c.emoji, ci.person_id
        from chore_instances ci
        join chores c on c.id = ci.chore_id and c.deleted_at is null
       where ci.household_id = $1
@@ -225,6 +270,7 @@ async function overdueChores(householdId: string, today: string): Promise<LooseE
     id: r.id,
     title: r.title,
     emoji: r.emoji,
+    ownerId: r.person_id,
     detail: lateBy(daysBetween(r.due_on, today)),
     // No "it's done already" when the chore demands a photo: there is no camera in a
     // planning session, and completeInstance would (rightly) refuse. Route it instead.
@@ -286,7 +332,7 @@ export async function planningListCandidates(householdId: string): Promise<Plann
 
 async function staleListItems(
   householdId: string, currentWeek: string, plannedWeek: string, listIds: string[]
-): Promise<LooseEnd[]> {
+): Promise<SourceEnd[]> {
   const { rows } = await query<{
     id: string
     name: string
@@ -326,6 +372,10 @@ async function staleListItems(
     id: r.id,
     title: r.name,
     emoji: r.emoji,
+    // A LIST HAS NO OWNER. `list_items.created_by` records who typed the row, which is
+    // provenance rather than ownership — rendering it in an owner slot would teach the
+    // wrong thing about what the column means.
+    ownerId: null,
     detail: `on ${r.list_name}`,
     actions: ['done'] as LooseEndAction[],
   }))
@@ -335,9 +385,9 @@ async function staleListItems(
 // place that knows how period boundaries tile ("Today passes a one-day window, the
 // weekly planner passes a week"). The horizon here is today: a rhythm that is not late
 // yet is not a loose end, it is next week's problem.
-async function rhythmsPastDue(householdId: string, today: string): Promise<LooseEnd[]> {
+async function rhythmsPastDue(householdId: string, today: string): Promise<SourceEnd[]> {
   const attention = await listAttention(householdId, today)
-  const out: LooseEnd[] = []
+  const out: SourceEnd[] = []
   for (const item of attention) {
     if (item.kind === 'due') {
       if (!item.overdue) continue
@@ -347,6 +397,7 @@ async function rhythmsPastDue(householdId: string, today: string): Promise<Loose
         id: item.rhythm.id,
         title: item.rhythm.title,
         emoji: item.rhythm.emoji,
+        ownerId: item.rhythm.personId,
         detail: lateBy(daysBetween(item.dueAt.slice(0, 10), today)),
         actions: ['done'],
       })
@@ -357,6 +408,7 @@ async function rhythmsPastDue(householdId: string, today: string): Promise<Loose
         id: item.rhythm.id,
         title: item.rhythm.title,
         emoji: item.rhythm.emoji,
+        ownerId: item.rhythm.personId,
         detail: 'Nothing booked for this period',
         // "It's done already" on an unbooked period means the period is settled —
         // which in the rhythms module is a period skip, not a completion.
@@ -370,7 +422,7 @@ async function rhythmsPastDue(householdId: string, today: string): Promise<Loose
 // Habit goals short for the week. `periodDone` is the goals module's own read of the
 // CURRENT period (distinct days logged), so nothing is recomputed here — see the
 // "goal display axis" rule: a habit is this period's count, never a lifetime total.
-async function shortHabits(householdId: string): Promise<LooseEnd[]> {
+async function shortHabits(householdId: string): Promise<SourceEnd[]> {
   const goals = await listGoals(householdId)
   return goals
     .filter((g) => g.goalType === 'habit' && g.habitPeriod === 'week')
@@ -382,6 +434,11 @@ async function shortHabits(householdId: string): Promise<LooseEnd[]> {
       id: g.id,
       title: g.title,
       emoji: g.emoji,
+      // ONE participant and a per-person basis ⇒ it is theirs. A family habit belongs to
+      // everybody, and naming one of them as its owner would be worse than an empty slot.
+      ownerId: g.targetBasis !== 'family' && g.participants?.length === 1
+        ? (g.participants[0] as { personId: string }).personId
+        : null,
       detail: `${g.periodDone} of ${Math.max(1, g.habitTargetPerPeriod ?? 1)} this week`,
       actions: ['done'] as LooseEndAction[],
     }))
@@ -450,6 +507,8 @@ export async function listParked(householdId: string): Promise<LooseEnd[]> {
       id: r.id,
       title: r.note,
       emoji: null,
+      // The byline ('Parked by Kevin · 2 weeks ago') is already in `detail`.
+      owner: null,
       detail: bits.join(' · '),
       // 'done' is "Talk about it now" — two minutes and it is settled here; 'drop' is
       // the answer only this group can take, because the note exists nowhere else.
@@ -817,18 +876,19 @@ export async function getLooseEnds(householdId: string, weekStart: string, sessi
   // them all out" — the first is vacuous, the second is the setting being used.
   const listCandidates = enabled(settings, 'lists') ? await planningListCandidates(householdId) : []
   const askableLists = listCandidates.filter((l) => l.relevant).map((l) => l.id)
-  const [chores, lists, rhythms, goals, parked, routes] = await Promise.all([
+  const [chores, lists, rhythms, goals, parked, routes, people] = await Promise.all([
     enabled(settings, 'chores') ? overdueChores(householdId, today) : Promise.resolve([]),
     askableLists.length ? staleListItems(householdId, currentWeek, weekStart, askableLists) : Promise.resolve([]),
     enabled(settings, 'rhythms') ? rhythmsPastDue(householdId, today) : Promise.resolve([]),
     enabled(settings, 'goals') ? shortHabits(householdId) : Promise.resolve([]),
     listParked(householdId),
     sessionId ? listRoutes(sessionId) : Promise.resolve([]),
+    peopleById(householdId),
   ])
   // Chores first, then what's still open on the lists, then the slow-burning
   // maintenance, then the habits: roughly most-urgent to least, which is the order the
   // deck walks.
-  const notDone = [...chores, ...lists, ...rhythms, ...goals]
+  const notDone = withOwners([...chores, ...lists, ...rhythms, ...goals], people)
   return {
     weekStart,
     notDone,

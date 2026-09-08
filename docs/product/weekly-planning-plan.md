@@ -351,6 +351,45 @@ Two things had to be decided to close it:
 The per-step list stays, underneath, because it is the only place that records which steps
 were skipped **on purpose** — an outcome, not a gap.
 
+### A row has to say where it came from and who has it
+
+Step 1 gathers from four modules and then rendered a title, a one-line detail and nothing
+else. On the card deck that is survivable — one item at a time, with its kind labelled
+above it. In SEE-ALL, eleven rows deep, it isn't:
+
+> "I dont know whether its a task or goal or what (where is it coming from?)" · "Some of
+> these are already assigned an owner but we have no idea who."
+
+Both were true, and the second was true of the card as well. Two rules came out of fixing
+it:
+
+- **See-all had silently dropped the kind label the card already had.** Not a missing
+  feature so much as a mode that diverged — worth remembering next time a step grows a
+  second presentation: the two modes render the same item and should say the same things
+  about it. The screenshot that prompted this had a chore called "Groceries" sitting
+  directly above an unchecked list item, visually identical in kind.
+- **The owner is resolved ONCE, in `getLooseEnds`, from a person map** — not joined per
+  source. Two of the four sources come back through another module's own reader
+  (`listAttention`, `listGoals`) and own no SQL to join `persons` into, so resolving
+  per-source would put two mechanisms for one field in one payload, which is how they
+  drift. The colour and the avatar travel WITH the name, because planning runs entirely
+  over REST and may be read while PowerSync is disconnected — resolving a person id
+  against the mirror is exactly what this payload must not require.
+
+Who counts as an owner, per source, and why:
+
+| source | owner | why |
+| --- | --- | --- |
+| chore | `chore_instances.person_id` | the INSTANCE, not the chore — an instance can be reassigned for the day, and the instance is what is late |
+| rhythm | `rhythms.person_id` | a rhythm can belong to one person or to the household |
+| goal | the single participant, unless `targetBasis = 'family'` | a family habit belongs to everybody; naming one of them would be worse than an empty slot |
+| list | **never** | `list_items.created_by` is who typed the row — provenance, not ownership, and putting it in an owner slot would teach the wrong thing about the column |
+| parked | **never** | its byline ("Parked by Kevin · 2 weeks ago") is already in `detail` |
+
+**No owner renders nothing at all**, rather than a placeholder chip. "Nobody has this" is
+already legible as the absence, and an empty chip on every unowned row would be noise on
+the mode that carries the most of it.
+
 ### Which lists step 1 asks about is the household's call
 
 Step 1 reads four sources, and only one of them needed a switch:
