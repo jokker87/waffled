@@ -73,7 +73,14 @@ func Pick(scope Scope, preferred, window int, exclude ...int) (int, error) {
 			return candidate, nil
 		}
 	}
-	return 0, fmt.Errorf("no free %s port in %d..%d", scope, preferred, preferred+window-1)
+	return 0, ErrNoFreePort(scope, preferred, window)
+}
+
+// ErrNoFreePort is the error Pick returns when a scan window is exhausted. It is
+// exported so a caller that runs its own scan — with an injected freeness test, to keep
+// allocation testable — reports failure in exactly the same words.
+func ErrNoFreePort(scope Scope, preferred, window int) error {
+	return fmt.Errorf("no free %s port in %d..%d", scope, preferred, preferred+window-1)
 }
 
 // VerifyAvailable is the check for a port persisted in runtime.json. A port we chose on
