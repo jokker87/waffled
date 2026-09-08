@@ -1,0 +1,60 @@
+package supervisor
+
+import (
+	"context"
+	"strings"
+	"testing"
+	"time"
+)
+
+// Real `dns-sd -B _waffled._tcp .` output, one Add line per interface.
+const browseOutput = `Browsing for _waffled._tcp
+DATE: ---Tue 08 Sep 2026---
+16:19:25.646  ...STARTING...
+Timestamp     A/R    Flags  if Domain               Service Type         Instance Name
+16:19:26.847  Add        3   1 local.               _waffled._tcp.       The Seinfelds
+16:19:26.847  Add        2  14 local.               _waffled._tcp.       The Seinfelds
+`
+
+func TestBrowseOutputFindsOurInstance(t *testing.T) {
+	if !instanceSeen(browseOutput, "The Seinfelds") {
+		t.Error("our own instance was not found in a browse that lists it")
+	}
+	if instanceSeen(browseOutput, "The Costanzas") {
+		t.Error("a different household's instance was matched")
+	}
+	// mDNSResponder renames on a name collision, and the renamed instance is still ours
+	// — the household should not be told discovery is broken because a neighbour got
+	// there first.
+	renamed := strings.ReplaceAll(browseOutput, "The Seinfelds", "The Seinfelds (2)")
+	if !instanceSeen(renamed, "The Seinfelds") {
+		t.Error("an instance renamed by mDNSResponder on a collision was not recognised")
+	}
+	// A browse that saw nothing, and a removal, are both "not there".
+	if instanceSeen("Browsing for _waffled._tcp\n...STARTING...\n", "The Seinfelds") {
+		t.Error("an empty browse reported an instance")
+	}
+	if instanceSeen(strings.ReplaceAll(browseOutput, "Add ", "Rmv "), "The Seinfelds") {
+		t.Error("a withdrawn registration was reported as present")
+	}
+}
+
+// dns-sd -B browses forever, and its stdout is block-buffered down a pipe: a browse that
+// ends by being killed comes back EMPTY, which would report an empty network on a Mac
+// that is advertising fine. It has to end by itself, in time, with its output flushed.
+func TestBrowseIsBoundedAndReturnsWhatItHeard(t *testing.T) {
+	if browseTool() == "" {
+		t.Skip("no dns-sd on this platform")
+	}
+	start := time.Now()
+	out, err := browseBonjour(context.Background(), 2*time.Second)
+	if err != nil {
+		t.Fatalf("browse returned an error for its own deadline: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Errorf("browse ran for %s — it is not bounded", elapsed)
+	}
+	if !strings.Contains(out, "_waffled._tcp") {
+		t.Errorf("the browse output was not captured before the deadline killed it:\n%s", out)
+	}
+}

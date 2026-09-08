@@ -14,7 +14,10 @@ package supervisor
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
@@ -281,6 +284,101 @@ func (s *Supervisor) householdCensus(ctx context.Context) bonjour.Census {
 // One scalar, not two queries: with exactly one row max(name) IS that row's name, and
 // with any other count the name is not used at all.
 const householdCensusSQL = `select count(*) || '|' || coalesce(max(name), '') from households where deleted_at is null`
+
+// ── the doctor check ────────────────────────────────────────────────────────────────
+//
+// `status` can only say what this Mac asked for. Whether the rest of the house can
+// actually see it is a different question, and the answer is usually a firewall or the
+// Local Network privacy prompt — so it is asked once, when a human runs `doctor`, rather
+// than on every poll.
+
+// browseTimeout is how long the browse is given. mDNSResponder answers a local
+// registration almost immediately; this is generous, and it is spent only on `doctor`.
+const browseTimeout = 3 * time.Second
+
+func browseTool() string { return bonjour.Tool() }
+
+// browseBonjour asks what is on the network and returns whatever it heard.
+//
+// `dns-sd -B` browses forever, so it is asked to stop itself with `-t <seconds>` rather
+// than killed on a context deadline. That is not a style choice: its stdout is block-
+// buffered when it is a pipe rather than a terminal, so a killed browse exits with
+// everything it found still in the buffer and this check would report an empty network
+// on a Mac that is advertising perfectly well. The context is still bounded, a couple of
+// seconds wider, in case dns-sd ignores its own timeout.
+func browseBonjour(ctx context.Context, timeout time.Duration) (string, error) {
+	tool := browseTool()
+	if tool == "" {
+		return "", errNoDNSSD
+	}
+	seconds := int(timeout / time.Second)
+	if seconds < 1 {
+		seconds = 1
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout+2*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, tool, "-t", strconv.Itoa(seconds), "-B", bonjour.ServiceType, ".").Output()
+	if err != nil && ctx.Err() == nil {
+		// It failed for its own reasons rather than because we stopped it.
+		return string(out), err
+	}
+	return string(out), nil
+}
+
+var errNoDNSSD = errors.New("this platform has no dns-sd client")
+
+// instanceSeen reads dns-sd's browse table for one of our own registrations.
+//
+// The name is matched as a PREFIX of the instance column: mDNSResponder appends " (2)"
+// when another Mac on the network already advertises the same household name, and that
+// renamed instance is still ours.
+func instanceSeen(out, name string) bool {
+	if strings.TrimSpace(name) == "" {
+		return false
+	}
+	for _, line := range strings.Split(out, "\n") {
+		fields := strings.Fields(line)
+		// Timestamp, A/R, Flags, if, Domain, Service Type, then the instance name —
+		// which may itself contain spaces, so it is whatever is left.
+		if len(fields) < 7 || fields[1] != "Add" {
+			continue
+		}
+		instance := strings.Join(fields[6:], " ")
+		if strings.HasPrefix(instance, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// bonjourCheck answers "can a phone find this Mac?".
+func (s *Supervisor) bonjourCheck(ctx context.Context) Check {
+	const name = "bonjour"
+	b := s.BonjourStatus()
+	switch {
+	case browseTool() == "":
+		return Check{Name: name, Status: CheckWarn,
+			Detail: "this platform has no dns-sd client, so devices have to be given the address"}
+	case b.Error != "":
+		return Check{Name: name, Status: CheckWarn, Detail: "not advertising: " + b.Error}
+	case !b.Advertised:
+		return Check{Name: name, Status: CheckWarn,
+			Detail: "nothing is being advertised — start the server to make it discoverable"}
+	}
+
+	out, err := browseBonjour(ctx, browseTimeout)
+	if err != nil {
+		return Check{Name: name, Status: CheckWarn, Detail: fmt.Sprintf("could not browse the network: %v", err)}
+	}
+	if !instanceSeen(out, b.Name) {
+		return Check{Name: name, Status: CheckWarn, Detail: fmt.Sprintf(
+			"%q is registered but did not answer a browse within %s — check the firewall "+
+				"(System Settings → Network → Firewall) and, on Sonoma and later, that Waffled is "+
+				"allowed under Privacy & Security → Local Network", b.Name, browseTimeout)}
+	}
+	return Check{Name: name, Status: CheckOK, Detail: fmt.Sprintf(
+		"%q is discoverable as %s on %s port %d", b.Name, bonjour.ServiceType, b.Host, b.Port)}
+}
 
 func parseCensus(out string) bonjour.Census {
 	// Cut once: a household name may contain the separator, the count never can.

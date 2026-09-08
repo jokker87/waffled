@@ -143,6 +143,10 @@ func (s *Supervisor) Doctor(ctx context.Context) []Check {
 		}
 	}
 
+	// Discovery: `status` can only report what this Mac asked for, so this is the one
+	// place that asks the network whether the advertisement actually answers.
+	checks = append(checks, s.bonjourCheck(ctx))
+
 	if !s.postgresInitialized() {
 		add("postgres", CheckWarn, "no database cluster yet — it is created on the first start")
 		return checks
