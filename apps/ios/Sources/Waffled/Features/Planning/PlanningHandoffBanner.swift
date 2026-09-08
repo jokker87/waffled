@@ -53,6 +53,18 @@ import SwiftUI
 ///
 /// The caller must give this an `.id(step.key)` (the shell does): `hidden` and `made` are
 /// per-row local state and a step change has to start them empty.
+/// WHICH WORDS A HANDOFF ANSWER CARRIES: the in-place edit when there is one, otherwise the
+/// note as stored.
+///
+/// A one-line rule that lives outside the view on purpose — the banner is SwiftUI and this
+/// app has no view tests, so the only way to pin the behaviour that was wrong (rendering the
+/// edit while sending the original) is to make the decision testable on its own.
+enum PlanningHandoffWords {
+    static func of(_ note: WaffledAPI.PlanningStepHandoff, edited: [String: String]) -> String {
+        edited[note.id] ?? note.note
+    }
+}
+
 struct PlanningHandoffBanner: View {
     let step: WaffledAPI.PlanningStep
     /// EVERY route step 1 wrote this session, not just this step's — the box filters to
@@ -130,7 +142,7 @@ struct PlanningHandoffBanner: View {
 
     /// The words to show for a note — this sitting's rewrite when there is one.
     private func words(_ note: WaffledAPI.PlanningStepHandoff) -> String {
-        edited[note.id] ?? note.note
+        PlanningHandoffWords.of(note, edited: edited)
     }
 
     /// The tag chips an edit may choose from. Step 1 is never among them: the server
@@ -263,7 +275,11 @@ struct PlanningHandoffBanner: View {
                     // The note's id is captured HERE rather than parked in a field, so a
                     // second composer opened before the first reports back cannot settle
                     // the wrong note.
-                    verb.run(note.note) { created in
+                    // THE EDITED WORDS, not the stored ones. The banner renders
+                    // `words(note)`, so a note corrected in place shows its correction —
+                    // and this used to hand `note.note` to the composer anyway, discarding
+                    // that correction at the one moment the note becomes a real thing.
+                    verb.run(words(note)) { created in
                         // A CANCELLED composer settles nothing. Ticking the note off would
                         // throw away the only record that it still needs doing, on the
                         // strength of somebody having opened a box and closed it again.
