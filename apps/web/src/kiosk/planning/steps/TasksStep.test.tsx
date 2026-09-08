@@ -39,6 +39,23 @@ const step: PlanningStep = {
 }
 
 const WEEK = '2026-09-06' // a Sunday; 09-09 is Wed, 09-12 is Sat
+
+// THE CLOCK IS PART OF THE FIXTURE, because `WEEK` is.
+//
+// This suite plans one hard-coded week, and a planning session behaves differently for a
+// week that is already over — the server floors the plannable week at the household's
+// CURRENT one, so a week in the past is a state the product cannot reach. Left to the real
+// clock, this file described a reachable week until 2026-09-06 and an unreachable one
+// afterwards: "a task added here lands in the week being planned" began failing on its
+// own, with no change to any source file, because the Sunday it plans had gone by.
+//
+// Only `Date` is faked. The timers stay real, so `waitFor` and the rest of
+// @testing-library's async helpers behave exactly as they did.
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date('2026-09-03T12:00:00Z')) // the Thursday before WEEK
+})
+afterEach(() => { vi.useRealTimers() })
 interface Card {
   id: string; title: string; emoji: string | null; rrule: string | null; cadence: string
   days: string[]; dueOn: string | null; dueTime: string | null; carriedOver: boolean
