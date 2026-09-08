@@ -2,35 +2,28 @@ import SwiftUI
 
 /// Weekly Planning · step 6 "Goals" — "What's each group's focus this week?"
 ///
-/// Ported from `apps/web/src/kiosk/planning/steps/GoalsStep.tsx`.
+/// Web parity with `planning/steps/GoalsStep.tsx`.
 ///
-/// THE TABS ARE THE `goal_lists` THAT ALREADY EXIST: 🏡 the family one, 💛 the couple's
-/// private one with its lock, one per person. Borrowing the group picker means only ONE
-/// group is on screen at a time — six cards of everybody's goals is the thing this step
-/// exists to avoid — and a ★ on a tab says that group has settled, so the room can see
-/// what's left without reading all of them.
+/// THE TABS ARE THE `goal_lists` THAT ALREADY EXIST — the family one, the couple's private
+/// one, one per person. Borrowing the group picker keeps ONE group on screen at a time
+/// (six cards of everybody's goals is what this step exists to avoid), and a ★ on a tab
+/// says that group has settled. Picking a goal sets the goals module's own `is_featured`;
+/// there is no second "focus" concept, a hand-made pin is never cleared, and picking
+/// NOTHING settles the group just the same.
 ///
-/// Picking a goal sets the goals module's own `is_featured` flag; there is no second
-/// "focus" concept, and a pin somebody made by hand is never cleared. Picking NOTHING is a
-/// real answer and settles the group just the same.
+/// ANSWERING THE STEP IS SEPARATE FROM SETTING FOCUS. `/goals/focus` merges onto the step
+/// row and leaves `status` alone — the shell's affirmative decides the step. So this body
+/// must mirror the server's focus map back through `setDecisionData` after every read and
+/// write, because that affirmative REPLACES the step's data with whatever the crumb holds.
 ///
-/// ANSWERING THE STEP IS SEPARATE FROM SETTING FOCUS. `/goals/focus` is a mid-step write:
-/// it merges onto the step row and deliberately leaves `status` alone, so this body never
-/// decides the step — the shell's affirmative does. What it must do is mirror the server's
-/// own focus map back through `setDecisionData` after every read and every write, because
-/// pressing that affirmative REPLACES the step's data with whatever the crumb holds.
+/// PROGRESS GOES THROUGH `GoalDisplay`, never `totalProgress`: a habit resets each period,
+/// so a lifetime 340 would read as long-since done where this week's answer is "2 of 5".
 ///
-/// PROGRESS GOES THROUGH `GoalDisplay`, never `totalProgress`: a habit's question is "how
-/// many this period?" and it resets, so a lifetime count of 340 would read as long-since
-/// done where this week's honest answer is "2 of 5".
-///
-/// "＋ NEW GOAL FOR THIS WEEK" OPENS THE GOALS MODULE'S OWN EDITOR AS A SHEET, not a route
-/// away: leaving for the Goals screen abandons the session, and nothing brings the family
-/// back, so a fifteen-second answer ejects them from the whole thing. Presented from here
-/// the group is FIXED to the tab they were standing on (`lockedListId`, so it cannot be
-/// answered for the wrong group by accident) and the goal is pinned on the way in
-/// (`startFeatured`), which is what makes it come back as this week's focus without a
-/// second trip.
+/// "＋ NEW GOAL FOR THIS WEEK" OPENS THE GOALS MODULE'S OWN EDITOR AS A SHEET, never a
+/// route away — leaving for the Goals screen abandons the session with nothing to bring
+/// the family back. The group is FIXED to the tab they were on (`lockedListId`) and the
+/// goal is pinned on the way in (`startFeatured`), so it returns as this week's focus
+/// without a second trip.
 struct GoalsStepView: View {
     let props: PlanningStepProps
 

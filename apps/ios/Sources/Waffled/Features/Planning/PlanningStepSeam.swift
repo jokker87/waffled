@@ -2,19 +2,13 @@ import SwiftUI
 
 // THE CONTRACT BETWEEN THE SHELL AND A STEP.
 //
-// The shell owns the chrome — the step counter, the title, the one question, the week
-// label, the progress hair, "Leave for now", Skip and the affirmative — and each step
-// owns only what goes between them. This file is the single place the two meet, and it
-// is COMPLETE ON DAY ONE: all ten keys point at all ten view types, and all ten of those
-// exist as stubs from the start.
+// The shell owns the chrome — step counter, title, the one question, the week label, the
+// progress hair, "Leave for now", Skip and the affirmative — and each step owns only what
+// goes between them. This file is the single place the two meet: all ten keys point at all
+// ten view types, so building a step means editing that step's own files and nothing else.
 //
-// That is deliberate and it is the whole reason the port can be done in parallel:
-// building a step means editing that step's own files and nothing else. Nobody has to
-// come back here to register anything, so no two people ever queue on this file.
-//
-// Ported from `apps/web/src/kiosk/planning/registry.ts`, which does the same job with
-// lazy imports. The Swift equivalent of "lazily imported" is that a `switch` in a
-// `@ViewBuilder` only builds the arm it takes.
+// Web parity with `planning/registry.ts`, which does the same job with lazy imports; the
+// Swift equivalent is that a `switch` in a `@ViewBuilder` builds only the arm it takes.
 
 /// What every step body is handed.
 struct PlanningStepProps {

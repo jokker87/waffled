@@ -1,20 +1,16 @@
-// Weekly Planning · step 4 (Family night) — "Accept the rotation, or change it?"
+// Weekly Planning · step 4 (Family night) — against a real Postgres (Testcontainers).
 //
-// The step is ONE READ over the familyNight module and no writes of its own: pinning a
-// part, naming a theme and calling the week off all go through the module's existing
-// POST /api/family-night/occurrence. So what's asserted here is (a) the read is scoped
-// to the WEEK BEING PLANNED rather than the module's own "next gathering on/after
-// today", and (b) the three sentences the design calls requirements actually hold
-// against the shipped tables:
+// One read over the familyNight module and no writes of its own. Asserted here: the
+// read is scoped to the WEEK BEING PLANNED rather than the module's "next gathering on
+// or after today", and the three design requirements hold against the shipped tables —
+//   1. a pin lives on the OCCURRENCE (a date), never on households.settings, so next
+//      week comes back on rotation;
+//   2. the pin materializes the occurrence, and the occurrence COUNT is the rotation's
+//      clock, so next week's turn advances;
+//   3. calling the week off leaves the recurring calendar event alone.
 //
-//   1. "pinned for this week only"  — a pin lives on the occurrence (a date), never on
-//      households.settings.familyNight. Next week must come back on rotation.
-//   2. "which is what shifts next week's turn" — the pin materializes the occurrence,
-//      and the occurrence COUNT is the rotation's clock, so next week advances.
-//   3. "without touching the recurring calendar event" — which holds. The design's
-//      draft also said "without advancing the rotation"; that half was settled the other
-//      way as a product call (a skipped week takes its turn), and the last describe in
-//      this file now pins the RULE rather than a gap. See the comment there.
+// "Without advancing the rotation" was settled the other way as a product call (a
+// skipped week takes its turn); the last describe pins that rule.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from './helpers/pg'
 import jwt from 'jsonwebtoken'

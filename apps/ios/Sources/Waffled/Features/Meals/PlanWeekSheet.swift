@@ -264,7 +264,6 @@ struct PlanWeekSheet: View {
                     UseUpCard(items: $wantToTry, input: $wantToTryInput,
                               title: "Dishes to try", placeholder: "+ Dish to try")
 
-                    // Keep in mind
                     WaffledFieldCard(title: "Keep in mind") {
                         TextField("e.g. Lottie skips spicy · Tue & Thu are busy — keep under 30 min",
                                   text: $keepInMind, axis: .vertical)

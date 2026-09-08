@@ -1,23 +1,15 @@
 // Weekly Planning · step 10 · Recap — against a real Postgres (Testcontainers).
 //
-// The step reads what every other step decided, and the design's governing sentence is
-// "every line is a pointer rather than a copy". So what this file mostly drives out is
-// a NEGATIVE: the recap must not become a second, stale copy of the household's data.
+// Mostly a NEGATIVE: the recap must not become a second, stale copy of the household's
+// data (see recap.ts and the plan doc). Three rules asserted throughout:
+//   1. EVERY LINE RESOLVES AT READ TIME — undo a decision elsewhere and the line
+//      changes or disappears rather than keeping the old answer.
+//   2. A SUGGESTION IS NOT A DECISION — the family-night rotation's host and a
+//      pre-selected featured goal are not things the family said.
+//   3. A DELIBERATE NON-ANSWER IS AN OUTCOME, while an unreached step is not.
 //
-// Concretely, three rules it asserts over and over:
-//
-//   1. EVERY LINE RESOLVES AT READ TIME. Nothing is counted into a column, nothing is
-//      copied at decision time. Undo a decision somewhere else and the line changes or
-//      disappears — it never keeps claiming the old answer.
-//   2. A SUGGESTION IS NOT A DECISION. The family-night rotation suggests a host and
-//      the goals step pre-selects an already-featured goal; neither is something the
-//      family said, so neither may be reported as a decision.
-//   3. A DELIBERATE NON-ANSWER IS AN OUTCOME. A skipped step and a group that settled
-//      on "nothing this week" both belong on the record as real answers ("left alone on
-//      purpose") — while a step nobody has reached yet belongs nowhere at all.
-//
-// Everything else the step shows is somebody else's read, already tested in its own
-// file, so this one asserts the JOIN rather than re-testing the sources.
+// Every other line the step shows is somebody else's read, tested in its own file, so
+// this one asserts the JOIN rather than re-testing the sources.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from './helpers/pg'
 import jwt from 'jsonwebtoken'

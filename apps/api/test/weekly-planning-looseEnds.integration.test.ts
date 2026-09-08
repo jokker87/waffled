@@ -1,17 +1,11 @@
 // Weekly Planning · step 1 "Loose ends" — the read over four modules, the ROUTING that
-// is the step's whole job, and the two answers that are allowed to write. Against a
-// real Postgres (Testcontainers).
+// is the step's whole job, and the two answers allowed to write. Real Postgres.
 //
-// The step's argument is in these tests:
-//   · STEP 1 ROUTES; IT DOES NOT REPAIR. "Routing here changes nothing in your modules
-//     — it only decides which step handles it." The load-bearing assertion is that an
-//     overdue chore is STILL overdue after being routed, and the decision is on the
-//     SESSION (planning_session_steps.data.routes), where every later step can read it.
-//   · "Not done" is COMPUTED. Nobody typed it, so nothing about it is stored here.
-//   · "Parked" is the one group with a table, because it exists nowhere else yet — and
-//     the only group where Drop is a real answer.
-//   · A source module that is turned off contributes nothing, on the read AND on the
-//     write: planning must not be a hole that reaches into a disabled module.
+// The load-bearing assertions: an overdue chore is STILL overdue after being routed,
+// and the decision lands on the SESSION (`planning_session_steps.data.routes`) where
+// every later step reads it. "Not done" is computed and stored nowhere; "Parked" is the
+// one group with a table and the only one where Drop is a real answer; a source module
+// that is off contributes nothing, on the read AND the write.
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest'
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from './helpers/pg'
 import jwt from 'jsonwebtoken'

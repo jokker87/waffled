@@ -1,31 +1,14 @@
 // Weekly Planning · step 3 · Horizon scan — against a real Postgres (Testcontainers).
 //
-// The step is the month view the household already has, plus one bar. So almost
-// everything it renders comes off endpoints that already exist and are already tested
-// elsewhere: the 42-cell grid is `GET /api/events?from&to` over the month grid window,
-// the ＋ on a day is the app's own event modal (`POST /api/events`), and parking a note
-// is step 1's `POST /api/weekly-planning/loose-ends/parked` — general on purpose, and
-// its own header says step 3 writes through it.
-//
-// What is NEW here, and so what this file drives out:
-//
-//   · `GET /api/weekly-planning/horizon` — the two things the step cannot derive for
-//     itself. WHICH TAGS a note may carry (only steps this household actually runs, the
-//     same rule step 1 applies to its destinations, because a tag pointing at a step the
-//     session skips over addresses the note to nobody), and WHAT THIS SESSION HAS
-//     PARKED so far — because `setDecisionData` is not storage, so a step that must
-//     still be true on a second visit has to read it back from the table that owns it.
-//
-//   · THE CENTRAL CLAIM OF THE STEP: a parked note is not an event. The mock says it
-//     twice ("a note, not a calendar entry", "＋ on a day adds a real event · the bar
-//     below parks a note that isn't an event yet"), so it is asserted here rather than
-//     left as prose: parking writes a row to planning_parked_items and NOTHING to the
-//     calendar.
-//
-//   · The tag is the DESTINATION step ('tasks' → "it turns up at step 8 for an owner and
-//     a day"), which is exactly the shape step 1 writes when somebody routes a note, so
-//     the two producers leave rows a later consumer cannot tell apart. See the note on
-//     `HORIZON_TAGS` in horizon.ts.
+// Almost everything the step renders comes off endpoints tested elsewhere (the month
+// grid is `GET /api/events`, ＋ is `POST /api/events`, parking is step 1's route). What
+// is new, and what this file drives out:
+//   · `GET /api/weekly-planning/horizon` — which tags a note may carry (only steps this
+//     household runs) and what this session has parked so far, since `setDecisionData`
+//     is not storage;
+//   · THE CENTRAL CLAIM: a parked note is NOT an event. Parking writes to
+//     planning_parked_items and nothing at all to the calendar;
+//   · the tag is the DESTINATION step, the same shape step 1 writes when it routes.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from './helpers/pg'
 import jwt from 'jsonwebtoken'

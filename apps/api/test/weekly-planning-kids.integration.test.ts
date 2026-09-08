@@ -1,22 +1,14 @@
 // Weekly Planning · step 9 — Kids. "What's your week about?"
 //
-// THE ONE STEP THE KIDS THEMSELVES READ. A card per kid, showing their own week, and
-// two questions each — and the whole point of the design is that BOTH ARE ANSWERED FROM
-// THINGS THAT ALREADY EXIST. So the tests below are mostly about provenance:
+// Both answers are picked from things that already exist, so these tests are mostly
+// about PROVENANCE: focus options come out of that child's own goals, their own overdue
+// chores and the standing chores they carry — never a catalog; look-forward-to options
+// are events already on THEIR week; and one kid's goal, chore or event never appears on
+// the other kid's card. An off module contributes nothing rather than 403ing the step.
 //
-//   · the focus options come out of that child's OWN goals, their OWN overdue chores
-//     and the standing chores they already carry — never a catalog of suggestions;
-//   · the look-forward-to options are events already on THEIR week — never a text box;
-//   · one kid's goal / chore / event never appears on the other kid's card.
-//
-// The step has NO `requiresModule` in the catalog (it reads goals AND chores, which are
-// separately toggleable), so a module that is off contributes nothing rather than 403ing
-// the whole step — the rule looseEnds' header already states.
-//
-// The two answers have no other module to land in (nothing owns "Wally's one thing this
-// week"), so they live on `planning_session_steps.data` — which is why they must survive
-// a re-read: the read-back frame is the part the kids remember, and `setDecisionData`
-// only reaches the server when the step is answered.
+// The two answers have no module to land in, so they live on
+// `planning_session_steps.data` and must survive a re-read — the read-back frame is the
+// part the kids remember, and `setDecisionData` only reaches the server when answered.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from './helpers/pg'
 import jwt from 'jsonwebtoken'

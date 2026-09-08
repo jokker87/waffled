@@ -1,16 +1,13 @@
-// Weekly Planning · step 7 (Meals) — the seven-column read over the week's dinners,
-// the "plan the rest for me" fill and its undo, against a real Postgres.
+// Weekly Planning · step 7 (Meals) — the seven-column read, the "plan the rest for me"
+// fill and its undo, against a real Postgres.
 //
-// The step stores NOTHING of its own: it reads the existing meal plan, writes through
-// the existing plan/clear paths, and lets the grocery list rebuild itself. So what's
-// asserted here is mostly about *not* touching things — the four nights somebody
-// already set must come back untouched by a fill, and an undo must clear only what the
-// fill wrote.
+// The step stores nothing of its own, so most of this is about NOT touching things: the
+// nights somebody already set come back untouched by a fill, and an undo clears only
+// what the fill wrote.
 //
-// EVERY date in this file is derived from the week the SERVER named. A literal date
-// would pass on the weekday it was written and fail on the others, because which week
-// a session plans depends on today, the household's `week_start` and its timezone —
-// the exact bug class this step was warned about.
+// EVERY date here derives from the week the SERVER named. A literal date passes on the
+// weekday it was written and fails on the others, because which week a session plans
+// depends on today, the household's `week_start` and its timezone.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from './helpers/pg'
 import jwt from 'jsonwebtoken'

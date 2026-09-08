@@ -2,37 +2,29 @@ import SwiftUI
 
 /// Weekly Planning · step 2 "Calendar" — "Here's your week. Anything missing?"
 ///
-/// The real week, with add-in-place on a tapped day. Reads the ordinary calendar; there is
-/// no planning-only event store.
+/// The real week with add-in-place on a tapped day; web parity with
+/// `planning/steps/CalendarStep.tsx`. There is no planning-only event store.
 ///
-/// Ported from `apps/web/src/kiosk/planning/steps/CalendarStep.tsx`. THE WEEK IS THE WHOLE
-/// SCREEN, and it is the REAL calendar: seven DAY ROWS in one card (the web's own header
-/// says "SEVEN DAY ROWS in one card, not seven columns" — and a column per day is
-/// unreadable on a phone), each a weekday over a large serif date, that day's events as
-/// inline chips, and a `＋` at the end of the row. A day with nothing says "Nothing on the
-/// calendar" and takes a tint, so an open evening reads as an opportunity rather than as a
-/// hole. Nothing here is invented: the rows are `SyncManager.eventsByDay` — the PowerSync
-/// mirror, which is what `GET /api/events` is on the web — painted by the same
-/// `eventPalette` every other calendar surface uses.
+/// SEVEN DAY ROWS IN ONE CARD, not seven columns — a column per day is unreadable on a
+/// phone. Each row is a weekday over a large serif date, that day's events as inline
+/// chips, and a `＋`; an empty day says "Nothing on the calendar" and takes a tint, so an
+/// open evening reads as an opportunity rather than a hole. The rows are
+/// `SyncManager.eventsByDay` (the PowerSync mirror), painted by the same `eventPalette`
+/// every other calendar surface uses.
 ///
 /// Four rules this file must not break:
-///
-///  1. THE SERVER OWNS THE WEEK. `props.weekStart` is the week; the seven days are that
-///     date plus 0…6, as string arithmetic. Nothing here asks the device what week it is.
-///  2. BUSY WEEKS STAY ONE SCREEN. A day over four events shows the first four and a
-///     "+N more" pill that opens that day IN PLACE. Never a scrolling row, and never a
-///     navigation away — the shell owns where the session is.
-///  3. ADDING IS THE APP'S OWN EVENT SHEET. `EventEditSheet`, opened on the day whose `＋`
-///     was tapped. It already asks the date, the time AND its duration, repeats, the
-///     location and who it's for, and it already writes through the local-first path. A
-///     second event form living in this step is exactly the drift the reuse rule exists to
-///     prevent — and the web's inline composer, which it replaced, is what put every
-///     addition at 5pm for exactly one hour.
-///  4. NO INVENTED PRESENCE. There is no face row: the session is single-driver and we do
+///  1. THE SERVER OWNS THE WEEK. `props.weekStart` plus 0…6 as string arithmetic. Nothing
+///     here asks the device what week it is.
+///  2. BUSY WEEKS STAY ONE SCREEN. Over four events, show four and a "+N more" pill that
+///     opens that day IN PLACE — never a scrolling row, never a navigation away.
+///  3. ADDING IS THE APP'S OWN `EventEditSheet`, on the day whose `＋` was tapped. It
+///     already asks date, time, duration, repeats, location and who it's for, and writes
+///     through the local-first path. A second event form here is exactly the drift the
+///     reuse rule exists to prevent.
+///  4. NO INVENTED PRESENCE. No face row: the session is single-driver and this app does
 ///     not track who is in the room.
 ///
-/// The body is content-sized: the SHELL owns the scroll view, so there is no `ScrollView`
-/// and no `WF.tabBarClearance` here.
+/// The body is content-sized; the SHELL owns the scroll view.
 struct CalendarStepView: View {
     let props: PlanningStepProps
 

@@ -2,41 +2,27 @@ import SwiftUI
 
 /// Weekly Planning · step 5 "Connection" — "Who gets time with whom?"
 ///
-/// Pairings read out of event participants, time you already share counted rather than
-/// replaced, and any pairing makeable from scratch.
-///
-/// Ported from `apps/web/src/kiosk/planning/steps/ConnectionStep.tsx`.
+/// Web parity with `planning/steps/ConnectionStep.tsx`.
 ///
 /// NOTHING NEW IS STORED FOR THIS STEP. A pairing is a query over event participants — an
 /// event whose people are exactly those two — and claiming a slot writes an ORDINARY
-/// CALENDAR EVENT with those participants. There is no pairing record to create, and this
-/// file must never grow one: a row's state is whatever the calendar says next time you
-/// look, which is why every action here RE-READS instead of bookkeeping locally. The one
-/// thing that is remembered is a POINTER — which event answers which pairing.
+/// CALENDAR EVENT. This file must never grow a pairing record: a row's state is whatever
+/// the calendar says next time you look, so every action RE-READS rather than bookkeeping
+/// locally. The one thing remembered is a POINTER — which event answers which pairing.
 ///
 /// Four rules this file must not break:
+///  1. THE ROWS ARE A PROMPT, NOT THE LIST. The server ranks every pair in the house; the
+///     step draws the top few, with "Make a pairing" first-class at full width beneath.
+///  2. TIME THAT ALREADY EXISTS GETS CREDIT — a row leads with the time the week already
+///     holds and offers "already counts". A tool that can only add obligations is worse.
+///  3. ADDING IS THE APP'S OWN `EventEditSheet`, opened with the pairing's people and the
+///     slot's date and instant (`prefillStart`). This step keeps only the half the sheet
+///     cannot do: choosing who, and picking one of the week's real gaps.
+///  4. NO INVENTED TIMES. A slot is a server-computed gap; `startsAt == nil` means the
+///     whole day is free and the sheet's own picker decides the hour.
 ///
-///  1. THE ROWS ARE A PROMPT, NOT THE LIST. The server ranks every pair in the house by
-///     how long it has been; the step draws the top few. "Make a pairing" — any two
-///     people, or three, any time — is a FIRST-CLASS action at full width under them.
-///  2. TIME THAT ALREADY EXISTS GETS CREDIT. The honest answer is often "you're already
-///     doing this together on Saturday", so a row leads with the time the week already
-///     holds and offers a muted "already counts" instead of only offering to manufacture a
-///     new commitment. A planning tool that can only add obligations is a worse tool.
-///  3. ADDING IS THE APP'S OWN EVENT SHEET. `EventEditSheet`, opened with the pairing's
-///     people prefilled and the slot's date AND INSTANT (`prefillStart`). It owns the
-///     title, the duration, repeats, the location and the local-first write. What this
-///     step keeps of a composer is only the half the sheet can't do: choosing who, which
-///     is the input to the slot query, and picking one of the week's real gaps.
-///  4. NO INVENTED TIMES. A slot is a gap the week left behind, computed server-side. A
-///     day with nothing on it carries NO time at all — `startsAt == nil` means the whole
-///     day is free, the label already says so, and the sheet's own picker decides the hour.
-///
-/// The faces are the household's REAL people (`SyncManager.members`): who a pairing is
-/// between is the entire content of a row, so a stand-in family here would be worse than
-/// no faces at all.
-///
-/// The body is content-sized: the SHELL owns the scroll view.
+/// The faces are the household's REAL people (`SyncManager.members`) — who a pairing is
+/// between is the entire content of a row. The body is content-sized; the SHELL scrolls.
 struct ConnectionStepView: View {
     let props: PlanningStepProps
 

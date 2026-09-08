@@ -1,25 +1,13 @@
-// Weekly Planning · step 5 (Connection) — "Who gets time with whom?"
+// Weekly Planning · step 5 (Connection) — against a real Postgres (Testcontainers).
 //
-// THE STEP STORES NOTHING. A pairing is a *query* over event_participants: an event
-// whose people are exactly those two. Picking a slot writes an ordinary calendar event
-// through the app's own event modal, so there is no write route here at all — only two
-// reads, and everything they say has to be true of the real calendar.
-//
-// Three things these tests exist to pin down, because each is a way the step could look
-// right and be wrong:
-//
-//  1. EXACTLY THOSE TWO. An event with the two of them *and someone else* is not their
-//     time together. It is the mock's "Friday's dinner at the Hales is you both, but
-//     it's not that" — reported separately (`togetherThisWeek`) so the row can say so.
-//  2. TIME THAT ALREADY EXISTS GETS CREDIT, INCLUDING A RECURRING ONE. Saturday's yard
-//     work is a weekly series, so it lives in event_occurrences, not in `events`. A
-//     bare `select … from events` would miss it and the step would offer to manufacture
-//     a commitment the family already keeps. The fixture creates it through
-//     POST /api/events (which expands the master) rather than by hand, so a regression
-//     that stops reading occurrences actually fails here.
-//  3. THE SLOTS ARE THE GAPS THE WEEK LEFT BEHIND. Never a clock time this file made
-//     up: a slot either opens when the day's last event ends, or the day is empty and
-//     the slot carries no time at all (the event modal's own picker decides).
+// The step stores nothing and has no write route, so these are two reads that must be
+// true of the real calendar. Three ways it could look right and be wrong:
+//   1. EXACTLY THOSE TWO — an event with them AND someone else is reported separately
+//      (`togetherThisWeek`), not as their time together.
+//   2. A RECURRING one counts. Saturday's yard work lives in event_occurrences, so a
+//      bare `select … from events` would miss it; the fixture creates it through
+//      POST /api/events so a regression that stops reading occurrences fails here.
+//   3. THE SLOTS ARE THE WEEK'S OWN GAPS — never a clock time this file made up.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from './helpers/pg'
 import jwt from 'jsonwebtoken'

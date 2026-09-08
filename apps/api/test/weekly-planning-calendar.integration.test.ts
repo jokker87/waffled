@@ -1,24 +1,12 @@
-// Weekly Planning · step 2 · Calendar — the reads and the write this step stands on,
-// against a real Postgres (Testcontainers).
+// Weekly Planning · step 2 · Calendar — against a real Postgres (Testcontainers).
 //
-// This step adds NO endpoint of its own: the week it shows is the plain calendar read
-// (`GET /api/events?from&to`) and adding goes through the app's own event modal, which
-// writes with the plain create (`POST /api/events`) — which is why
-// `calendar.routes.ts` is still a registered no-op. So this file is RETROFITTED
-// coverage of an existing read rather than a red-first test — the red-green for this
-// step happened in apps/web/src/kiosk/planning/steps/CalendarStep.test.tsx.
-//
-// What it is worth asserting anyway is the contract the step actually depends on and
-// that nothing else pins down:
-//   · the week window is exactly weekStart … weekStart+6 — an off-by-one at either end
-//     silently empties the first or the seventh day row;
-//   · an event keeps the HOUR AND THE LENGTH it was created with. The step's own bug
-//     was a client one (every addition landed at the 5pm default), and the server was
-//     never at fault — but a guard here is what keeps it a client-only regression if
-//     anyone re-rounds a start or invents an end;
-//   · a created event comes back owner-coloured, which is how the chips are painted;
-//   · the step's answer round-trips on the session record as a COUNT, not a copy of the
-//     calendar.
+// The step adds no endpoint of its own (the week is `GET /api/events`, adding is
+// `POST /api/events`), so this is RETROFITTED coverage of an existing read — the
+// red-green for step 2 is in `planning/steps/CalendarStep.test.tsx`. What it pins:
+// the window is exactly weekStart…weekStart+6 (an off-by-one silently empties a day
+// row); an event keeps the HOUR AND LENGTH it was created with, so a client that
+// re-rounds a start stays a client-only regression; a created event comes back
+// owner-coloured; and the step's answer round-trips as a COUNT, not a copy.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from './helpers/pg'
 import jwt from 'jsonwebtoken'

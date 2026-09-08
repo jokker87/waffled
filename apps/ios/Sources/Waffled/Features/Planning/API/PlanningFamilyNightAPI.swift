@@ -3,11 +3,10 @@ import Foundation
 // Weekly Planning · step 4 (Family night) — this step's wire types, its ONE read, and
 // the bodies it posts to the familyNight module.
 //
-// Ported from `apps/web/src/lib/api/planning/familyNight.ts`. Same shape as the web
-// client: one GET of its own, and every WRITE through the familyNight module's existing
-// POST /api/family-night/occurrence — the same endpoint the Today card's picker calls. A
-// second write path here would be a second place for "who's on the treat" to be true,
-// and the two would eventually disagree in front of the family.
+// Web parity with `lib/api/planning/familyNight.ts`: one GET of its own, and every WRITE
+// through the familyNight module's existing POST /api/family-night/occurrence — the same
+// endpoint the Today card's picker calls. A second write path would be a second place for
+// "who's on the treat" to be true.
 //
 // ⚠ PRESENCE IS THE MESSAGE. The server reads whether a KEY WAS SENT, not its value
 // (see `upsertOccurrence` in apps/api/src/modules/familyNight/familyNight.ts — two
@@ -29,11 +28,9 @@ import Foundation
 // covered by `PlanningFamilyNightStepTests`, so a later tidy-up that adds
 // `personId: null` to the detail body fails a test instead of a family's evening.
 //
-// The existing `WaffledAPI.saveFamilyNightOccurrence` is NOT reused: its `assignments`
-// parameter is `[(partId, personId)]`, so it always emits a `personId` key, and it can
-// express neither `eventId` nor `createEvent`. Rather than split six writes across two
-// paths to the same endpoint, all six go through `saveFamilyNightOccurrence(body:)`
-// here. The Today card's function is left exactly as it is.
+// `WaffledAPI.saveFamilyNightOccurrence` (the Today card's) cannot serve this step: its
+// `assignments` parameter always emits a `personId` key and it can express neither
+// `eventId` nor `createEvent`. All six writes here go through the `body:` overload.
 
 extension WaffledAPI {
 

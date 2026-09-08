@@ -2,38 +2,25 @@ import SwiftUI
 
 /// Weekly Planning · step 4 "Family night" — "Accept the rotation, or change it?"
 ///
-/// The rotation's suggestion per part, pinnable for this week only, a line for what each
-/// part actually is, and this week on the calendar.
+/// Three rows and a theme line; web parity with `planning/steps/FamilyNightStep.tsx`. The
+/// fast path is reading them and moving on: the rotation has already worked out whose turn
+/// each part is, so the affirmative is an acknowledgement and writes nothing at all.
 ///
-/// Ported from `apps/web/src/kiosk/planning/steps/FamilyNightStep.tsx`.
-///
-/// THREE ROWS AND A THEME LINE, and the fast path is reading them and moving on. The
-/// rotation has already worked out whose turn each part is, and most weeks it is right,
-/// so the affirmative is an acknowledgement: pressing it writes nothing at all.
-///
-/// Everything that IS a decision goes through the familyNight module's own occurrence
+/// Everything that IS a decision goes through the familyNight module's own OCCURRENCE
 /// endpoint, because that is where a gathering lives:
-///   · tap a face  → an assignment on the OCCURRENCE. Pinned for this week only; next
-///     week comes back on rotation. It also materializes the occurrence, and the
-///     occurrence count is what the rotation counts — which is how a pin "shifts next
-///     week's turn" without anybody editing the household's standing agenda.
-///   · the theme   → free text on the same occurrence ('' clears it).
-///   · Skip this week → status 'skipped' on the same occurrence. It calls off the
-///     GATHERING, not the recurring calendar event behind it, which is left alone.
+///   · tap a face → an assignment pinned for THIS WEEK only. It materializes the
+///     occurrence, and occurrence counts are what the rotation counts — which is how a pin
+///     shifts next week's turn without anybody editing the standing agenda.
+///   · the theme → free text on the same occurrence ('' clears it).
+///   · Skip this week → status 'skipped' on it. That calls off the GATHERING, never the
+///     recurring calendar event behind it.
 ///
-/// DEVIATION FROM THE WEB: "Skip this week" lives in the BODY here, not in the shell's
-/// footer. `planningStepFooterExtra` in the seam routes a footer control only for Meals,
-/// and the seam is not this step's to change. Body placement is arguably the better
-/// half of the trade anyway — the skip bar's Undo is already in the body, so the action
-/// and the consequence sit together rather than at opposite ends of the screen (which is
-/// exactly what the web's own comment grumbles about).
+/// "Skip this week" lives in the BODY, not the shell's footer: `planningStepFooterExtra`
+/// routes a footer control only for Meals, and the skip bar's Undo is already here, so the
+/// action and its consequence sit together.
 ///
-/// The body is content-sized: the SHELL owns the scroll view, so there is no `ScrollView`
-/// and no `WF.tabBarClearance` here — and, just as importantly, no horizontal padding of
-/// its own. The shell already insets every step by 16; a second 16 here made this card
-/// 32pt narrower than every other step's ("the family night card is more narrow for some
-/// reason"). The nested scroll view was redundant — the shell's is the one that scrolls —
-/// and was only ever the thing that carried the extra padding.
+/// No `ScrollView`, no `WF.tabBarClearance`, no horizontal padding of its own: the shell
+/// owns all three and already insets every step by 16.
 struct FamilyNightStepView: View {
     let props: PlanningStepProps
 
