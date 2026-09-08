@@ -290,7 +290,7 @@ Throwaway bash under `infra/native/spike/`. Purpose: **learn**, not build.
    --json|logs|doctor`, data dir layout from §3, ordered supervision with health gates,
    `runtime.json`, next-free-port selection, manifest verification before start. Cold start
    under 20 s against the 60 s criterion; warm restart about 2 s.
-2. *(done — PR #TBD)* Bonjour advertisement. Once Caddy is answering, the runtime
+2. *(done — PR #190)* Bonjour advertisement. Once Caddy is answering, the runtime
    registers `_waffled._tcp` on the public port by supervising `/usr/bin/dns-sd -R` as one
    more child — through the system mDNSResponder, so nothing new binds 5353 and `go.mod`
    stays stdlib-only — and withdraws it first on the way down. The instance name is the
