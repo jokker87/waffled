@@ -211,9 +211,16 @@ func (s *Supervisor) ensurePostgres(ctx context.Context) (func(), error) {
 // current. Restores are narrated in the runtime log instead.
 
 func (s *Supervisor) openBackupRun(ctx context.Context, db string) string {
+	// Wrapped in a CTE so the statement is a SELECT. A bare `insert … returning id`
+	// through `psql -tAc` prints the returned value AND psql's own "INSERT 0 1" command
+	// tag on the next line, and the two together are not a uuid — every later update
+	// then failed on a malformed id and the row stayed 'running' forever, which the api
+	// ignores. So the backup succeeded and System Health showed nothing at all.
 	id, err := s.QueryScalar(ctx, db,
-		"insert into backup_runs (status, kind, destination) "+
-			"values ('running','database','local') returning id")
+		"with started as ("+
+			"insert into backup_runs (status, kind, destination) "+
+			"values ('running','database','local') returning id"+
+			") select id from started")
 	if err != nil {
 		// Expected before migration 0071, and on any install whose api is older.
 		s.log.Warnf("could not record the start of this backup (System Health will not show it): %v", err)
