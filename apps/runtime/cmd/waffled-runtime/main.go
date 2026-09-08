@@ -162,7 +162,11 @@ func cmdStop(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	s, err := newSupervisor(common, supervisor.NewLogger(os.Stderr, false))
+	// Tolerant, like status and doctor: if a service died and something else grabbed its
+	// port, refusing to construct would leave `stop` unable to shut down the services
+	// that ARE still running — the command whose whole job is freeing ports, blocked by
+	// a port being occupied.
+	s, err := newInspector(common, supervisor.NewLogger(os.Stderr, false))
 	if err != nil {
 		return err
 	}
