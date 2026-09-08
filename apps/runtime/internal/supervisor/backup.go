@@ -166,10 +166,8 @@ func (s *Supervisor) writeSidecar(ctx context.Context, out, db string, size int6
 // as it found it.
 func (s *Supervisor) ensurePostgres(ctx context.Context) (func(), error) {
 	noop := func() {}
-	if !s.postgresInitialized() {
-		return noop, fmt.Errorf(
-			"there is no database in %s yet — run `waffled-runtime start` once before backing up",
-			s.plan.Layout.Postgres)
+	if err := s.requireCluster(); err != nil {
+		return noop, err
 	}
 	if _, running := s.postgresPid(); running {
 		return noop, nil
@@ -191,6 +189,18 @@ func (s *Supervisor) ensurePostgres(ctx context.Context) (func(), error) {
 			s.log.Warnf("could not stop the temporary postgres: %v", err)
 		}
 	}, nil
+}
+
+// requireCluster refuses the operations that need a database to already be there. One
+// source for the message, because `restore` asks the question without starting a server
+// while `backup` asks it on the way to starting one.
+func (s *Supervisor) requireCluster() error {
+	if s.postgresInitialized() {
+		return nil
+	}
+	return fmt.Errorf(
+		"there is no database in %s yet — run `waffled-runtime start` once first",
+		s.plan.Layout.Postgres)
 }
 
 // ── backup_runs ─────────────────────────────────────────────────────────────────────
@@ -460,8 +470,12 @@ func (s *Supervisor) Restore(ctx context.Context, opts RestoreOptions) error {
 
 	// Check what this is BEFORE stopping anything: a household should not lose its
 	// running server to a restore that was never going to be allowed.
-	stop, err := s.ensurePostgres(ctx)
-	if err != nil {
+	//
+	// None of it touches a server. The dump's level comes from its sidecar, or from
+	// `pg_restore --file -`, which reads the file and connects to nothing; the bundle's
+	// level is a directory listing. So no postmaster is started for this — one that was
+	// down stays down until the restore proper needs it, below.
+	if err := s.requireCluster(); err != nil {
 		return err
 	}
 	level, lerr := s.dumpMigrationLevel(ctx, file)
@@ -470,20 +484,15 @@ func (s *Supervisor) Restore(ctx context.Context, opts RestoreOptions) error {
 	}
 	bundled, err := s.bundleMigrations()
 	if err != nil {
-		stop()
 		return err
 	}
 	if err := backup.CheckRestorable(level, backup.Level(bundled)); err != nil {
-		stop()
 		return err
 	}
 	if level == "" {
 		s.log.Warnf("could not tell which migration %s was taken at; if it came from a newer "+
 			"Waffled than this one, the restore may leave the database ahead of the code", file)
 	}
-	// Postgres is needed for the rest of this, and the stack shutdown below would stop it
-	// anyway; hold it open and let the explicit sequencing take over.
-	stop()
 
 	if !opts.Yes {
 		if opts.Confirm == nil {

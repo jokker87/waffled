@@ -333,7 +333,10 @@ not mention.
 **A dump taken at a migration newer than this bundle ships is refused.** That is the one
 unrecoverable direction — migrations only run forward, so a database ahead of its code
 has nothing to migrate back down with. The check happens *before* anything is stopped, so
-a household never loses a running server to a restore that was never going to be allowed.
+a household never loses a running server to a restore that was never going to be allowed
+— and without starting anything either: the dump's level comes from its sidecar or from
+`pg_restore --file -`, which reads the file and connects to nothing, and the bundle's is a
+directory listing.
 
 `.sql` and `.sql.gz` dumps are accepted too, streamed into `psql` without ever
 materialising the decompressed file. That is the **Docker-to-Mac path**: the file a
