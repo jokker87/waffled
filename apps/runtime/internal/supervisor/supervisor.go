@@ -87,6 +87,13 @@ type Supervisor struct {
 	children  map[string]*child
 	lastError string
 
+	// The Bonjour advertiser's own lifecycle (see bonjour.go). bonjourStop ends the
+	// refresh goroutine, bonjourOnce makes closing it idempotent — Stop is called twice
+	// on a failed start — and bonjourWait is what Stop waits on before killing dns-sd.
+	bonjourStop chan struct{}
+	bonjourOnce sync.Once
+	bonjourWait sync.WaitGroup
+
 	// waitHealthy gates a service on its health URL. It is a field, always set to
 	// waitHTTP in production, purely so the rollback test can make the api's gate fail
 	// for real without a branch in this path that a user could trip. An env variable or
@@ -361,6 +368,10 @@ func (s *Supervisor) Start(ctx context.Context) error {
 	s.lastError = ""
 	s.mu.Unlock()
 
+	// Last, and only once the server actually answers: an advertisement is a promise
+	// that something is there to reach. It cannot fail the start (see bonjour.go).
+	s.startBonjour(ctx)
+
 	s.log.Infof("green in %s → %s", time.Since(started).Round(100*time.Millisecond), s.LocalURL())
 	if lan := s.LANURL(); lan != "" && lan != s.LocalURL() {
 		s.log.Infof("other devices on your network: %s", lan)
@@ -404,11 +415,16 @@ func (s *Supervisor) startChild(ctx context.Context, spec services.Spec, timeout
 	s.children[spec.Name] = c
 	s.mu.Unlock()
 
-	if spec.HealthURL != "" {
-		if err := s.waitHealthy(ctx, spec.HealthURL, timeout, c.liveness()); err != nil {
-			return fmt.Errorf("%s did not become healthy: %w\nsee %s",
-				spec.Name, err, s.plan.Layout.LogPath(spec.Name))
-		}
+	if spec.HealthURL == "" {
+		// Nothing to poll (the Bonjour advertiser). Claiming it is "healthy" would be a
+		// health check nobody ran.
+		c.superviseRestarts()
+		s.log.Infof("%s started (pid %d)", spec.Name, c.currentPid())
+		return nil
+	}
+	if err := s.waitHealthy(ctx, spec.HealthURL, timeout, c.liveness()); err != nil {
+		return fmt.Errorf("%s did not become healthy: %w\nsee %s",
+			spec.Name, err, s.plan.Layout.LogPath(spec.Name))
 	}
 	c.superviseRestarts()
 	s.log.Infof("%s healthy (pid %d)", spec.Name, c.currentPid())
@@ -493,6 +509,11 @@ func (s *Supervisor) Stop(ctx context.Context) error {
 		}
 	}
 
+	// The advertisement goes first: it is a promise that something is there to reach,
+	// and it must not outlive the server by even the length of a shutdown. It is an
+	// advisory child and not a member of Children(), so it is stopped by name here.
+	s.stopBonjour()
+
 	// Dependency order, backwards: Caddy stops answering before the api it fronts does.
 	children := s.plan.Children()
 	for i := len(children) - 1; i >= 0; i-- {
@@ -568,6 +589,9 @@ func (s *Supervisor) Status(ctx context.Context) *status.Report {
 	}
 
 	r.Backups = backup.Describe(s.plan.Layout.Backups, s.scheduleInstalled())
+	// Reported beside the services, never as one of them: nothing about the
+	// advertisement feeds DeriveState (see bonjour.go).
+	r.Bonjour = s.BonjourStatus()
 
 	s.mu.Lock()
 	r.LastError = s.lastError

@@ -109,6 +109,33 @@ type Backups struct {
 	ScheduleInstalled bool `json:"scheduleInstalled"`
 }
 
+// Bonjour is the advertisement on the local network — how a phone that has never been
+// told an address finds this Mac (plan §3).
+//
+// It is reported beside the services rather than as one of them, and deliberately so: a
+// household whose Bonjour registration failed still has a working server that every
+// browser and every device typing the address in can reach. Nothing here feeds
+// DeriveState, and `advertised: false` is never on its own a reason to draw a red icon.
+type Bonjour struct {
+	// Advertised is true only while the registration is live on the network.
+	Advertised bool `json:"advertised"`
+	// Name is the instance name other devices see: the household's, or
+	// "Waffled on <computer>".
+	Name string `json:"name"`
+	// Service is the DNS-SD type, constant, and reported even when nothing is
+	// advertising so a client has something to look for.
+	Service string `json:"service"`
+	// Port is the public Caddy port being advertised — the only one another device
+	// should reach.
+	Port int `json:"port"`
+	// Host is the multicast name this Mac answers to. There is no `waffled.local`:
+	// devices see this machine's own hostname, which is why discovery exists.
+	Host string `json:"host"`
+	// Error says why nothing is being advertised, when something went wrong rather than
+	// nothing having been asked for.
+	Error string `json:"error"`
+}
+
 // Report is the whole document.
 type Report struct {
 	Schema     int        `json:"schema"`
@@ -121,8 +148,10 @@ type Report struct {
 	Bundle     Bundle     `json:"bundle"`
 	Supervisor Supervisor `json:"supervisor"`
 	Services   []Service  `json:"services"`
-	// Backups is additive: Schema stays at 1 because no existing field changed meaning.
+	// Backups and Bonjour are additive: Schema stays at 1 because no existing field
+	// changed meaning.
 	Backups     Backups `json:"backups"`
+	Bonjour     Bonjour `json:"bonjour"`
 	LastError   string  `json:"lastError"`
 	GeneratedAt string  `json:"generatedAt"`
 }
@@ -185,6 +214,13 @@ func (r *Report) Text() string {
 	}
 	if r.URLs.LAN != "" {
 		fmt.Fprintf(&b, "  on your network: %s\n", r.URLs.LAN)
+	}
+	switch {
+	case r.Bonjour.Advertised:
+		fmt.Fprintf(&b, "  bonjour: %q on %s as %s (port %d)\n",
+			r.Bonjour.Name, r.Bonjour.Host, r.Bonjour.Service, r.Bonjour.Port)
+	case r.Bonjour.Error != "":
+		fmt.Fprintf(&b, "  bonjour: not advertising — %s\n", r.Bonjour.Error)
 	}
 	b.WriteString("\n")
 	for _, s := range r.Services {
