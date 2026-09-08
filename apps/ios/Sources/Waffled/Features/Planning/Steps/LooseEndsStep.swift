@@ -71,6 +71,10 @@ struct LooseEndsStepView: View {
             if group == .parked && !seeAll { captureBar }
         }
         .sheet(isPresented: $chooser) { listsSheet }
+        // Verification only: open the chooser without a tap. See DemoHooks.openLists.
+        .task(id: model.listCandidates.count) {
+            if DemoHooks.openLists && showChooser { chooser = true }
+        }
         // One key for both: a new session or a new week is a different set of loose ends.
         .task(id: "\(props.sessionId)|\(props.weekStart)") {
             model.resetForWeek()

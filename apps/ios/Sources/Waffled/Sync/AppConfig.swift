@@ -173,6 +173,10 @@ enum DemoHooks {
     static var pantryItem: String? { AppConfig.env("WAFFLED_PANTRY_ITEM") }
     /// Initial Meals section for verification: week | month | recipes.
     static var mealsSection: String? { AppConfig.env("WAFFLED_MEALS_SECTION") }
+    /// Open step 1's "Which lists?" chooser on launch (verification). The sheet is behind
+    /// a tap in the loose-ends step and the simulator has no tap API, so without this the
+    /// switches cannot be looked at headlessly at all.
+    static var openLists: Bool { AppConfig.env("WAFFLED_OPEN_LISTS") == "1" }
     /// Auto-open the "Plan my week" sheet (verification).
     static var planWeek: Bool { AppConfig.env("WAFFLED_PLAN_WEEK") == "1" }
     /// Auto-open the "Plan my month" sheet (verification).

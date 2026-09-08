@@ -341,7 +341,7 @@ function Body({ step, sessionId, weekStart, setDecisionData, busy }: StepBodyPro
 
   const listChooser = (
     <div className="modal-overlay" onClick={() => setChooser(false)}>
-      <div className="modal wp-le-lists" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Lists it asks about">
+      <div className="modal-card wp-le-lists" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Lists it asks about">
         <div className="wp-le-lists-t wf-serif">Lists it asks about</div>
         <div className="wp-le-lists-s">
           This step asks about anything still unchecked from before this week. Turn off a list

@@ -91,8 +91,10 @@
 
 .wp-le-lists-open:hover { color: var(--ink); }
 
-/* The sheet. `.modal-overlay` + `.modal` are the shared vocabulary; only what is specific
-   to a row of lists lives here. */
+/* The sheet. `.modal-overlay` + `.modal-card` are the shared vocabulary — the pair used
+   in 62 other places — and only what is specific to a row of lists lives here. (Written
+   against a `.modal` class that does not exist the first time, which rendered a sheet with
+   no surface at all: the design-system rule earns its keep.) */
 .wp-le-lists { max-width: 460px; padding: 22px 22px 18px; }
 
 .wp-le-lists-t { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
