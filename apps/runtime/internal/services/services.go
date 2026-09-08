@@ -261,35 +261,43 @@ host    replication  all   ::1/128        scram-sha-256
 `
 }
 
-// Psql runs a SQL file as the superuser. The password travels in PGPASSWORD rather than
-// inside a postgres:// URL in argv, which every process on the Mac can read from `ps`.
-func (p Plan) Psql(database, file string) Spec {
+// psqlSpec is a psql invocation against database, with verb supplying whatever says
+// what to run. The password travels in PGPASSWORD rather than inside a postgres:// URL
+// in argv, which every process on the Mac can read from `ps`.
+//
+// Both forms go through here so that neither can be built by slicing the other apart.
+// PsqlCommand used to take Psql's args and drop the last two to remove a placeholder
+// `-f ""` — which meant appending any flag to Psql would silently hand psql an empty -f
+// alongside -tAc, and break every caller of PsqlCommand at runtime with no compile error.
+func (p Plan) psqlSpec(database string, verb ...string) Spec {
 	psql := p.PostgresBin("psql")
-	env := append(p.baseEnv(), "PGPASSWORD="+p.Env.Get(configenv.KeyPostgresPassword))
+	args := []string{
+		psql,
+		"-h", "127.0.0.1",
+		"-p", strconv.Itoa(p.Ports.Postgres),
+		"-U", p.Env.PostgresUser(),
+		"-d", database,
+		"-v", "ON_ERROR_STOP=1",
+		"--no-psqlrc",
+	}
 	return Spec{
-		Name: "psql",
-		Path: psql,
-		Args: []string{
-			psql,
-			"-h", "127.0.0.1",
-			"-p", strconv.Itoa(p.Ports.Postgres),
-			"-U", p.Env.PostgresUser(),
-			"-d", database,
-			"-v", "ON_ERROR_STOP=1",
-			"--no-psqlrc",
-			"-f", file,
-		},
-		Env:     env,
+		Name:    "psql",
+		Path:    psql,
+		Args:    append(args, verb...),
+		Env:     append(p.baseEnv(), "PGPASSWORD="+p.Env.Get(configenv.KeyPostgresPassword)),
 		OneShot: true,
 	}
 }
 
-// PsqlCommand is Psql for a single statement.
+// Psql runs a SQL file as the superuser.
+func (p Plan) Psql(database, file string) Spec {
+	return p.psqlSpec(database, "-f", file)
+}
+
+// PsqlCommand is Psql for a single statement, returned unaligned and untitled so the
+// caller can read the value straight out of stdout.
 func (p Plan) PsqlCommand(database, sql string) Spec {
-	spec := p.Psql(database, "")
-	spec.Args = spec.Args[:len(spec.Args)-2] // drop -f ""
-	spec.Args = append(spec.Args, "-tAc", sql)
-	return spec
+	return p.psqlSpec(database, "-tAc", sql)
 }
 
 // PgIsReady is the health gate for Postgres — the same check compose's healthcheck runs.
