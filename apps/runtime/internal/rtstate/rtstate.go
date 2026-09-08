@@ -42,8 +42,13 @@ type State struct {
 	// a unix socket path at 103 bytes, so a deep data directory gets a short temp dir
 	// instead and we have to remember which.
 	SocketDir string `json:"socketDir,omitempty"`
-	// BundleSHA/BundleTime identify the bundle build the data was last started against.
-	// They also key the manifest-verification cache: same build, skip the 580 MB rehash.
+	// BundleSHA/BundleTime record which bundle build this data directory was last
+	// started against. They are written for support — "what was running when this
+	// broke?" — and nothing reads them back. In particular they do NOT key the
+	// manifest-verification cache: that lives in bundle-verified.json and is keyed on
+	// the bundle path, the sha256 of manifest.json, and a stat fingerprint of the tree
+	// (see internal/manifest). Changing these two fields changes nothing about whether
+	// the bundle is re-verified.
 	BundleSHA  string `json:"bundleGitSha,omitempty"`
 	BundleTime string `json:"bundleBuiltAt,omitempty"`
 }
