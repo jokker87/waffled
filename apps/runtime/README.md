@@ -361,8 +361,11 @@ finding out afterwards is the failure this exists to prevent.
 
 Two pools share `backups/` and are pruned separately by prefix: **14** `waffled-*.dump`
 and **3** `pre-migrate-*.dump`. A pruner that globbed `*.dump` would quietly eat the
-rollback points every night. Pruning runs only *after* a new dump has landed, so a night
-the dump fails does not also delete the oldest one that worked. Snapshots are ordered by
+rollback points every night. Pruning runs **whether or not the dump succeeded** — on a
+full disk, deleting what is beyond `keep` is the only thing in the command that frees
+space, and gating it on success means the next night fails the same way for good. It
+costs a household nothing: retention removes only files *beyond* the limit, so a failed
+run in a directory holding `keep` or fewer removes none at all. Snapshots are ordered by
 their parsed timestamp, not their name — sorting `pre-migrate-0.9.0-…` as a string puts
 it after `0.14.3` and would delete the newest.
 

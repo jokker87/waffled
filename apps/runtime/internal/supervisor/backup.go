@@ -57,6 +57,31 @@ func (s *Supervisor) Backup(ctx context.Context, opts BackupOptions) (path strin
 		out = abs
 	}
 
+	// Retention runs whichever way this ends, so it is deferred rather than done after a
+	// dump has landed.
+	//
+	// The failure that decides it is a full disk: pg_dump fails on ENOSPC, and if pruning
+	// only ever follows a successful dump, the one mechanism here that frees space is
+	// never reached — so the next night fails identically, for good. Honouring `keep` is
+	// the contract either way, and it is not a contract that deletes a good backup to
+	// make room for one that does not exist: Prune removes only what is beyond `keep`, so
+	// a failed run in a directory holding `keep` or fewer dumps removes nothing at all.
+	if generated {
+		defer func() {
+			keep := opts.Keep
+			if keep <= 0 {
+				keep = backup.DefaultKeepDumps
+			}
+			removed, perr := backup.Prune(dir, backup.KindDump, keep)
+			if perr != nil {
+				s.log.Warnf("could not apply backup retention: %v", perr)
+			}
+			for _, r := range removed {
+				s.log.Infof("pruned %s (keeping the last %d)", filepath.Base(r), keep)
+			}
+		}()
+	}
+
 	// Whatever went wrong is recorded where `status` and `doctor` will find it: a failed
 	// backup leaves no file behind, so without this a week of broken nightly runs looks
 	// exactly like a week of quiet success.
@@ -91,22 +116,6 @@ func (s *Supervisor) Backup(ctx context.Context, opts BackupOptions) (path strin
 
 	if err := backup.ClearFailure(dir); err != nil {
 		s.log.Warnf("could not clear the recorded backup failure: %v", err)
-	}
-
-	// Prune only after a dump has landed. Retention that ran first would, on a night the
-	// dump fails, delete the oldest backup and produce no new one.
-	if generated {
-		keep := opts.Keep
-		if keep <= 0 {
-			keep = backup.DefaultKeepDumps
-		}
-		removed, perr := backup.Prune(dir, backup.KindDump, keep)
-		if perr != nil {
-			s.log.Warnf("could not apply backup retention: %v", perr)
-		}
-		for _, r := range removed {
-			s.log.Infof("pruned %s (keeping the last %d)", filepath.Base(r), keep)
-		}
 	}
 
 	s.log.Infof("backed up %s to %s (%.1f MB in %s)", db, out,
