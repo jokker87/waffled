@@ -145,9 +145,9 @@ uses bash because it is throwaway and the point is to learn, not to build.
 | **Web** | Baked into the Caddy image at `/srv` | Same `apps/web/dist`, served by Caddy from `Resources/runtime/web/` | Low |
 | **Migrations** | one-shot `migrate` container (`node-pg-migrate up`) | Runtime runs the same command before starting the API | Low |
 | **Caddy** | `waffled-caddy` image (caddy:2 + web build) | Official static darwin binary + the **same Caddyfile** (`api:3000` → `127.0.0.1:3000` via env) | Low |
-| **PowerSync** | `journeyapps/powersync-service:1.22.0`, `start -r unified`, Postgres storage | The image is a pnpm monorepo run under Node 24. Its entrypoint package (`@powersync/service-image`) is private, but every dependency it wires up is published on npm, and the entry file is ~40 lines. Two viable paths: (a) build the `service` package from the `powersync-service` repo at tag `v1.22.0`; (b) write our own 40-line entry over the published `@powersync/service-*` packages. One native dep (`@napi-rs/snappy`, has darwin-arm64 + x64 prebuilds). License is FSL-1.1-ALv2: bundling it in a self-hosted product is the same posture as redistributing the image; not a competing sync service. | **Medium — prove first** |
+| **PowerSync** | `journeyapps/powersync-service:1.22.0`, `start -r unified`, Postgres storage | The image is a pnpm monorepo run under Node 24. Its entrypoint package (`@powersync/service-image`) is private, but every dependency it wires up is published on npm, and the entry file is ~40 lines. Two viable paths: (a) build the `service` package from the `powersync-service` repo at tag `v1.22.0`; (b) write our own 40-line entry over the published `@powersync/service-*` packages. One native dep (`@napi-rs/snappy`, has darwin-arm64 + x64 prebuilds). License is FSL-1.1-ALv2: bundling it in a self-hosted product is the same posture as redistributing the image; not a competing sync service. | Medium — **proven in Phase 1** (path (a): build from the tag with pnpm 11, run under the bundled Node) |
 | **Postgres** | `postgres:16` image, `wal_level=logical`, init SQL creates `powersync_storage` + `pgcrypto` | Bundle PG 16 binaries (`embedded-postgres` npm / zonky-style tarballs, or EDB's). Runtime does `initdb`, writes `postgresql.conf` (logical WAL, listen 127.0.0.1, scram auth), runs `00-init.sql`, `pg_ctl start`. Every binary and dylib must be signed for notarization. Major-version upgrades (16→17) become **our** problem: `pg_upgrade` or dump/restore inside the updater. | **High — the whole risk** |
-| **Backups** | `waffled-backup` sidecar, `pg_dump` nightly, `backup_runs` table feeds health | `pg_dump` from the bundled PG, scheduled by a launchd agent; write the same `backup_runs` row so System Health keeps working. Restore keeps the PowerSync-slot rebuild the CLI does today. | Low–Medium |
+| **Backups** | `waffled-backup` sidecar, `pg_dump` nightly, `backup_runs` table feeds health | `pg_dump` from the bundle — the npm/zonky Postgres repacks ship no client tools, so the bundle takes `pg_dump`/`pg_restore`/`pg_isready`/`psql` from the theseus-rs `postgresql-binaries` release (12 MB) — scheduled by a launchd agent; write the same `backup_runs` row so System Health keeps working. Restore keeps the PowerSync-slot rebuild the CLI does today. | Low–Medium |
 | **Supervision** | Compose `depends_on` + healthchecks + `restart: unless-stopped` | launchd restarts a process but has **no ordering**; the runtime supervisor owns the dependency graph and health gates. | Medium |
 | **Observability** | optional `lgtm` profile | Not bundled. Logs to files; System Health is the UI. | n/a |
 
@@ -160,7 +160,11 @@ uses bash because it is throwaway and the point is to learn, not to build.
 - **Network isolation.** Postgres/API/PowerSync are only reachable on the Compose network
   today. Natively they land on localhost where every process on the Mac can reach them.
   → Bind all three to `127.0.0.1`, keep `scram-sha-256` (never `trust`) on Postgres, expose
-  only Caddy on `0.0.0.0`.
+  only Caddy on `0.0.0.0`. **Known gap (Phase 2 finding):** the PowerSync service hardcodes
+  `0.0.0.0` in its listen call — no config key, no `PS_*` variable — so its internal port is
+  reachable from the LAN. Every request still needs an RS256 token minted by the api, so it is a
+  missing layer of defence, not an open door. Options: patch the listen host in our build of the
+  service, or front it with a packet filter rule; decide in Phase 3.
 - **User isolation.** Containers run as a dedicated non-root user with three volumes. Natively
   the API runs as the logged-in user with their whole home directory. A media path-traversal
   bug goes from "read a blob" to "read ~/Documents". → Hardening pass on every file-path
@@ -215,7 +219,7 @@ uses bash because it is throwaway and the point is to learn, not to build.
 
 **Open (decide during Phase 1/2)**
 
-- PowerSync path (a) build from tag vs (b) own entry over npm packages. Spike answers this.
+- ~~PowerSync path (a) build from tag vs (b) own entry over npm packages.~~ **Resolved: (a).** The spike built from the `v1.22.0` tag on the first try; (b) was never needed.
 - Whether the default public port stays 8080 or moves to something less collision-prone.
 - Sparkle vs a home-grown updater. Sparkle for the app bundle is the obvious choice; the
   question is whether the *runtime* updates independently of the app (Plex does not; keep it
@@ -230,11 +234,19 @@ uses bash because it is throwaway and the point is to learn, not to build.
 Each phase has an exit criterion. Nothing in a later phase starts until the previous exit
 criterion is met — the whole point is to find out early if Postgres or PowerSync refuse.
 
-### Phase 0 — This document *(done with this PR)*
+### Phase 0 — This document *(done — PR #175)*
 
 - Plan in `docs/product/native-mac-plan.md`; roadmap entry under Planned.
 
-### Phase 1 — Native spike: the whole stack on one Mac, no Docker *(delegated; small)*
+### Phase 1 — Native spike: the whole stack on one Mac, no Docker *(done — PR #176)*
+
+**Result: both risks answered yes.** Postgres 16 ran from `@embedded-postgres/darwin-arm64`
+(EDB's signed universal binaries; hydrate its dylib symlinks, and it ships no `pg_dump`/`psql`),
+PowerSync ran from the `v1.22.0` tag under plain Node, the web first-run wizard created a
+household with live sync, and an iPhone simulator on the LAN synced through it. Cold start 6 s
+from an empty data dir. Two corrections the spike itself needed: Homebrew's Node is a stub that
+cannot be relocated (bundle the nodejs.org build), and `initdb` must use `en_US.UTF-8`, not
+`C`, to match the `postgres:16` image's collation so Docker → Mac restores keep sort order.
 
 Throwaway bash under `infra/native/spike/`. Purpose: **learn**, not build.
 
@@ -258,8 +270,13 @@ Throwaway bash under `infra/native/spike/`. Purpose: **learn**, not build.
 
 ### Phase 2 — Runtime supervisor (Go)
 
-1. `waffled-runtime` with `start|stop|status --json|backup|restore|doctor|logs`, data dir
-   layout from §3, ordered supervision with health gates, log rotation, `runtime.json`.
+1. *(done — PR #178 bundle, PR #182 runtime)* The bundle build script under
+   `infra/native/bundle/` assembles a 662 MB self-contained arm64 runtime with a per-file
+   checksum manifest. `waffled-runtime` lives in `apps/runtime/` (Go): `start|stop|status
+   --json|logs|doctor`, data dir layout from §3, ordered supervision with health gates,
+   `runtime.json`, next-free-port selection, manifest verification before start. Cold start
+   under 20 s against the 60 s criterion; warm restart about 2 s. `backup|restore` are the
+   next item.
 2. Bonjour advertisement.
 3. Backup schedule via a generated launchd plist; `backup_runs` rows.
 4. Integration test: spins the whole stack from an empty data dir on CI (macOS runner) and
@@ -300,8 +317,8 @@ Throwaway bash under `infra/native/spike/`. Purpose: **learn**, not build.
 - Phase 3: one to two weeks, half of which is signing/notarization/Sparkle plumbing, not UI.
 - Phase 4: a few days.
 
-The unknowns that could blow this up are both in Phase 1, which is why it goes first and
-is throwaway.
+The two unknowns that could have blown this up were both in Phase 1, which is why it went
+first and was throwaway. Both came back yes.
 
 ---
 
