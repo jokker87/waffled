@@ -21,6 +21,9 @@ waffled-runtime start [--foreground] [--bundle DIR] [--data DIR]
 waffled-runtime stop [--timeout 2m]
 waffled-runtime status [--json]
 waffled-runtime logs [service] [-f] [-n N]      # postgres migrate api powersync caddy runtime
+waffled-runtime backup [--out FILE] [--keep N]
+waffled-runtime backup --install-schedule | --uninstall-schedule
+waffled-runtime restore FILE [--yes]
 waffled-runtime doctor [--json]
 waffled-runtime version
 ```
@@ -87,7 +90,7 @@ directory.
   runtime.json           ports, install id, socket dir, the bundle build last used
   postgres/              PGDATA — excluded from Time Machine
   media/                 uploaded blobs (the api writes, Caddy serves)
-  backups/               pg_dump output (task 5)
+  backups/               pg_dump output: routine backups and pre-migration snapshots
   logs/                  one file per service, rotated at 10 MB (one generation kept)
   pids/                  supervisor.pid + one per supervised child
   powersync/             PowerSync's working dir: its config + the .probes/ it creates
@@ -255,12 +258,132 @@ run, because a stolen port is the most likely reason someone runs either of them
 conflict is reported in `lastError` and by `doctor`'s own port check. `start` still fails
 hard.
 
+The `backups` block is added to the same document:
+
+```jsonc
+"backups": {
+  "dir": "/Users/…/Waffled/backups",
+  "lastBackupAt": "2026-09-08T03:00:00Z",
+  "lastPath": "/Users/…/backups/waffled-20260908-030000.dump",
+  "lastSizeBytes": 4823104,
+  "lastMigration": "0099_rhythm_book_within",
+  "count": 14,
+  "lastError": "", "lastErrorAt": "",
+  "scheduleInstalled": true
+}
+```
+
+`schema` stays at **1**: the block is additive and no existing field changed meaning.
+
+It is derived from the **filesystem**, never from the `backup_runs` table. "When did it
+last back up?" is asked exactly when the server is stopped, and a block that needed
+Postgres would go blank at the only moment it mattered. `backup_runs` is the same facts
+mirrored for the api, which can only be asked when the api is up anyway. For the same
+reason `scheduleInstalled` is a `stat` of the plist rather than a `launchctl print` — the
+menu-bar app polls this, and a process spawn per poll is not free.
+
+## Backup and restore
+
+```sh
+waffled-runtime backup                       # → backups/waffled-<UTC stamp>.dump
+waffled-runtime backup --out /Volumes/…/x.dump
+waffled-runtime backup --install-schedule    # nightly at 03:00, via launchd
+waffled-runtime restore backups/waffled-20260908-030000.dump
+```
+
+`backup` takes a **custom-format** (`pg_dump -Fc`) dump of the application database,
+writing under a temporary name and renaming on success — a dump only matters once
+something has already gone wrong, so a half-written one left by a crash must never look
+usable. PowerSync's `powersync_storage` database is deliberately **not** dumped: it holds
+derived bucket data, and restoring it beside an older application database would leave
+the two disagreeing. It is rebuilt from the restored data instead.
+
+Beside each dump goes a small `<name>.dump.json` **sidecar** recording the Waffled
+version, git sha, migration level, database and collation. A dump does not otherwise say
+what it is — `pg_restore`'s table of contents names the `pgmigrations` table but not its
+rows — so without it, answering "what schema is this?" means unpacking the whole file.
+
+**Backup works with the server stopped.** If nothing is running it starts Postgres alone,
+dumps, and stops it again, leaving the machine as it found it. The alternative — refusing
+unless the stack is up — would make the nightly job silently useless on exactly the Macs
+it matters on, because a launchd *user agent* only runs while someone is logged in and
+nobody sits at a Mac they left running as a server.
+
+### Restore
+
+`restore` refuses without `--yes` unless a terminal confirms by typing `restore`. Then it
+stops the **whole stack**, not just the three app services `./waffled restore` stops:
+natively a supervisor process holds the children and re-arms restarts once a service has
+been healthy, so signalling the api directly would just have our own code bring it back
+mid-restore. It drops PowerSync's replication slot and its storage database, drops and
+recreates the application database, loads the dump, and returns with everything stopped;
+the caller starts the stack again, which re-runs migrations to catch up an older dump and
+lets `00-init.sql` rebuild PowerSync's storage.
+
+Dropping and recreating rather than `pg_restore --clean` is deliberate: a restore should
+produce exactly what the dump holds, and `--clean` leaves behind anything the dump does
+not mention.
+
+**A dump taken at a migration newer than this bundle ships is refused.** That is the one
+unrecoverable direction — migrations only run forward, so a database ahead of its code
+has nothing to migrate back down with. The check happens *before* anything is stopped, so
+a household never loses a running server to a restore that was never going to be allowed.
+
+`.sql` and `.sql.gz` dumps are accepted too, streamed into `psql` without ever
+materialising the decompressed file. That is the **Docker-to-Mac path**: the file a
+family carries over is whatever their Compose backup sidecar wrote, and it will have no
+sidecar JSON, so the migration level is read out of the gzip stream instead.
+
+### Snapshot before migrating, and automatic rollback
+
+Plan §5: *rollback means restore, not reverse migrations.* Before `start` runs migrations
+it checks whether any are actually pending — comparing the bundle's migration **names**
+against `pgmigrations`, because the api runs node-pg-migrate with `checkOrder:false` and
+a database can legitimately hold a later migration while an earlier one is still pending.
+If any are, it dumps to `backups/pre-migrate-<version>-<stamp>.dump` first.
+
+If the api then fails its health gate, that snapshot is **restored automatically** and
+the start fails, naming the file. A first run takes no snapshot: there is nothing yet to
+lose. A snapshot that *cannot* be taken stops the start, matching `run_pre_upgrade_backup`
+in the repo-root `waffled` script — going through a schema change with no way back and
+finding out afterwards is the failure this exists to prevent.
+
+### Retention
+
+Two pools share `backups/` and are pruned separately by prefix: **14** `waffled-*.dump`
+and **3** `pre-migrate-*.dump`. A pruner that globbed `*.dump` would quietly eat the
+rollback points every night. Pruning runs only *after* a new dump has landed, so a night
+the dump fails does not also delete the oldest one that worked. Snapshots are ordered by
+their parsed timestamp, not their name — sorting `pre-migrate-0.9.0-…` as a string puts
+it after `0.14.3` and would delete the newest.
+
+### Schedule
+
+`backup --install-schedule` writes `~/Library/LaunchAgents/app.waffled.backup.plist`
+(`StartCalendarInterval` 03:00, `RunAtLoad` false) and loads it with
+`launchctl bootstrap gui/$UID`. Every path in it is absolute and `--data` is baked in,
+because a launchd agent gets a minimal environment and no working directory it can rely
+on. The plist is built with `encoding/xml`, not string concatenation: a household under
+`/Users/sam & jo` would otherwise get a file launchd silently refuses to parse and a
+backup that never runs with nothing to show for it. Output goes to `logs/backup.log`.
+
+### Four deliberate differences from the Compose path
+
+Recorded because each looks like a bug to anyone who reads only one side:
+
+| | Compose sidecar | Here | Why |
+|---|---|---|---|
+| format | plain SQL + gzip | `pg_dump -Fc` | custom format can be asked for one table, which is how a dump's migration level is read before committing to a restore |
+| retention | age (`find -mtime +14`) | count (last 14) | a family Mac asleep for a fortnight would wake to an age-based pruner having deleted every backup it had and taken no new one |
+| `backup_runs` on restore | n/a | **not written** | the table has a `kind` column but the api reads `where status in ('success','failed') order by finished_at desc limit 1` with no filter on it, so a restore row would be reported as "the last backup" and a household that restored last week would be told its backups were current |
+| `BACKUP_ENABLED` | `true` | `true` (was `false`) | the api short-circuits its backup health check to "turned off" on `false`, which would hide the rows the runtime writes — a nightly backup failing for a week would look exactly like one succeeding for a week |
+
 ## Tests
 
 ```sh
 cd apps/runtime
 go test ./...                                                    # unit, hermetic, ~15s
-WAFFLED_BUNDLE=/path/to/runtime go test -tags integration ./...   # the real stack
+WAFFLED_BUNDLE=/path/to/runtime go test -tags integration -p 1 ./...   # the real stack
 go vet ./... && gofmt -l .
 ```
 
@@ -285,6 +408,31 @@ real bundle into a temp data directory **whose path contains a space**:
 - `TestDetachedStartStop` — builds the real binary and drives `start` → `status --json`
   → `doctor` → `stop`, which is the only test that exercises the daemonize path.
 - `TestATamperedBundleIsRefused` — a bundle that does not match its manifest never runs.
+- `TestBackupAndRestoreRoundTrip` — write a row, back up, destroy it, restore, and find
+  it again with every service green. It reads `backup_runs` back with the api's **own
+  query**, so a drifted column shows up here rather than as a blank panel in System
+  Health, and it asserts PowerSync has an **active replication slot** on the restored
+  database — liveness alone answers perfectly well while the service syncs nothing.
+- `TestRestoreAcceptsAComposeSidecarDump` — the Docker-to-Mac path, against a file built
+  with `backup.sh`'s exact flags rather than one of ours.
+- `TestRestoreRefusesADumpNewerThanTheBundle`, `TestRestoreRefusesWithoutConfirmation` —
+  and neither refusal stops the running server.
+- `TestRetentionKeepsTheLastNAndLeavesSnapshotsAlone`.
+- `TestSnapshotIsTakenAndRolledBackWhenTheAPIFailsToStart` and
+  `TestBackupWorksWithTheServerStopped` live in `internal/supervisor` rather than here,
+  because forcing the post-migrate health gate to fail has to be done **without shipping
+  a way to do it**: `Supervisor.waitHealthy` is an unexported field, always `waitHTTP` in
+  production, and only a test inside the package can swap it. Every line of the start
+  sequence then runs exactly as it does on a real Mac, with no environment variable or
+  flag a household could trip into a fake failure. The test rewinds the database for real
+  (running `0096_recipe_views`' own Down SQL) rather than only deleting its
+  `pgmigrations` row — deleting the row alone makes node-pg-migrate re-run an Up whose
+  objects still exist, so the migration fails and nothing ever reaches the gate. It then
+  asserts the restored state is the **pre-migration** one specifically, since a snapshot
+  taken a moment too late would still restore something and still look like it worked.
+
+Run the integration suite with `-p 1`: without it Go runs packages concurrently and two
+stacks race for the same ports.
 
 Measured on an M-series Mac with Docker holding 8080/8081/8090/3000/5432, so every
 default fell forward (public 8082, sync 8083, api 3001, powersync 8084, postgres 5433):
@@ -300,10 +448,14 @@ The plan's Phase 2 exit criterion is under 60s; the test fails if a cold start e
 
 ## Not this task
 
-Backup and restore (task 5), Bonjour advertisement (task 6) and the updater (task 8) are
-deliberately absent, with seams left for them: `backups/` exists in the layout, the bundle
-ships `pg_dump`/`pg_restore`, `Supervisor.QueryScalar` runs SQL without adding a Postgres
-driver dependency, and `status` is already the shape a menu would render.
+Bonjour advertisement and the updater are deliberately absent, with seams left for them.
+The updater's flow — snapshot → stop → swap the runtime → migrate → health → restore on
+failure — is the sequence `start` already runs, so it should reuse `ensurePostgres`,
+`snapshotBeforeMigrate`, `rollbackTo`, `replaceDatabase` and `backup.CheckRestorable`
+rather than growing a second copy. It will want its **own** retention prefix beside
+`pre-migrate-`: a snapshot taken before swapping binaries answers a different question
+from one taken before a schema change, and sharing a pool would let either evict the
+other.
 
 ## Portability
 

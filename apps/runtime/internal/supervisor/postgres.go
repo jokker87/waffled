@@ -246,7 +246,7 @@ func (s *Supervisor) databaseExists(ctx context.Context, name string) (bool, err
 }
 
 // QueryScalar runs a single-value query through the bundled psql and returns the result
-// as text. It is how this package (and `doctor`, and the backup work in task 5) asks the
+// as text. It is how this package (and `doctor`, and backup/restore) asks the
 // database a question without taking on a Postgres driver dependency.
 func (s *Supervisor) QueryScalar(ctx context.Context, database, sql string) (string, error) {
 	out, err := s.runOneShot(ctx, s.plan.PsqlCommand(database, sql), time.Minute)
