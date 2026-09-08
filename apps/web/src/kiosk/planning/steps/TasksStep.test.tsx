@@ -450,7 +450,9 @@ describe('TasksStep', () => {
   it('the day chip opens the chore editor, and the day saves from there', async () => {
     mockApi()
     render(<Body {...props()} />)
-    await waitFor(() => expect(screen.getByText(/Fold the towels/)).toBeTruthy())
+    // Sweep the porch has pending instances (i1, i2) — the second write is the one that
+    // fails, which is the whole point. Fold the towels has none, so nothing would throw.
+    await waitFor(() => expect(screen.getByText(/Sweep the porch/)).toBeTruthy())
 
     fireEvent.click(screen.getByRole('button', { name: 'Set the day for Fold the towels' }))
     await waitFor(() => expect(screen.getByText('Edit chore')).toBeTruthy())
@@ -471,7 +473,9 @@ describe('TasksStep', () => {
   it('has no inline date picker left on the card', async () => {
     mockApi()
     render(<Body {...props()} />)
-    await waitFor(() => expect(screen.getByText(/Fold the towels/)).toBeTruthy())
+    // Sweep the porch has pending instances (i1, i2) — the second write is the one that
+    // fails, which is the whole point. Fold the towels has none, so nothing would throw.
+    await waitFor(() => expect(screen.getByText(/Sweep the porch/)).toBeTruthy())
     fireEvent.click(screen.getByRole('button', { name: 'Set the day for Fold the towels' }))
     await waitFor(() => expect(screen.getByText('Edit chore')).toBeTruthy())
     expect(screen.queryByLabelText('Day for Fold the towels')).toBeNull()
@@ -522,7 +526,9 @@ describe('TasksStep', () => {
     it('opens the app’s chore editor, and a rename shows on the board', async () => {
       mockApi()
       render(<Body {...props()} />)
-      await waitFor(() => expect(screen.getByText(/Fold the towels/)).toBeTruthy())
+      // Sweep the porch has pending instances (i1, i2) — the second write is the one that
+    // fails, which is the whole point. Fold the towels has none, so nothing would throw.
+    await waitFor(() => expect(screen.getByText(/Sweep the porch/)).toBeTruthy())
 
       fireEvent.click(within(strip()).getByRole('button', { name: 'Edit Fold the towels' }))
 
@@ -558,7 +564,9 @@ describe('TasksStep', () => {
     it('offers no Delete — a planning session decides who does what, not what exists', async () => {
       mockApi()
       render(<Body {...props()} />)
-      await waitFor(() => expect(screen.getByText(/Fold the towels/)).toBeTruthy())
+      // Sweep the porch has pending instances (i1, i2) — the second write is the one that
+    // fails, which is the whole point. Fold the towels has none, so nothing would throw.
+    await waitFor(() => expect(screen.getByText(/Sweep the porch/)).toBeTruthy())
 
       fireEvent.click(within(strip()).getByRole('button', { name: 'Edit Fold the towels' }))
       await waitFor(() => expect(screen.getByText('Edit chore')).toBeTruthy())
@@ -613,5 +621,38 @@ describe('TasksStep', () => {
       expect(screen.queryByText('Edit chore')).toBeNull()
       await waitFor(() => expect(within(strip()).getByText(/Dishes/)).toBeTruthy())
     })
+  })
+})
+
+// HANDING A CHORE OVER IS TWO WRITES, and the second one can fail on its own.
+//
+// `handOut` PATCHes the chore DEFINITION and then assigns each pending instance. The catch
+// asserted "nothing moved, so there's nothing to undo" — false the moment the definition
+// PATCH has already succeeded — and then skipped the re-read and said nothing, so the card
+// sat in its old column and the tally was wrong until some unrelated refetch.
+describe('tasks · when handing a chore over half-fails', () => {
+  it('re-reads the board and says so, rather than claiming nothing moved', async () => {
+    mockApi()
+    const inner = globalThis.fetch as unknown as typeof fetch
+    // The definition PATCH succeeds; assigning the instance does not.
+    globalThis.fetch = vi.fn(async (url: string, init?: RequestInit) => {
+      if (String(url).includes('/assign')) throw new Error('offline')
+      return (inner as (u: string, i?: RequestInit) => Promise<unknown>)(url, init)
+    }) as unknown as typeof fetch
+
+    render(<Body {...props()} />)
+    // Sweep the porch has pending instances (i1, i2) — the second write is the one that
+    // fails, which is the whole point. Fold the towels has none, so nothing would throw.
+    await waitFor(() => expect(screen.getByText(/Sweep the porch/)).toBeTruthy())
+    const before = calls.filter((c) => c.method === 'GET' && c.url.includes('/weekly-planning/tasks')).length
+
+    fireEvent.click(within(strip()).getAllByRole('button', { name: /Give Sweep the porch to/ })[0])
+
+    // It said something…
+    expect(await screen.findByRole('alert')).toBeTruthy()
+    // …and went back to the server rather than trusting a board it knows is now wrong.
+    await waitFor(() => expect(
+      calls.filter((c) => c.method === 'GET' && c.url.includes('/weekly-planning/tasks')).length
+    ).toBeGreaterThan(before))
   })
 })

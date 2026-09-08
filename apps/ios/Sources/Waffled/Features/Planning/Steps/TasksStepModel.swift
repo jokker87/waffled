@@ -243,8 +243,12 @@ final class PlanningTasksModel {
     /// and the 🙌, so a hand-out can never do something a take-back can't undo.
     ///
     /// Returns true when it landed, so the caller knows whether to tell the shell.
-    /// A FAILED HAND-OUT DOES NOT REFETCH AND DOES NOT MUTATE — nothing moved, so the
-    /// chore stays exactly where it was and the tally is untouched.
+    ///
+    /// A FAILED HAND-OUT RE-READS THE BOARD, because "nothing moved" is not something this
+    /// can know. Handing a chore over is TWO writes — the chore definition, then each
+    /// pending instance — so a throw from the second one leaves the definition already
+    /// moved. This used to claim the opposite in both the comment and the message shown to
+    /// the user, and skip the refetch, which left the card in its old column.
     @discardableResult
     func give(_ chore: WaffledAPI.PlanningTasksChore, to personId: String?, weekStart: String) async -> Bool {
         guard savingChoreId == nil else { return false }
@@ -254,7 +258,8 @@ final class PlanningTasksModel {
         do {
             try await handOut(chore, personId)
         } catch {
-            errorMessage = "That didn't take — the task stayed where it was."
+            errorMessage = "That may not have gone through fully — the board has been re-read, so what you see is what's saved."
+            await load(weekStart: weekStart)
             return false
         }
         assigned = personId != nil ? assigned + 1 : max(0, assigned - 1)

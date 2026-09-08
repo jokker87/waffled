@@ -233,6 +233,9 @@ function ChoreCard({
 function Body({ weekStart, setDecisionData, refresh, busy }: StepBodyProps) {
   const [board, setBoard] = useState<PlanningTasksBoard | null>(null)
   const [error, setError] = useState(false)
+  // A hand-over that failed, which is NOT the same as the board failing to load: the board
+  // is fine and still shown, one write may be half-applied.
+  const [giveError, setGiveError] = useState<string | null>(null)
   const [saving, setSaving] = useState<string | null>(null)
   // Whose column's "+ Add for …" is open. `''` is the strip's own "Add a task" (nobody
   // prefilled); null is closed.
@@ -289,12 +292,23 @@ function Body({ weekStart, setDecisionData, refresh, busy }: StepBodyProps) {
       setSaving(chore.id)
       try {
         await planningTasksApi.handOut(chore, personId)
+        setGiveError(null)
         setAssigned((n) => (personId ? n + 1 : Math.max(0, n - 1)))
         // Re-read rather than bookkeeping: the column is the week, and the server owns it.
         load()
         refresh()
       } catch {
-        /* nothing moved, so there's nothing to undo — the chore stays where it was */
+        // HANDING A CHORE OVER IS TWO WRITES — the chore DEFINITION, then each pending
+        // instance — so a failure here does not mean nothing moved. This used to claim
+        // exactly that ("nothing moved, so there's nothing to undo") and skip the re-read,
+        // which left the card in its old column and the tally wrong until something else
+        // happened to refetch.
+        //
+        // We cannot know which half landed, so we ask the server instead of guessing, and
+        // say plainly that it may be half-done.
+        setGiveError('That may not have gone through fully — the board has been re-read, so what you see is what’s saved.')
+        load()
+        refresh()
       } finally {
         setSaving(null)
       }
@@ -385,6 +399,7 @@ function Body({ weekStart, setDecisionData, refresh, busy }: StepBodyProps) {
 
   return (
     <div className="wpt">
+      {giveError && <div className="wp-err" role="alert">{giveError}</div>}
       {/* The strip: everything nobody has taken, faces underneath. It is also a drop
           target, which is what makes a hand-out reversible by drag as well as by tap. */}
       <div

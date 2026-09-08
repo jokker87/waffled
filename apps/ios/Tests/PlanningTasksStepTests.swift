@@ -253,7 +253,18 @@ private func model(_ feed: TasksBoardFeed) -> PlanningTasksModel {
         #expect(model.loaded)
     }
 
-    @Test func aFailedHandOutNeitherRefetchesNorTallies() async throws {
+    // A FAILED HAND-OUT RE-READS THE BOARD, and this test used to assert the opposite.
+    //
+    // It expected `fetchCount == 1` — no refetch — on the premise that a failure means
+    // nothing moved. That premise is false: handing a chore over is TWO writes (the chore
+    // definition, then each pending instance), so a throw from the second leaves the first
+    // already applied. The old expectation, the old comment and the old message shown to
+    // the user all asserted the same falsehood, which is why the board kept a stale column.
+    //
+    // The tally still does NOT move: it counts what this session decided, and a half-landed
+    // write decided nothing. Only the board is re-read, because only the server knows which
+    // half took.
+    @Test func aFailedHandOutRereadsTheBoardAndTalliesNothing() async throws {
         let feed = TasksBoardFeed(try decodedBoard())
         feed.handOutFails = true
         let model = model(feed)
@@ -264,9 +275,11 @@ private func model(_ feed: TasksBoardFeed) -> PlanningTasksModel {
 
         #expect(!ok)
         #expect(feed.handOuts.count == 1)
-        #expect(feed.fetchCount == 1)          // the initial load only
-        #expect(model.assigned == 0)           // nothing moved, so nothing is tallied
+        #expect(feed.fetchCount == 2)          // the initial load, then the re-read
+        #expect(model.assigned == 0)           // nothing this session decided
         #expect(model.errorMessage != nil)
+        // The message may not claim the chore stayed put — it cannot know that.
+        #expect(model.errorMessage?.contains("stayed where it was") != true)
     }
 
     @Test func theTallyUndoesItselfOnATakeBackSoTheRecapCantOverReport() async throws {
