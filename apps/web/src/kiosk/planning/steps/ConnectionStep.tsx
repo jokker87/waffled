@@ -239,8 +239,16 @@ function Body({ step, sessionId, weekStart, setDecisionData, refresh, busy }: St
   useEffect(load, [load])
 
   // A ladder left running into an unmounted step would setState on nothing.
+  //
+  // RE-ARMED IN THE EFFECT BODY, not only cleared on unmount. StrictMode mounts, cleans up,
+  // then mounts again — so a cleanup-only effect left this false for the whole life of the
+  // real mount and settle() bailed before setBoard, which quietly disabled the CATCHUP_MS
+  // ladder in development: precisely where the bug it exists for would be noticed.
   const alive = useRef(true)
-  useEffect(() => () => { alive.current = false }, [])
+  useEffect(() => {
+    alive.current = true
+    return () => { alive.current = false }
+  }, [])
 
   // Written through the step's own MID-STEP route, which merges the map onto the step's
   // row and leaves `status` and `decided_at` alone — linking a time is not answering the
