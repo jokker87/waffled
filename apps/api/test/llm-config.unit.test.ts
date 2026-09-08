@@ -138,10 +138,9 @@ describe('getAiConfig — a persisted empty model falls back to the provider def
   })
 })
 
-// Provider requests are billable and not idempotent. A timeout only means Waffled
-// stopped waiting; the model may still be generating, so reissuing the same prompt
-// can turn one user action into several provider calls.
-describe('completeJson — sends each prompt once', () => {
+// A transient provider blip (OpenAI 500 "you can retry", a dropped socket) shouldn't
+// sink the user's action — completeJson retries those, but not a permanent 4xx.
+describe('completeJson — retries transient provider failures', () => {
   const OLD_KEY = process.env.OPENAI_API_KEY
   afterEach(() => {
     vi.resetModules()
@@ -158,15 +157,32 @@ describe('completeJson — sends each prompt once', () => {
     }))
     return await import('../src/platform/llm')
   }
+  const okResponses = {
+    ok: true, status: 200,
+    json: async () => ({ output: [{ type: 'message', content: [{ type: 'output_text', text: '{"suggestions":[]}' }] }] }),
+    text: async () => '',
+  }
   const httpFail = (status: number) => ({ ok: false, status, text: async () => `${status} server_error`, json: async () => ({}) })
   const req = { system: 's', user: 'u', schema: {}, schemaName: 'meal_plan', maxTokens: 10 }
 
-  it('does not retry a transient 500', async () => {
+  it('retries a 500 then succeeds', async () => {
     const llm = await loadLlmOpenai()
-    const fetchMock = vi.fn().mockResolvedValue(httpFail(500))
+    const fetchMock = vi.fn().mockResolvedValueOnce(httpFail(500)).mockResolvedValueOnce(okResponses)
     vi.stubGlobal('fetch', fetchMock)
-    await expect(llm.completeJson('h1', req)).rejects.toThrow()
-    expect(fetchMock).toHaveBeenCalledOnce()
+    const r = await llm.completeJson('h1', req)
+    expect(r.via).toBe('openai')
+    expect(r.data).toEqual({ suggestions: [] })
+    expect(fetchMock.mock.calls.length).toBe(2)
+  })
+
+  it('retries a 429 then succeeds', async () => {
+    const llm = await loadLlmOpenai()
+    const fetchMock = vi.fn().mockResolvedValueOnce(httpFail(429)).mockResolvedValueOnce(okResponses)
+    vi.stubGlobal('fetch', fetchMock)
+    const r = await llm.completeJson('h1', req)
+    expect(r.via).toBe('openai')
+    expect(r.data).toEqual({ suggestions: [] })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
   it('does NOT retry a 400 (bad request / auth) — fails immediately', async () => {
@@ -174,7 +190,7 @@ describe('completeJson — sends each prompt once', () => {
     const fetchMock = vi.fn().mockResolvedValue(httpFail(400))
     vi.stubGlobal('fetch', fetchMock)
     await expect(llm.completeJson('h1', req)).rejects.toThrow()
-    expect(fetchMock).toHaveBeenCalledOnce()
+    expect(fetchMock.mock.calls.length).toBe(1)
   })
 
   it('does not reissue a timed-out prompt', async () => {
@@ -184,6 +200,14 @@ describe('completeJson — sends each prompt once', () => {
     const fetchMock = vi.fn().mockRejectedValue(timeout)
     vi.stubGlobal('fetch', fetchMock)
     await expect(llm.completeJson('h1', req)).rejects.toThrow()
-    expect(fetchMock).toHaveBeenCalledOnce()
+    expect(fetchMock.mock.calls.length).toBe(1)
+  })
+
+  it('gives up after exhausting retries on a persistent 5xx (1 + 2 tries)', async () => {
+    const llm = await loadLlmOpenai()
+    const fetchMock = vi.fn().mockResolvedValue(httpFail(503))
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(llm.completeJson('h1', req)).rejects.toThrow()
+    expect(fetchMock.mock.calls.length).toBe(3)
   })
 })
