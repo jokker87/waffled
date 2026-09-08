@@ -15,6 +15,12 @@ struct FamilyView: View {
     @State private var ranDemo = false
     private let cols = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
 
+    init(path: Binding<[HubRoute]>, approvals: ApprovalsModel, hub: FamilyHubModel? = nil) {
+        _path = path
+        self.approvals = approvals
+        _hub = State(initialValue: hub ?? FamilyHubModel())
+    }
+
     private struct LoadKey: Hashable {
         let scope: RestDataScopeKey
         let modules: FamilyRestModules

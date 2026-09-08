@@ -367,8 +367,9 @@ final class SyncManager {
     private let connectionTransitions = ConnectionTransitionQueue()
     private let testConnectionLifecycle: SyncConnectionLifecycle?
 
-    init(testConnectionLifecycle: SyncConnectionLifecycle? = nil) {
+    init(testConnectionLifecycle: SyncConnectionLifecycle? = nil, initialMembers: [SyncedMember] = []) {
         self.testConnectionLifecycle = testConnectionLifecycle
+        self.members = initialMembers
         db = PowerSyncDatabase(schema: SyncSchema.schema, dbFilename: "waffled.sqlite")
     }
 
