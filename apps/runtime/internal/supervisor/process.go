@@ -25,12 +25,33 @@ type runner struct {
 	logsDir string
 	pidsDir string
 	log     *Logger
+	// backoff spaces out restarts. Nil means restartBackoff; a test overrides it to keep
+	// an interleaving test fast rather than sleeping out real seconds.
+	backoff func(attempt int) time.Duration
+}
+
+func (r *runner) restartDelay(attempt int) time.Duration {
+	if r.backoff != nil {
+		return r.backoff(attempt)
+	}
+	return restartBackoff(attempt)
 }
 
 // child is one supervised process.
 type child struct {
 	runner *runner
 	spec   services.Spec
+
+	// lifecycle serializes "decide to spawn" against "decide to stop". mu alone cannot:
+	// spawn does file and fork work that must not run under a lock a status call also
+	// takes, so superviseRestarts used to release mu before spawning — and a stop() in
+	// that window saw the dead child, reported success, and left the new one running
+	// unsupervised on its port. Taking lifecycle around the whole of [check stopping →
+	// publish the new cmd], and again in stop() before it snapshots cmd, means stop()
+	// either wins the race (the restart then sees stopping and never spawns) or waits
+	// and snapshots the child that was just published. Always taken before mu, and
+	// never held while waiting for a process to exit.
+	lifecycle sync.Mutex
 
 	mu        sync.Mutex
 	cmd       *exec.Cmd
@@ -50,12 +71,16 @@ func (r *runner) pidPath(name string) string { return filepath.Join(r.pidsDir, n
 // recording the pid so `status` and `stop` can find it from another process.
 func (r *runner) start(spec services.Spec) (*child, error) {
 	c := &child{runner: r, spec: spec}
+	c.lifecycle.Lock()
+	defer c.lifecycle.Unlock()
 	if err := c.spawn(); err != nil {
 		return nil, err
 	}
 	return c, nil
 }
 
+// spawn must be called with c.lifecycle held, so that no stop() can slip between the
+// caller's "not stopping" decision and the moment the new cmd is published.
 func (c *child) spawn() error {
 	logPath := c.runner.logPath(c.spec.Name)
 	if err := rotateIfLarge(logPath); err != nil {
@@ -136,19 +161,24 @@ func (c *child) superviseRestarts() {
 			reason := c.lastErr
 			c.mu.Unlock()
 
-			delay := restartBackoff(attempt)
+			delay := c.runner.restartDelay(attempt)
 			c.runner.log.Warnf("%s exited unexpectedly (%s); restarting in %s (attempt %d)",
 				c.spec.Name, reason, delay, attempt)
 			time.Sleep(delay)
 
+			// The stopping check and the spawn are one atomic decision: a stop() that
+			// arrives between them would otherwise never learn about the new process.
+			c.lifecycle.Lock()
 			c.mu.Lock()
-			if c.stopping {
-				c.mu.Unlock()
+			stopping = c.stopping
+			c.mu.Unlock()
+			if stopping {
+				c.lifecycle.Unlock()
 				return
 			}
-			c.mu.Unlock()
-
-			if err := c.spawn(); err != nil {
+			err := c.spawn()
+			c.lifecycle.Unlock()
+			if err != nil {
 				c.runner.log.Errorf("could not restart %s: %v", c.spec.Name, err)
 				c.mu.Lock()
 				c.lastErr = err.Error()
@@ -163,10 +193,16 @@ func (c *child) superviseRestarts() {
 // stop asks politely, then insists. A service that ignores SIGTERM must not hold up
 // shutdown — the menu-bar app's "Quit" has to be quick and total.
 func (c *child) stop(grace time.Duration) error {
+	// Under lifecycle, so a crash-restart is either not yet started (it will see
+	// stopping and give up) or fully published (cmd below is that new process). The
+	// lock is released before any waiting: stop must never block a spawn it is about
+	// to kill, and holding it across a 15s grace would deadlock the supervise goroutine.
+	c.lifecycle.Lock()
 	c.mu.Lock()
 	c.stopping = true
 	cmd, done := c.cmd, c.waitDone
 	c.mu.Unlock()
+	c.lifecycle.Unlock()
 
 	defer os.Remove(c.runner.pidPath(c.spec.Name))
 

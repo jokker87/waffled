@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -316,3 +317,80 @@ func (w testWriter) Write(p []byte) (int, error) {
 }
 
 var _ = context.Background
+
+// A stop() that lands while a crash-restart is mid-spawn must leave nothing behind.
+//
+// The regression this guards: superviseRestarts checked c.stopping, released the lock,
+// and only then called spawn(). A stop() arriving in that window set stopping=true,
+// snapshotted the child that had already died, saw nothing running and reported success
+// — and spawn() then published a fresh process that nothing would ever kill, holding
+// the service's port against the next start.
+//
+// The interleaving is a few milliseconds wide, so the test sweeps stop() across the
+// restart window in fine steps rather than hoping one attempt lands in it.
+func TestStopDuringACrashRestartLeavesNoChildBehind(t *testing.T) {
+	const backoff = 20 * time.Millisecond
+
+	for attempt := 0; attempt < 60; attempt++ {
+		r := newTestRunner(t)
+		r.backoff = func(int) time.Duration { return backoff }
+		pidLog := filepath.Join(r.logsDir, "generations.pids")
+
+		// exec, so the recorded $$ stays the pid of the process that is actually alive.
+		c, err := r.start(shell("flapper", "echo $$ >> "+pidLog+"; exec sleep 30"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		c.superviseRestarts()
+		waitTight(t, 3*time.Second, func() bool { return len(recordedPids(t, pidLog)) >= 1 },
+			"the first child never recorded its pid")
+
+		// Crash it, then stop the service while the restart is in flight.
+		_ = syscall.Kill(c.currentPid(), syscall.SIGKILL)
+		time.Sleep(backoff + time.Duration(attempt)*100*time.Microsecond)
+		if err := c.stop(2 * time.Second); err != nil {
+			t.Fatalf("attempt %d: stop reported %v", attempt, err)
+		}
+
+		// A child that escaped the stop is published a moment after stop() returns.
+		time.Sleep(30 * time.Millisecond)
+		for _, pid := range recordedPids(t, pidLog) {
+			if processAlive(pid) {
+				_ = syscall.Kill(pid, syscall.SIGKILL)
+				t.Fatalf("attempt %d: pid %d was still running after stop() reported success — "+
+					"a crash-restart spawned it in the window stop() had already passed", attempt, pid)
+			}
+		}
+	}
+}
+
+// recordedPids reads every generation the flapping child has written.
+func recordedPids(t *testing.T, path string) []int {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var pids []int
+	for _, line := range strings.Fields(string(raw)) {
+		pid, err := strconv.Atoi(line)
+		if err != nil {
+			t.Fatalf("%s holds %q, not a pid", path, line)
+		}
+		pids = append(pids, pid)
+	}
+	return pids
+}
+
+// waitTight is waitFor with a poll fine enough for a millisecond-scale interleaving.
+func waitTight(t *testing.T, limit time.Duration, cond func() bool, msg string) {
+	t.Helper()
+	deadline := time.Now().Add(limit)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("%s (waited %s)", msg, limit)
+}
