@@ -237,3 +237,49 @@ describe('hyphenated sibling routes are reachable with the right scope', () => {
     expect((await keyCall('DELETE', '/api/chore-proofs', choresWrite)).statusCode).toBe(200)
   })
 })
+
+// ── the catalog covers every live route, or the route says why not ──────────────
+// The bug above was silent because nothing tied API_SCOPES to the actual route
+// table. This walks lambda-api's own table (app.routes() → [method, path, …]), so
+// it can't drift from what's registered, and fails on any route that is neither
+// scope-matched nor listed below as deliberately unreachable by a key.
+//
+// Adding a route family? Either give its prefix to a resource in API_SCOPES, or add
+// it here with the reason it must stay session/device-only.
+const NOT_KEY_REACHABLE: Array<{ why: string; prefixes: string[] }> = [
+  { why: 'public liveness probe', prefixes: ['/healthz'] },
+  { why: 'echoes the token sub — tells a key nothing it does not already know', prefixes: ['/api/me'] },
+  { why: 'login, OIDC, invites and self-service account are session-only', prefixes: ['/api/auth', '/auth', '/api/account', '/api/households'] },
+  { why: 'a key can never mint or manage keys', prefixes: ['/api/api-keys'] },
+  { why: 'kiosk and Waffled-Bite pairing run on their own device tokens', prefixes: ['/api/kiosk', '/api/waffled-bites'] },
+  { why: 'the capability grid is an admin session surface', prefixes: ['/api/permissions'] },
+  { why: 'offline sync is the first-party clients own transport', prefixes: ['/api/powersync'] },
+  { why: 'LLM capture and the blob upload sink are first-party client surfaces', prefixes: ['/api/capture', '/api/media'] },
+  { why: 'integrations surface — documented as always 403 for a key', prefixes: ['/api/countdowns', '/api/family-night', '/api/goal-calendar', '/api/calendar'] },
+  { why: 'per-viewer UI layout, not household data', prefixes: ['/api/today-layout'] },
+  { why: 'operator surfaces (deep health report, update channel)', prefixes: ['/api/health', '/api/updates'] },
+  // Parked, not deliberate: /api/list-items is the same boundary bug (it is a lists
+  // route that /api/lists cannot match), and PR #180 already adds its prefix to the
+  // `lists` resource. Listed here only so this guard is green without duplicating
+  // that change — DELETE this entry when #180 merges.
+  { why: 'PENDING — fixed by PR #180, which gives this prefix to `lists`', prefixes: ['/api/list-items'] },
+  // Plausible gaps, left alone on purpose: closing either is a product call that
+  // widens what a key can touch, not a fix for the boundary bug above.
+  { why: 'GAP? conversions sit beside /api/currencies but were never given to `rewards`', prefixes: ['/api/conversions'] },
+  { why: 'GAP? rhythms would need a whole new scope resource, not another prefix', prefixes: ['/api/rhythms'] },
+]
+
+describe('scope catalog covers the route table', () => {
+  it('leaves no live route both unscoped and unlisted', async () => {
+    const { scopeForRequest } = await import('../src/modules/api-keys/api-keys')
+    const allowed = NOT_KEY_REACHABLE.flatMap((g) => g.prefixes)
+    const covered = (path: string) => allowed.some((p) => path === p || path.startsWith(p + '/'))
+
+    const orphans = (app.routes() as string[][])
+      .map(([method, path]) => [method, path] as const)
+      .filter(([method, path]) => !scopeForRequest(method, path) && !covered(path))
+      .map(([method, path]) => `${method} ${path}`)
+
+    expect(orphans).toEqual([])
+  })
+})
