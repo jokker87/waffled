@@ -7,7 +7,7 @@
 // of the calendar would be a second door onto the same rows, and the two would drift.
 //
 // The session adds exactly one thing: PARKING A NOTE. That already has a home too —
-// step 1 owns `planning_parked_items` (0100) and `POST /api/weekly-planning/loose-ends/
+// step 1 owns `planning_parked_items` (0101) and `POST /api/weekly-planning/loose-ends/
 // parked`, both written to be general precisely so this step could use them. So this
 // file does NOT re-implement parking; `parkItem` in ./looseEnds.ts is the one writer.
 //
@@ -38,7 +38,7 @@ import { resolveSteps, STEPS } from '../weeklyPlanning'
 // the mock's caption for this bar is "tagged Tasks, so it turns up at step 8 for an
 // owner and a day", and step 8 should not need to know which bar the note came from.
 //
-// (0100's own comment sketches step 3 tagging 'horizon'. That predates the bar having a
+// (0101's own comment sketches step 3 tagging 'horizon'. That predates the bar having a
 // tag row at all; it contradicts the column's stated semantics, and the v4 mock settles
 // it. Nothing reads 'horizon' today.)
 //

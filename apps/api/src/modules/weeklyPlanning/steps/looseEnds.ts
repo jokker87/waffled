@@ -17,7 +17,7 @@
 //     unchecked row there is shopping, not a loose end (see staleListItems).
 //
 //   PARKED is what somebody wrote down during the week and that exists nowhere else
-//     yet, so it gets the one table this step owns (0100_planning_parked_items). Same
+//     yet, so it gets the one table this step owns (0101_planning_parked_items). Same
 //     card, different verbs — because a parked thing might turn out to be nothing,
 //     which is why Drop is a real answer there and only there.
 //
@@ -741,7 +741,7 @@ export type UpdateParkedResult =
 /**
  * Fix a parked note's words, or re-address it to a different step.
  *
- * 0100's own comment says "editing a parked note is not a thing the step offers — a note
+ * 0101's own comment says "editing a parked note is not a thing the step offers — a note
  * is written once and then answered". That was the shape of the table, not a law, and it
  * stopped being true the moment somebody typed a note with a typo in it or reached for
  * the wrong tag chip: "parked in this session — I have no way to edit the item or change

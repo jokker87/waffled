@@ -487,7 +487,7 @@ describe('planning · editing a note after it has been parked', () => {
   // I should."
   //
   // A note was written once and then only answered: a typo, or the wrong destination
-  // chosen in the bar, could be fixed only by dropping it and re-typing. (0100's own
+  // chosen in the bar, could be fixed only by dropping it and re-typing. (0101's own
   // comment says as much — "editing a parked note is not a thing the step offers" — and
   // that sentence is what this route retires.)
   //

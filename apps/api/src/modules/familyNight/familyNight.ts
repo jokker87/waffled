@@ -184,7 +184,7 @@ interface OccRow {
   theme: string | null
   notes: string | null
   status: string
-  /** THIS gathering's calendar event — not the standing series in config. See 0101. */
+  /** THIS gathering's calendar event — not the standing series in config. See 0102. */
   event_id: string | null
 }
 

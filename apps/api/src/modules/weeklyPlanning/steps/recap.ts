@@ -283,7 +283,7 @@ async function rhythmsSettledSince(householdId: string, since: string): Promise<
 // which rows are untagged — so the sentence is step 1's, not a second version of it.
 //
 // `step_key` is always a DESTINATION step, never the step that wrote the note (see
-// 0100's comment), so "untagged" is exactly "nobody has said which step will look at
+// 0101's comment), so "untagged" is exactly "nobody has said which step will look at
 // this" — which is what the last call is for.
 async function parkedKeys(householdId: string): Promise<Map<string, string | null>> {
   const { rows } = await query<{ id: string; step_key: string | null }>(
