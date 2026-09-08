@@ -295,12 +295,32 @@ final class PlanningConnectionModel {
         ]
     }
 
+    /// Which week the links currently in hand were seeded for. A different week is a
+    /// different set — see `seedLinks`.
+    private var seededWeek: String?
+
     /// Seed `links` from the step's OWN persisted `data.links`, BEFORE the read lands.
     ///
     /// Order matters: the crumb carries `links`, so pushing one before the seed arrives
     /// would hand the shell an empty map to write back over a real one. Guarded on
     /// `links.isEmpty`, so a link made in this sitting is never overwritten by a re-seed.
-    func seedLinks(from value: JSONValue?) {
+    ///
+    /// THE WEEK IS PART OF THAT GUARD, and it wasn't. The week stepper is reachable from
+    /// inside a session, and with a session open on this step in two weeks the shell handed
+    /// the SAME model to both (its body was keyed on the step alone). `links.isEmpty` was
+    /// false, so week B's own `data.links` was refused, week B rendered week A's pairings as
+    /// already answered — the keys are person-id joins, identical across weeks — and the
+    /// next `link()`, which PUTs the whole map, persisted WEEK A'S EVENT IDS ONTO WEEK B.
+    ///
+    /// So: same week, keep what this sitting made; different week, start from that week's
+    /// own data. The shell also keys the body by week now, which is the root fix — this is
+    /// the model refusing to be wrong even if that keying is lost again.
+    func seedLinks(from value: JSONValue?, weekStart: String) {
+        if seededWeek != weekStart {
+            links = [:]
+            seededWeek = weekStart
+            rebuild()
+        }
         guard links.isEmpty, let value, case let .object(map) = value else { return }
         var seeded: [String: String] = [:]
         for (key, entry) in map {

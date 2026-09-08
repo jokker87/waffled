@@ -61,7 +61,7 @@ struct ConnectionStepView: View {
         .task(id: props.weekStart) {
             // SEED FIRST, THEN READ. The crumb carries `links`, and pushing one before the
             // seed lands would hand the shell an empty map to write back over a real one.
-            model.seedLinks(from: props.step.data["links"])
+            model.seedLinks(from: props.step.data["links"], weekStart: props.weekStart)
             await model.load(weekStart: props.weekStart)
         }
         .onChange(of: model.revision) { _, _ in props.setDecisionData(model.decisionData) }

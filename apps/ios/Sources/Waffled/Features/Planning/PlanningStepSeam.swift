@@ -100,6 +100,20 @@ struct PlanningStepProps {
     /// That is the important half: a button reading "Make a goal" that only ticks the note
     /// off promises an action it does not perform, which is worse than the plain one.
     let lendVerb: (PlanningHandoffVerb?) -> Void
+
+    /// Tell the shell a write THIS STEP owns is in flight, so Skip and the affirmative go
+    /// cold until it lands.
+    ///
+    /// `busy` above flows the other way — it is the SHELL's own writes. A step's writes were
+    /// invisible to the chrome, so "✨ Plan the rest" and "Looks right" could be tapped in
+    /// that order: the affirmative reads the crumb immediately, so the record was written
+    /// without the nights still being filled (they lose their ✨ afterwards), and the fill's
+    /// `apply` landed on a step that had already been answered.
+    ///
+    /// Only a step with a LONG write needs to call it — Meals' auto-fill is the one that
+    /// prompted this. A step whose writes are a single quick call can ignore it; the shell
+    /// defaults to not busy.
+    let reportBusy: (Bool) -> Void
 }
 
 /// One verb, lent to the shell's banner by the step you are standing on.

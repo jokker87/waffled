@@ -40,6 +40,9 @@ struct PlanningShellView: View {
     /// worse of the two failures.
     @State private var handoffVerb: PlanningHandoffVerb?
     @State private var handoffVerbStepKey: String?
+    /// A write the STEP owns is in flight — see PlanningStepProps.reportBusy. The
+    /// footer goes cold for it, so "Looks right" cannot answer a step mid-write.
+    @State private var stepBusy = false
 
     private var isKiosk: Bool { DeviceExperience.current == .kiosk }
 
@@ -221,7 +224,7 @@ struct PlanningShellView: View {
                         .frame(maxWidth: .infinity).padding(.vertical, 12)
                         .wfField()
                 }
-                .buttonStyle(.plain).disabled(model.busy)
+                .buttonStyle(.plain).disabled(model.busy || stepBusy)
                 planAnotherWeek
                 discardBlock
             }
@@ -277,9 +280,14 @@ struct PlanningShellView: View {
                             // lifetime has to stay exactly this: a same-step refetch
                             // keeps it, a step change clears it.
                             .id(step.key)
-                        // Keyed on the step so moving on gives the next body a clean
-                        // slate rather than inheriting the last one's @State.
-                        planningStepBody(props).id(step.key)
+                        // Keyed on the step AND THE WEEK so moving on — or stepping to
+                        // another week from inside the session — gives the next body a
+                        // clean slate rather than inheriting the last one's @State.
+                        //
+                        // The week used to be missing, and it is reachable from in here:
+                        // two weeks with sessions on the same step shared one step model,
+                        // so week B kept week A's answers (see ConnectionStepModel.seedLinks).
+                        planningStepBody(props).id("\(step.key)|\(props.weekStart)")
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -396,7 +404,7 @@ struct PlanningShellView: View {
                 Text("Skip this step")
                     .font(.system(size: 14, weight: .bold)).foregroundStyle(WF.ink3)
             }
-            .buttonStyle(.plain).disabled(model.busy)
+            .buttonStyle(.plain).disabled(model.busy || stepBusy)
 
             if let step = model.current, let sessionId = model.session?.id, let week = model.view?.weekStart {
                 planningStepFooterExtra(stepProps(step, sessionId: sessionId, weekStart: week))
@@ -427,7 +435,7 @@ struct PlanningShellView: View {
             Task { await model.answer("done") }
         } label: {
             HStack(spacing: 6) {
-                if model.busy { ProgressView().controlSize(.small).tint(.white) }
+                if model.busy || stepBusy { ProgressView().controlSize(.small).tint(.white) }
                 Text(model.current?.primary ?? "Done")
                     .font(.system(size: 15, weight: .bold)).foregroundStyle(.white)
                     .lineLimit(1)
@@ -443,10 +451,10 @@ struct PlanningShellView: View {
                 }
             }
             .padding(.horizontal, 16).padding(.vertical, 11)
-            .background(model.busy ? WF.ink3 : WF.primary)
+            .background(model.busy || stepBusy ? WF.ink3 : WF.primary)
             .clipShape(RoundedRectangle(cornerRadius: WF.rMD, style: .continuous))
         }
-        .buttonStyle(.plain).disabled(model.busy)
+        .buttonStyle(.plain).disabled(model.busy || stepBusy)
     }
 
     // MARK: - The agenda sheet
@@ -525,7 +533,7 @@ struct PlanningShellView: View {
             .padding(.horizontal, 12).padding(.vertical, 10)
             .wfField(radius: WF.rSM, fill: here ? WF.primary.opacity(0.06) : WF.card)
         }
-        .buttonStyle(.plain).disabled(model.busy)
+        .buttonStyle(.plain).disabled(model.busy || stepBusy)
     }
 
     private func closeSheet() {
@@ -561,7 +569,7 @@ struct PlanningShellView: View {
                     .frame(width: 34, height: 34)
                     .background(WF.panel).clipShape(Circle())
             }
-            .buttonStyle(.plain).disabled(model.busy)
+            .buttonStyle(.plain).disabled(model.busy || stepBusy)
             .accessibilityLabel("Plan the next week")
         }
     }
@@ -598,7 +606,7 @@ struct PlanningShellView: View {
                             .frame(maxWidth: .infinity).padding(.vertical, 10)
                             .background(WF.danger).clipShape(Capsule())
                     }
-                    .buttonStyle(.plain).disabled(model.busy)
+                    .buttonStyle(.plain).disabled(model.busy || stepBusy)
                 }
             }
             .padding(12)
@@ -638,6 +646,7 @@ struct PlanningShellView: View {
             lendVerb: { verb in
                 handoffVerb = verb
                 handoffVerbStepKey = verb == nil ? nil : step.key
-            })
+            },
+            reportBusy: { stepBusy = $0 })
     }
 }

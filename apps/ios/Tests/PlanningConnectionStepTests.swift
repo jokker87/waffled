@@ -625,14 +625,60 @@ private let session = "session-1"
         ])
         let m = model(feed)
 
-        m.seedLinks(from: .object(["a-b": .string("e2"), "junk": .int(3)]))
+        m.seedLinks(from: .object(["a-b": .string("e2"), "junk": .int(3)]), weekStart: week)
         await m.load(weekStart: week)
 
         #expect(m.links == ["a-b": "e2"])
         #expect(m.rows.first?.answer?.id == "e2")
-        // A second seed never overwrites what this sitting decided.
-        m.seedLinks(from: .object(["a-b": .string("e1")]))
+        // A second seed for the SAME week never overwrites what this sitting decided.
+        m.seedLinks(from: .object(["a-b": .string("e1")]), weekStart: week)
         #expect(m.links == ["a-b": "e2"])
+    }
+
+    /// A DIFFERENT WEEK IS A DIFFERENT SET OF LINKS.
+    ///
+    /// The week stepper is reachable from inside a session, and the shell used to key a step
+    /// body on the step alone — so two weeks with sessions on this step shared one model.
+    /// `guard links.isEmpty` then refused week B's own `data.links`, week B rendered week A's
+    /// pairings as already answered (the keys are person-id joins, identical across weeks),
+    /// and the next `link()` — which PUTs the whole map — wrote WEEK A'S EVENT IDS ONTO
+    /// WEEK B's session.
+    @Test func steppingToAnotherWeekDoesNotInheritTheFirstWeeksLinks() async {
+        let feed = ConnectionFeed([
+            board([pairing(["a", "b"], who: "A and B", already: [event("e1", "Yard work")])]),
+            board([pairing(["a", "b"], who: "A and B", already: [event("e9", "Museum")])]),
+        ])
+        let m = model(feed)
+
+        m.seedLinks(from: .object(["a-b": .string("e1")]), weekStart: week)
+        await m.load(weekStart: week)
+        #expect(m.links == ["a-b": "e1"])
+
+        // Next week, whose own row has nothing linked.
+        let nextWeek = "2026-09-13"
+        m.seedLinks(from: nil, weekStart: nextWeek)
+
+        #expect(m.links.isEmpty, "week B inherited week A's links: \(m.links)")
+        #expect(m.rows.first?.answer == nil)
+    }
+
+    /// …and week B's OWN data is adopted rather than merely cleared.
+    @Test func anotherWeekAdoptsItsOwnLinks() async {
+        let feed = ConnectionFeed([
+            board([pairing(["a", "b"], who: "A and B", already: [event("e1", "Yard work")])]),
+            board([pairing(["a", "b"], who: "A and B", already: [event("e9", "Museum")])]),
+        ])
+        let m = model(feed)
+
+        m.seedLinks(from: .object(["a-b": .string("e1")]), weekStart: week)
+        await m.load(weekStart: week)
+
+        let nextWeek = "2026-09-13"
+        m.seedLinks(from: .object(["a-b": .string("e9")]), weekStart: nextWeek)
+        await m.load(weekStart: nextWeek)
+
+        #expect(m.links == ["a-b": "e9"])
+        #expect(m.rows.first?.answer?.id == "e9")
     }
 
     @Test func theStepDrawsOnlyTheVisibleRows() async {

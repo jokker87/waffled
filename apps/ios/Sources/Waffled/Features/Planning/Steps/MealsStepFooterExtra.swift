@@ -37,13 +37,28 @@ struct MealsStepFooterExtra: View {
         // NO `.task` HERE, deliberately: the body owns the fetching. The shell rebuilds
         // its footer on every `busy` change, so a read hung off this view would re-fire
         // through the whole session.
-        if model.view != nil {
-            if model.filled.isEmpty {
-                fillButton
-            } else {
-                undoButton
+        //
+        // WRAPPED IN A GROUP so the modifiers below attach to something that always
+        // materialises: on the `model.view == nil` pass the branch renders nothing, and a
+        // modifier on a viewless branch is not applied at all.
+        Group {
+            if model.view != nil {
+                if model.filled.isEmpty {
+                    fillButton
+                } else {
+                    undoButton
+                }
             }
         }
+        // THE SHELL'S FOOTER HAS TO KNOW THIS STEP IS WRITING. `props.busy` flows the
+        // other way (the shell's own writes), so an auto-fill in flight left Skip and the
+        // affirmative live: "✨ Plan the rest" then "Looks right" answered the step while
+        // the nights were still being written, so the record was saved without them (they
+        // lose their ✨ afterwards) and the fill's own apply landed on an answered step.
+        .onChange(of: model.busy) { _, isBusy in props.reportBusy(isBusy) }
+        // Withdrawn on the way out, or a step left mid-write would leave the footer cold
+        // on the NEXT step — the same reason the lent verb is withdrawn explicitly.
+        .onDisappear { props.reportBusy(false) }
     }
 
     private var fillButton: some View {
