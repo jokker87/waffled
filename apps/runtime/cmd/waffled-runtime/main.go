@@ -287,45 +287,80 @@ func tailFile(path string, n int, follow bool) error {
 		return nil
 	}
 
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	return followFile(ctx, path, os.Stdout, followPoll)
+}
+
+const followPoll = 250 * time.Millisecond
+
+// followFile streams everything appended to path until ctx is cancelled.
+//
+// It re-opens the path rather than seeking when the file changes underneath it.
+// Seeking is not enough: rotateIfLarge renames <service>.log to <service>.log.1 and the
+// restarted service opens a fresh file at the old name, so a follower holding the old
+// descriptor would replay the renamed inode and then sit at EOF forever while every new
+// line went to a file it never opened. os.SameFile is the test, not size — a
+// replacement file that has already grown past the old offset is a rotation too.
+func followFile(ctx context.Context, path string, out io.Writer, poll time.Duration) error {
 	f, err := os.Open(path)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { f.Close() }()
 	offset, err := f.Seek(0, io.SeekEnd)
 	if err != nil {
 		return err
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
 	buf := make([]byte, 32*1024)
+	drain := func() {
+		for {
+			n, err := f.Read(buf)
+			if n > 0 {
+				out.Write(buf[:n])
+				offset += int64(n)
+			}
+			if err != nil || n == 0 {
+				return
+			}
+		}
+	}
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-time.After(250 * time.Millisecond):
+		case <-time.After(poll):
 		}
+		// Whatever the old file still holds belongs to the reader — drain it before
+		// looking at whether it has been replaced.
+		drain()
+
 		st, err := os.Stat(path)
 		if err != nil {
 			continue
 		}
-		// A rotated or truncated file: start again from its beginning.
-		if st.Size() < offset {
+		cur, curErr := f.Stat()
+		switch {
+		case curErr != nil || !os.SameFile(st, cur):
+			// Rotated: the name now points at a different file. Re-open it, because the
+			// descriptor we hold is the renamed .1 and nothing more will ever arrive on
+			// it. Size is no help here — the replacement may already be the larger file.
+			next, err := os.Open(path)
+			if err != nil {
+				continue // mid-rename; try again on the next tick
+			}
+			f.Close()
+			f = next
+			offset = 0
+			drain()
+		case st.Size() < offset:
+			// Truncated in place: same file, fewer bytes. Start again from its beginning.
 			offset = 0
 			if _, err := f.Seek(0, io.SeekStart); err != nil {
 				return err
 			}
-		}
-		for {
-			n, err := f.Read(buf)
-			if n > 0 {
-				os.Stdout.Write(buf[:n])
-				offset += int64(n)
-			}
-			if err != nil || n == 0 {
-				break
-			}
+			drain()
 		}
 	}
 }
