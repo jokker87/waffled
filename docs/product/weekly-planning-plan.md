@@ -25,7 +25,7 @@ Two things have no home yet and so get tables:
    it was finished (v4 step 10: "saving writes the session record with a timestamp").
 2. **Parked items** — what somebody wrote down during the week that "exists nowhere else yet"
    (v4 step 1's *Parked* group, and step 3's "park a note" with its optional step tag).
-   Landed with step 1 as `planning_parked_items` (**0101**), so the shell shipped no unused
+   Landed with step 1 as `planning_parked_items` (**0102**), so the shell shipped no unused
    schema. `session_id` is nullable `on delete set null`: discarding a session must not delete
    a note somebody wrote down.
 
@@ -177,7 +177,7 @@ are now on both clients; each bullet records the web shape first and then how iO
   found by a tester on the planning step's night picker: "I clicked the + and it made a new
   recipe, but I should also be able to make a meal."
 
-## Schema (0100)
+## Schema (0101)
 
 - `planning_sessions` — one row per household per planned week (`unique (household_id,
   week_start)`), with `status`, `current_step`, `driver_person_id`, `started_at`,
@@ -286,7 +286,7 @@ branches editing the shell is exactly what these seams exist to prevent.
 
 Three steps aren't free to go in any order:
 
-1. ~~**`looseEnds` goes first**~~ — **done.** It owns `planning_parked_items` (**0101**) and the
+1. ~~**`looseEnds` goes first**~~ — **done.** It owns `planning_parked_items` (**0102**) and the
    routes contract above. `horizon`'s "park a note" writes to the same table and can now start.
 2. **`recap` goes last** — it reads what every other step decided, including step 1's routes.
 3. Everything else (`familyNight`, `connection`, `kids`) is independent.
@@ -630,7 +630,7 @@ Building a step against a shipped module is also an audit of it. Three findings 
   so pinning someone who was already next means they can come up twice. The mock's line
   "worked out from who did what last time" was rewritten to "each part taken in turn, in your
   family's order", because the original is a promise the software can't keep.
-- **A parked note's `step_key` is the DESTINATION step, never `'horizon'`.** 0101's comment
+- **A parked note's `step_key` is the DESTINATION step, never `'horizon'`.** 0102's comment
   sketched step 3 tagging its own name; that contradicts the column's own stated semantics
   ("which step is going to look at this?" — never the step that wrote it) and would make a
   note parked at the horizon invisible to the step meant to act on it. Corrected in the
@@ -656,23 +656,32 @@ Two defects the unit tests structurally could not see, both found by driving :80
   around a whole body to protect the session.
 
 **Migration numbers are assigned centrally, never picked by a step** — CI's migration-hygiene job
-fails the PR on a collision. Only `looseEnds` has one (0101). Any other step that turns out to
+fails the PR on a collision. Only `looseEnds` has one (0102). Any other step that turns out to
 need schema asks for a number first.
 
-**This branch's three migrations were renumbered once, and the reason generalises.** They were
-written as 0099/0100/0101 while `main` was still at 0098; by the time the branch merged, main had
-shipped its own **0099** (`rhythm_book_within`, released in v0.14.x) and CI's hygiene job failed on
-the collision. They shifted up one — `weekly_planning` 0099→**0100**, `planning_parked_items`
-0100→**0101**, `family_night_detail_and_event` 0101→**0102**.
+**This branch's three migrations have been renumbered TWICE, and the reason generalises.** They
+were written as 0099/0100/0101 while `main` was still at 0098. Each merge of `main` since then has
+brought a released migration that took the number under them, and CI's hygiene job failed on the
+collision each time:
+
+| written | after main shipped `0099_rhythm_book_within` | after main shipped `0100_chore_instance_history` |
+| --- | --- | --- |
+| `weekly_planning` 0099 | **0100** | **0101** |
+| `planning_parked_items` 0100 | **0101** | **0102** |
+| `family_night_detail_and_event` 0101 | **0102** | **0103** |
+
+A long-running branch should expect this on every merge, and the check is one command:
+`npm run check:migrations` in `apps/api`.
 
 Two things worth keeping from that:
 
 - **The whole chain moves, not just the colliding file.** `node-pg-migrate` orders by FILENAME, and
-  0100/0101 create tables that reference what 0099 creates — so bumping only the loser to the next
-  free number (0102) would have run it *after* its own dependents and broken a fresh database. The
+  the later two create tables that reference what the first one creates — so bumping only the
+  colliding file to the next free number would have run it *after* its own dependents and broken a
+  fresh database. The
   fix is a shift that preserves relative order, not a reassignment of one number.
-- **It was only safe because none of the three had shipped.** v0.14.3's migration list ends at
-  `0099_rhythm_book_within`; the planning migrations existed on this branch and in throwaway dev
+- **It was only safe because none of the three had shipped.** The released list ends at
+  `0100_chore_instance_history`; the planning migrations existed on this branch and in throwaway dev
   databases and nowhere else. Renaming an applied migration makes it a NEW migration to every
   database that already ran it, which is why `check-migration-numbers.mjs` grandfathers the historic
   `0079` pair instead of renumbering it. A released collision stays; an unreleased one moves.

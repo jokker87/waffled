@@ -120,9 +120,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   - **Loose ends** gathers what's still open — overdue chores, unchecked list items, rhythms past
     due, goals short for the week — alongside anything somebody parked during the week, and hands
-    each one to the step that will deal with it. Sending a chore to Tasks changes nothing yet; it
-    just decides who's asked about it later. Dropping a parked note, or marking something already
-    done, are the two answers that act immediately.
+    each one to the step that will deal with it. Every row says where it came from and who already
+    has it, so an unowned one reads as up for grabs. Sending a chore to Tasks changes nothing yet;
+    it just decides who's asked about it later. Dropping a parked note, or marking something
+    already done, are the two answers that act immediately. **Which of your lists it asks about is
+    yours to choose:** **Which lists?** in the step itself gives you a switch per list, so a list
+    meant to stay open — a someday list, a wishlist — stops surfacing every single week, while
+    overdue chores, late rhythms and short habits always count. A list you say nothing about keeps
+    counting, and the grocery list is never asked about because it rebuilds itself from the meal
+    plan. Any adult can set this while running a session; the same switches live in
+    Settings → Modules → Weekly Planning for setting it up beforehand.
   - **Calendar** shows the week as it really is and lets you add what's missing on the day you
     tapped — a line, a time, and everyone it's for. It's a real calendar event, and the later
     steps plan around it.
@@ -169,6 +176,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and the demo box are unaffected. The startup log line now includes the bound address.
 
 ### Fixed
+
+- **An impossible chore date is refused instead of erroring.** Saving a chore dated to a day
+  that doesn't exist (a 31st of February, say) reached the database and came back as a bare
+  server error. It is now turned away with a clear message, and a real date still saves.
 
 - **A failed refresh no longer makes a saved change look lost.** The web event editor
   now offers Retry when recurring-event details cannot load, and iPhone/iPad Countdowns
