@@ -101,9 +101,39 @@ func (a *Agent) Install() error {
 	// Best-effort: bootout fails when nothing is loaded, which is the common case.
 	_, _ = a.run("bootout", a.domainTarget())
 	if out, err := a.run("bootstrap", a.domain(), a.PlistPath()); err != nil {
+		// The plist goes with it. Installed() is a bare os.Stat, so a file left behind by
+		// a bootstrap that failed would have `doctor`, `status` and the menu bar all
+		// reporting a nightly backup indefinitely while launchd holds no job and nothing
+		// ever runs. Removing it is not destructive: bootout above already unloaded
+		// whatever was there, so by this point the file describes nothing.
+		if rerr := os.Remove(a.PlistPath()); rerr != nil && !os.IsNotExist(rerr) {
+			return fmt.Errorf("launchctl bootstrap %s: %w\n%s\n(and %s could not be removed: %v)",
+				a.PlistPath(), err, strings.TrimSpace(out), a.PlistPath(), rerr)
+		}
 		return fmt.Errorf("launchctl bootstrap %s: %w\n%s", a.PlistPath(), err, strings.TrimSpace(out))
 	}
 	return nil
+}
+
+// Loaded asks launchd whether the job is actually there, by exit status rather than by
+// parsing output. It is the cross-check `doctor` runs and deliberately not what
+// Installed() asks: a plist can be on disk with no job loaded — a bootstrap that failed
+// on an older build, a label booted out by hand — and only launchd knows the difference.
+//
+// It is a process fork, so nothing that polls may call it. `status` and the menu bar
+// stay on Installed().
+func (a *Agent) Loaded() (bool, error) {
+	out, err := a.run("print", a.domainTarget())
+	if err == nil {
+		return true, nil
+	}
+	// launchctl's own words: "Could not find service … in domain" is a job that is not
+	// loaded, anything else is a launchctl that would not run, and `doctor` prints the
+	// difference rather than guessing at it.
+	if detail := strings.TrimSpace(out); detail != "" {
+		return false, fmt.Errorf("launchctl print %s: %w\n%s", a.domainTarget(), err, detail)
+	}
+	return false, fmt.Errorf("launchctl print %s: %w", a.domainTarget(), err)
 }
 
 // Uninstall unloads the job and removes the plist. Quiet when nothing is installed —

@@ -2,6 +2,7 @@ package schedule
 
 import (
 	"encoding/xml"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -190,6 +191,69 @@ func TestUninstallWhenNothingIsInstalled(t *testing.T) {
 	a, _ := newAgent(t)
 	if err := a.Uninstall(); err != nil {
 		t.Errorf("Uninstall with nothing installed: %v", err)
+	}
+}
+
+// A bootstrap that fails must not leave the plist behind. Installed() is a bare os.Stat,
+// so a leftover file makes `doctor`, `status` and the menu bar all report a nightly
+// backup that launchd never loaded and that will never run — the exact failure the
+// schedule exists to make visible, reported as success indefinitely.
+func TestFailedBootstrapRemovesThePlist(t *testing.T) {
+	a, _ := newAgent(t)
+	a.launchctl = func(args ...string) (string, error) {
+		if args[0] == "bootstrap" {
+			return "Bootstrap failed: 5: Input/output error", errors.New("exit status 5")
+		}
+		return "", nil
+	}
+
+	err := a.Install()
+	if err == nil {
+		t.Fatal("Install reported success despite launchctl bootstrap failing")
+	}
+	if a.Installed() {
+		t.Error("the plist is still on disk after a failed bootstrap, so everything that " +
+			"asks Installed() will report a nightly backup that was never loaded")
+	}
+}
+
+// Loaded() is the cross-check `doctor` runs: the question "is the job actually there?"
+// which only launchd can answer. It is deliberately NOT what Installed() asks — `status`
+// polls that once a second and cannot afford a launchctl fork.
+func TestLoadedAsksLaunchdForTheJob(t *testing.T) {
+	a, calls := newAgent(t)
+	loaded, err := a.Loaded()
+	if err != nil {
+		t.Fatalf("Loaded: %v", err)
+	}
+	if !loaded {
+		t.Error("Loaded() is false though launchctl print succeeded")
+	}
+	if len(*calls) != 1 {
+		t.Fatalf("launchctl calls %v, want exactly one", *calls)
+	}
+	if got := (*calls)[0]; got[0] != "print" || got[1] != "gui/501/"+Label {
+		t.Errorf("launchctl was called with %v, want print gui/501/%s", got, Label)
+	}
+}
+
+func TestLoadedReportsAJobLaunchdDoesNotHave(t *testing.T) {
+	a, _ := newAgent(t)
+	a.launchctl = func(...string) (string, error) {
+		return "Could not find service \"" + Label + "\" in domain for gui", errors.New("exit status 113")
+	}
+
+	loaded, err := a.Loaded()
+	if loaded {
+		t.Error("Loaded() is true though launchctl could not find the job")
+	}
+	if err == nil {
+		t.Fatal("Loaded() gave no reason for the job being missing")
+	}
+	// The detail is what `doctor` prints; without launchctl's own words nobody can tell a
+	// job that was never loaded from a launchctl that would not run at all.
+	if !strings.Contains(err.Error(), "Could not find service") {
+		t.Errorf("the error drops launchctl's explanation: %v", err)
 	}
 }
 

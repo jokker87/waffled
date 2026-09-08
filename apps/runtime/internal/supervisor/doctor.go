@@ -98,11 +98,23 @@ func (s *Supervisor) Doctor(ctx context.Context) []Check {
 				b.LastBackupAt, age, float64(b.LastSizeBytes)/(1<<20), b.Count, s.plan.Layout.Backups)
 		}
 	}
-	if b.ScheduleInstalled {
-		add("backup schedule", CheckOK, "a nightly backup is installed (%s)", schedule.Label)
-	} else {
+	// The plist on disk is only half the answer, and `status` stops at that half because
+	// it polls. Here — once, when a human asks — launchd is asked whether it actually
+	// holds the job: a bootstrap that failed on an older build, or a label booted out by
+	// hand, leaves a file that every other reporter reads as "installed" while no backup
+	// will ever run.
+	switch {
+	case !b.ScheduleInstalled:
 		add("backup schedule", CheckWarn,
 			"no nightly backup is scheduled — install one with `waffled-runtime backup --install-schedule`")
+	default:
+		if loaded, err := s.scheduleLoaded(); loaded {
+			add("backup schedule", CheckOK, "a nightly backup is installed and loaded (%s)", schedule.Label)
+		} else {
+			add("backup schedule", CheckWarn,
+				"%s is installed but launchd does not have the job loaded, so no backup will run — "+
+					"re-run `waffled-runtime backup --install-schedule`: %v", schedule.Label, err)
+		}
 	}
 
 	if free, err := freeDiskBytes(s.plan.Layout.Root); err != nil {

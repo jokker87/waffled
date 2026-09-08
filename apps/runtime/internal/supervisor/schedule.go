@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"github.com/kevinpsites/waffled/apps/runtime/internal/schedule"
 )
@@ -36,4 +37,21 @@ func (s *Supervisor) scheduleInstalled() bool {
 		return false
 	}
 	return a.Installed()
+}
+
+// scheduleLoaded asks launchd whether the installed job is really loaded — the question
+// scheduleInstalled cannot answer, because a plist on disk and a job launchd holds are
+// different facts and a failed bootstrap leaves only the first.
+//
+// Only `doctor` calls it: it forks launchctl, and it is skipped away from macOS, where
+// there is no launchd to ask.
+func (s *Supervisor) scheduleLoaded() (bool, error) {
+	if runtime.GOOS != "darwin" {
+		return true, nil
+	}
+	a, err := s.BackupAgent()
+	if err != nil {
+		return false, err
+	}
+	return a.Loaded()
 }

@@ -376,6 +376,14 @@ on. The plist is built with `encoding/xml`, not string concatenation: a househol
 `/Users/sam & jo` would otherwise get a file launchd silently refuses to parse and a
 backup that never runs with nothing to show for it. Output goes to `logs/backup.log`.
 
+A **failed bootstrap takes the plist with it**. "The plist is on disk" and "launchd holds
+the job" are different facts, and everything that polls — `status`, the menu bar — can
+only afford the first (an `os.Stat`, not a `launchctl` fork per second). So a file left
+behind by a bootstrap that failed would be reported as an installed nightly backup
+forever, while nothing ran. `doctor` closes the remaining gap: once, when a human asks, it
+runs `launchctl print gui/$UID/app.waffled.backup` and warns if the job someone installed
+is not actually loaded.
+
 ### Four deliberate differences from the Compose path
 
 Recorded because each looks like a bug to anyone who reads only one side:
