@@ -613,8 +613,11 @@ other.
 
 Standard library only — no third-party dependencies, no cgo. macOS-specific behaviour
 (the default data directory, the Time Machine exclusion, the dns-sd client) sits behind
-`//go:build darwin` with a no-op sibling, so the core still cross-compiles for the Windows
-work parked in plan §9. `internal/bonjour`'s non-darwin `Tool()` returns `""` and the
+`//go:build darwin` with a no-op sibling. `GOOS=linux go build ./...` is clean; the Windows
+work parked in plan §9 additionally needs equivalents for three POSIX calls the supervisor
+uses today (`Flock` for the backup lock, `Setsid`/`Setpgid` for process groups, and
+`Statfs` for free space), so the build tags here are a start on that and not the whole of
+it. `internal/bonjour`'s non-darwin `Tool()` returns `""` and the
 supervisor then skips advertising and says so in `status` — never an error, because a
 server no phone can discover still serves everything that has its address. Windows has
 `dns-sd.exe` only where Bonjour for Windows is installed and Linux would register through

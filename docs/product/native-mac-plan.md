@@ -364,8 +364,12 @@ and the Go supervisor cross-compiles. What differs: supervision is a Windows Ser
 runs at boot without login, better than macOS), packaging is an MSI (WiX/Inno) with an
 Authenticode certificate (expect SmartScreen warnings until reputation builds), Defender
 Firewall prompts for the inbound port, Postgres refuses to run as Administrator, antivirus
-scans PGDATA unless excluded, and mDNS advertising needs a library since Windows only
-resolves `.local` natively. The tray app can be tiny if the manager UI is a localhost web page
+scans PGDATA unless excluded, and mDNS advertising needs a library (or Bonjour for Windows'
+own `dns-sd.exe`) since Windows only resolves `.local` natively — the runtime already has
+the seam for it: `internal/bonjour`'s non-darwin `Tool()` returns `""` and advertising is
+skipped rather than failed. Cross-compiling the supervisor itself still needs Windows
+equivalents for three POSIX calls it uses today (`Flock`, `Setsid`/`Setpgid`, `Statfs`);
+Linux builds clean. The tray app can be tiny if the manager UI is a localhost web page
 served by the runtime — worth considering for the Mac too if the SwiftUI menu grows.
 
 ---
