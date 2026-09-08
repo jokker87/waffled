@@ -1,0 +1,289 @@
+package supervisor
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"sync"
+	"syscall"
+	"time"
+
+	"github.com/kevinpsites/waffled/apps/runtime/internal/services"
+)
+
+// runner spawns and tracks the long-running children — api, PowerSync and Caddy.
+//
+// Postgres is deliberately NOT one of these. pg_ctl exits as soon as the postmaster is
+// accepting connections, so watching it as a child would read a successful start as an
+// immediate crash and restart-loop forever. Postgres is started and stopped through
+// pg_ctl and observed through pg_isready and postmaster.pid instead (see postgres.go).
+type runner struct {
+	logsDir string
+	pidsDir string
+	log     *Logger
+}
+
+// child is one supervised process.
+type child struct {
+	runner *runner
+	spec   services.Spec
+
+	mu        sync.Mutex
+	cmd       *exec.Cmd
+	pid       int
+	stopping  bool
+	exited    bool
+	restartN  int
+	lastErr   string
+	waitDone  chan struct{}
+	exitError error
+}
+
+func (r *runner) logPath(name string) string { return filepath.Join(r.logsDir, name+".log") }
+func (r *runner) pidPath(name string) string { return filepath.Join(r.pidsDir, name+".pid") }
+
+// start launches the spec, appending its stdout and stderr to logs/<name>.log and
+// recording the pid so `status` and `stop` can find it from another process.
+func (r *runner) start(spec services.Spec) (*child, error) {
+	c := &child{runner: r, spec: spec}
+	if err := c.spawn(); err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+func (c *child) spawn() error {
+	// Append, never truncate: a crash-looping service would otherwise erase the output
+	// that explains the crash.
+	logFile, err := os.OpenFile(c.runner.logPath(c.spec.Name), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return fmt.Errorf("open the %s log: %w", c.spec.Name, err)
+	}
+
+	cmd := exec.Command(c.spec.Path)
+	cmd.Args = c.spec.Args
+	cmd.Env = c.spec.Env // never nil: an inherited environment could override our config
+	cmd.Dir = c.spec.Dir
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	// Its own process group, so a Ctrl-C in the terminal that started the supervisor does
+	// not race the ordered shutdown by killing the children first.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+
+	if err := cmd.Start(); err != nil {
+		logFile.Close()
+		return fmt.Errorf("start %s: %w", c.spec.Name, err)
+	}
+
+	done := make(chan struct{})
+	c.mu.Lock()
+	c.cmd = cmd
+	c.pid = cmd.Process.Pid
+	c.exited = false
+	c.waitDone = done
+	c.exitError = nil
+	c.mu.Unlock()
+
+	if err := writePidfile(c.runner.pidPath(c.spec.Name), cmd.Process.Pid); err != nil {
+		c.runner.log.Warnf("could not record the %s pid: %v", c.spec.Name, err)
+	}
+
+	go func() {
+		err := cmd.Wait()
+		logFile.Close()
+		c.mu.Lock()
+		c.exited = true
+		c.exitError = err
+		if err != nil && !c.stopping {
+			c.lastErr = describeExit(c.spec.Name, err)
+		}
+		c.mu.Unlock()
+		close(done)
+	}()
+	return nil
+}
+
+// superviseRestarts is compose's `restart: unless-stopped`. It watches for an exit that
+// was not asked for and brings the service back with a growing backoff, recording each
+// one — a service that keeps dying should be visible in `status`, not silently flapping.
+func (c *child) superviseRestarts() {
+	go func() {
+		for {
+			c.mu.Lock()
+			done := c.waitDone
+			stopping := c.stopping
+			c.mu.Unlock()
+			if stopping || done == nil {
+				return
+			}
+			<-done
+
+			c.mu.Lock()
+			if c.stopping {
+				c.mu.Unlock()
+				return
+			}
+			c.restartN++
+			attempt := c.restartN
+			reason := c.lastErr
+			c.mu.Unlock()
+
+			delay := restartBackoff(attempt)
+			c.runner.log.Warnf("%s exited unexpectedly (%s); restarting in %s (attempt %d)",
+				c.spec.Name, reason, delay, attempt)
+			time.Sleep(delay)
+
+			c.mu.Lock()
+			if c.stopping {
+				c.mu.Unlock()
+				return
+			}
+			c.mu.Unlock()
+
+			if err := c.spawn(); err != nil {
+				c.runner.log.Errorf("could not restart %s: %v", c.spec.Name, err)
+				c.mu.Lock()
+				c.lastErr = err.Error()
+				c.mu.Unlock()
+				return
+			}
+			c.runner.log.Infof("%s restarted (pid %d)", c.spec.Name, c.currentPid())
+		}
+	}()
+}
+
+// stop asks politely, then insists. A service that ignores SIGTERM must not hold up
+// shutdown — the menu-bar app's "Quit" has to be quick and total.
+func (c *child) stop(grace time.Duration) error {
+	c.mu.Lock()
+	c.stopping = true
+	cmd, done := c.cmd, c.waitDone
+	c.mu.Unlock()
+
+	defer os.Remove(c.runner.pidPath(c.spec.Name))
+
+	if cmd == nil || cmd.Process == nil {
+		return nil
+	}
+	if !c.running() {
+		return nil
+	}
+
+	_ = cmd.Process.Signal(syscall.SIGTERM)
+	select {
+	case <-done:
+		return nil
+	case <-time.After(grace):
+	}
+
+	c.runner.log.Warnf("%s ignored SIGTERM after %s; killing it", c.spec.Name, grace)
+	_ = cmd.Process.Kill()
+	select {
+	case <-done:
+		return nil
+	case <-time.After(5 * time.Second):
+		return fmt.Errorf("%s (pid %d) did not exit after SIGKILL", c.spec.Name, c.currentPid())
+	}
+}
+
+func (c *child) running() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.cmd != nil && !c.exited
+}
+
+func (c *child) currentPid() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.pid
+}
+
+func (c *child) restarts() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.restartN
+}
+
+func (c *child) lastError() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.lastErr
+}
+
+// liveness is the callback waitHTTP uses to fail fast instead of waiting out the full
+// health timeout on a process that is already gone.
+func (c *child) liveness() func() error {
+	return func() error {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		if !c.exited {
+			return nil
+		}
+		reason := c.lastErr
+		if reason == "" {
+			reason = "it exited"
+		}
+		return fmt.Errorf("%s is not running: %s — see %s", c.spec.Name, reason, c.runner.logPath(c.spec.Name))
+	}
+}
+
+func describeExit(name string, err error) string {
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return fmt.Sprintf("%s exited with status %d", name, exitErr.ExitCode())
+	}
+	return fmt.Sprintf("%s exited: %v", name, err)
+}
+
+func writePidfile(path string, pid int) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(strconv.Itoa(pid)+"\n"), 0o600)
+}
+
+func readPidfile(path string) (int, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return 0, err
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil {
+		return 0, fmt.Errorf("%s does not contain a pid: %w", path, err)
+	}
+	if pid <= 0 {
+		return 0, fmt.Errorf("%s contains an implausible pid %d", path, pid)
+	}
+	return pid, nil
+}
+
+// processAlive answers "is this pid running" for a process this program did not spawn —
+// which is how `status` and `stop` work across invocations. Signal 0 performs the
+// permission and existence checks without delivering anything.
+func processAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	err = proc.Signal(syscall.Signal(0))
+	if err == nil {
+		return true
+	}
+	// EPERM means it exists but belongs to someone else.
+	return errors.Is(err, syscall.EPERM)
+}
+
+func signalPid(pid int, sig syscall.Signal) error {
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return err
+	}
+	return proc.Signal(sig)
+}
