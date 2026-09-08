@@ -81,7 +81,6 @@ type Supervisor struct {
 	runner   *runner
 	state    *rtstate.State
 	manifest *manifest.Manifest
-	verified bool
 
 	mu        sync.Mutex
 	children  map[string]*child
@@ -194,7 +193,6 @@ func New(opts Options) (*Supervisor, error) {
 	s.state.SocketDir = socketDir
 	s.state.BundleSHA = m.GitSha
 	s.state.BundleTime = m.BuiltAt
-	s.verified = true
 
 	if err := rtstate.Save(layout.RuntimeJSON, s.state); err != nil {
 		return nil, err
@@ -497,7 +495,12 @@ func (s *Supervisor) Status(ctx context.Context) *status.Report {
 			Caddy: c.Caddy.Version, PowerSync: c.PowerSync.Version, API: c.API.Version, Web: c.Web.Version,
 		}
 		r.Bundle = status.Bundle{
-			GitSha: m.GitSha, BuiltAt: m.BuiltAt, Arch: m.Arch, Platform: m.Platform, Verified: s.verified,
+			GitSha: m.GitSha, BuiltAt: m.BuiltAt, Arch: m.Arch, Platform: m.Platform,
+			// Constant by construction, not a live signal: New() returns an error on
+			// every path where verification failed, so a *Supervisor whose bundle did
+			// not verify cannot exist to be asked. The field stays in the JSON because
+			// the menu-bar app reads it and the schema is additive.
+			Verified: true,
 		}
 	}
 	if pid, err := readPidfile(s.runner.pidPath(SupervisorPidName)); err == nil {
