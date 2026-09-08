@@ -130,9 +130,13 @@ struct PlanningSettingsView: View {
         WaffledCard(padding: 14) {
             HStack(spacing: 11) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Show on the Today page")
+                    Text("Show on the family display’s Today")
                         .font(.system(size: 15, weight: .semibold)).foregroundStyle(WF.ink)
-                    Text("A card on the session day, and a way back into a week that’s part-planned.")
+                    // NAMED FOR THE SURFACE IT ACTUALLY AFFECTS. `PlanningTodayCard` is
+                    // rendered by `KioskDashboard` only — this iPhone's `TodayView` has no
+                    // planning card — so "the Today page" promised something the phone in
+                    // your hand does not do.
+                    Text("A card on the session day on the family display, and a way back into a week that’s part-planned. The phone reaches the session from the Family tab.")
                         .font(.system(size: 12)).foregroundStyle(WF.ink3)
                         .fixedSize(horizontal: false, vertical: true)
                 }

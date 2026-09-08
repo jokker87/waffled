@@ -2697,9 +2697,20 @@ function WeeklyPlanningSettings() {
         seven days that is follows your household's first day of the week.
       </div>
 
+      {/* WHERE THIS APPLIES, said out loud. The only consumer is the iPad display's
+          planning card: `weeklyPlanning` is in neither TODAY_CARDS nor MOBILE_TODAY_CARDS,
+          and this browser's Today page has no planning branch — so an admin toggling it
+          here sees nothing change on the screen they are looking at. That reads as a dead
+          control (the category this repo audited and removed four of), when in fact it is
+          a household setting whose effect is on another surface. */}
       <div className="set-module-setrow">
-        <span>Show on the Today page</span>
-        <Switch checked={config.showOnToday !== false} disabled={saving} onChange={(v) => save({ showOnToday: v })} ariaLabel="Show the planning session on Today" />
+        <span>Show on the family display’s Today</span>
+        <Switch checked={config.showOnToday !== false} disabled={saving} onChange={(v) => save({ showOnToday: v })} ariaLabel="Show the planning session on the family display’s Today page" />
+      </div>
+      <div className="set-module-desc" style={{ marginTop: -4, marginBottom: 8 }}>
+        A card on the session day, on the <b>family display</b>. The web Today page and the
+        phone don’t show a planning card — reach the session from the Planning page here, or
+        the Family tab on the phone.
       </div>
 
       <div className="set-row2-t" style={{ marginTop: 6, marginBottom: 4 }}>Steps</div>
