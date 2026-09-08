@@ -111,7 +111,20 @@ func bonjourStatus(statePath string, childRunning bool) status.Bonjour {
 
 // BonjourStatus is the block `status` reports.
 func (s *Supervisor) BonjourStatus() status.Bonjour {
-	return bonjourStatus(s.plan.Layout.BonjourState, s.serviceRunning(services.Bonjour))
+	b := bonjourStatus(s.plan.Layout.BonjourState, s.serviceRunning(services.Bonjour))
+	if b.Advertised || b.Error != "" {
+		return b
+	}
+	// A child THIS process holds knows why it is not running — a crash between restart
+	// attempts, say. A `status` in another process cannot see that and correctly reports
+	// only that nothing is advertised.
+	s.mu.Lock()
+	c := s.children[services.Bonjour]
+	s.mu.Unlock()
+	if c != nil {
+		b.Error = c.lastError()
+	}
+	return b
 }
 
 // startBonjour advertises the server, and is called once Caddy is healthy. It never
@@ -369,6 +382,12 @@ func (s *Supervisor) bonjourCheck(ctx context.Context) Check {
 			Detail: "this platform has no dns-sd client, so devices have to be given the address"}
 	case b.Error != "":
 		return Check{Name: name, Status: CheckWarn, Detail: "not advertising: " + b.Error}
+	case !b.Advertised && s.serviceRunning(services.Caddy):
+		// The distinction matters: "start the server" is unhelpful advice to someone
+		// whose server is plainly running.
+		return Check{Name: name, Status: CheckWarn, Detail: fmt.Sprintf(
+			"the server is running but nothing is being advertised — see %s",
+			s.plan.Layout.LogPath(services.Bonjour))}
 	case !b.Advertised:
 		return Check{Name: name, Status: CheckWarn,
 			Detail: "nothing is being advertised — start the server to make it discoverable"}
