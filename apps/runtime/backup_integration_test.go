@@ -6,9 +6,11 @@
 package runtime_test
 
 import (
+	"compress/gzip"
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -128,6 +130,120 @@ func TestBackupAndRestoreRoundTrip(t *testing.T) {
 	// database. Without dropping the old one, PowerSync would resume from a WAL position
 	// that no longer describes this data and sync silently nothing.
 	assertReplicationSlotRebuilt(ctx, t, s, db)
+}
+
+// TestRestoreAcceptsACompoSidecarDump is the Docker-to-Mac migration path, and the only
+// test that exercises the plain-SQL restore at all.
+//
+// The file is produced with the Compose backup sidecar's exact invocation —
+// `pg_dump --clean --if-exists --no-owner --no-privileges | gzip` into
+// waffled-<stamp>.sql.gz — because the interesting question is not whether our own code
+// round-trips but whether the file a family actually carries over restores. Those dumps
+// carry their own DROPs, land in a freshly created empty database, and go in through
+// psql with ON_ERROR_STOP=1 and --single-transaction: a combination that either works on
+// the real thing or does not.
+func TestRestoreAcceptsAComposeSidecarDump(t *testing.T) {
+	bundle := bundleDir(t)
+	data := dataDir(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+	defer cancel()
+
+	s := newSupervisor(t, bundle, data)
+	t.Cleanup(func() {
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), 3*time.Minute)
+		defer stopCancel()
+		_ = s.Stop(stopCtx)
+		killLeftovers(t, data)
+	})
+	if err := s.Start(ctx); err != nil {
+		dumpLogs(t, data)
+		t.Fatalf("start: %v", err)
+	}
+	db := s.Plan().Env.PostgresDB()
+
+	const canary = "carried-over-from-docker"
+	if _, err := s.QueryScalar(ctx, db,
+		"create table if not exists compose_probe (note text); "+
+			"insert into compose_probe values ('"+canary+"')"); err != nil {
+		t.Fatalf("write the canary row: %v", err)
+	}
+
+	dump := writeComposeStyleDump(ctx, t, s, db, filepath.Join(data, "backups"))
+	// It must be recognised as the sidecar's format, not ours.
+	if got := backup.FormatOf(dump); got != backup.FormatPlainGzip {
+		t.Fatalf("FormatOf(%s) = %v, want gzipped plain SQL", dump, got)
+	}
+	// And it has no sidecar JSON, so the level has to come out of the gzip stream —
+	// the fallback that exists for precisely this file.
+	if _, ok := backup.ReadSidecar(dump); ok {
+		t.Fatal("the fixture unexpectedly has a sidecar; this test is about dumps without one")
+	}
+
+	if _, err := s.QueryScalar(ctx, db, "delete from compose_probe"); err != nil {
+		t.Fatalf("delete the canary row: %v", err)
+	}
+
+	if err := s.Restore(ctx, supervisor.RestoreOptions{File: dump, Yes: true}); err != nil {
+		dumpLogs(t, data)
+		t.Fatalf("restoring a Compose sidecar dump: %v", err)
+	}
+	if err := s.Start(ctx); err != nil {
+		dumpLogs(t, data)
+		t.Fatalf("start after restore: %v", err)
+	}
+
+	got, err := s.QueryScalar(ctx, db, "select note from compose_probe")
+	if err != nil {
+		t.Fatalf("read the canary row back: %v", err)
+	}
+	if strings.TrimSpace(got) != canary {
+		t.Errorf("canary = %q, want %q", strings.TrimSpace(got), canary)
+	}
+	if after := s.Status(ctx); after.State != status.StateRunning {
+		t.Errorf("after restoring a plain dump the stack is %q:\n%s", after.State, after.Text())
+	}
+}
+
+// writeComposeStyleDump produces the file infra/compose/backup/backup.sh would: plain
+// SQL with --clean --if-exists --no-owner --no-privileges, gzipped, named
+// waffled-<UTC stamp>.sql.gz.
+func writeComposeStyleDump(ctx context.Context, t *testing.T, s *supervisor.Supervisor, db, dir string) string {
+	t.Helper()
+	plan := s.Plan()
+	out := filepath.Join(dir, "waffled-"+time.Now().UTC().Format("20060102-150405")+".sql.gz")
+
+	cmd := exec.CommandContext(ctx, plan.PostgresBin("pg_dump"),
+		"-h", "127.0.0.1",
+		"-p", fmt.Sprint(plan.Ports.Postgres),
+		"-U", plan.Env.PostgresUser(),
+		"-d", db,
+		"--clean", "--if-exists", "--no-owner", "--no-privileges",
+	)
+	cmd.Env = append(os.Environ(), "PGPASSWORD="+plan.Env.Get("POSTGRES_PASSWORD"))
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	sql, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("pg_dump (compose flags): %v\n%s", err, stderr.String())
+	}
+
+	f, err := os.Create(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gz := gzip.NewWriter(f)
+	if _, err := gz.Write(sql); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("wrote a Compose-style dump: %s (%d bytes of SQL)", out, len(sql))
+	return out
 }
 
 // TestRestoreRefusesADumpNewerThanTheBundle pins the one unrecoverable direction:

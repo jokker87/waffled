@@ -440,8 +440,11 @@ type RestoreOptions struct {
 // would simply have it brought straight back mid-restore, by our own code. Stopping the
 // supervisor is the only way to make "nothing writes during the restore" true.
 //
-// The caller starts the stack again, so the restart is owned by a process that will
-// outlive the command.
+// It returns with the stack fully stopped. The caller starts it again — detached from
+// the CLI, in-process from a test — so the restart is owned by a process that will
+// outlive the command, and so the migrations that catch up an older dump and the
+// rebuilding of PowerSync's storage happen through the ordinary start sequence rather
+// than a second copy of it here.
 func (s *Supervisor) Restore(ctx context.Context, opts RestoreOptions) error {
 	file, err := filepath.Abs(opts.File)
 	if err != nil {
@@ -502,9 +505,18 @@ func (s *Supervisor) Restore(ctx context.Context, opts RestoreOptions) error {
 		return fmt.Errorf("could not stop the server before restoring: %w", err)
 	}
 
-	if _, err := s.ensurePostgres(ctx); err != nil {
+	pgStop, err := s.ensurePostgres(ctx)
+	if err != nil {
 		return err
 	}
+	// Postgres was started for the restore alone, so it is stopped again whatever
+	// happens. Leaving a bare postmaster listening with no supervisor — on the success
+	// path OR on a failure part-way through replacing the database — would collide with
+	// the start that follows and, after a failure, leave something running that nobody
+	// asked for. `Start` brings Postgres back up itself and is idempotent, so handing the
+	// caller a fully stopped stack costs a second and leaks nothing.
+	defer pgStop()
+
 	if err := s.replaceDatabase(ctx, file); err != nil {
 		return err
 	}
@@ -603,22 +615,42 @@ func (s *Supervisor) dropReplicationSlots(ctx context.Context, db string) error 
 	return nil
 }
 
-// dropDatabase terminates whatever is still connected and drops it.
+// dropDatabase terminates whatever is still connected and drops it, retrying while
+// clients are still letting go.
+//
+// pg_terminate_backend only ASKS a backend to exit; it returns before the backend has
+// finished doing so, and DROP DATABASE fails outright with "is being accessed by other
+// users" if it arrives in that window. A service the supervisor has just SIGTERMed is
+// exactly such a backend, so the race is the normal case rather than an unlucky one, and
+// losing the race would abort a restore the user had already confirmed.
 func (s *Supervisor) dropDatabase(ctx context.Context, name string) error {
-	// Anything still holding a connection blocks the drop. By this point the only
-	// candidates are strays — a psql someone left open, or a service that has not
-	// finished exiting.
-	if _, err := s.QueryScalar(ctx, "postgres",
-		"select pg_terminate_backend(pid) from pg_stat_activity where datname = "+
-			quoteLiteral(name)+" and pid <> pg_backend_pid()"); err != nil {
-		s.log.Warnf("could not disconnect existing clients of %s: %v", name, err)
+	const attempts = 20
+	var lastOut string
+	var lastErr error
+	for i := 0; i < attempts; i++ {
+		// Re-asked every time: a client can reconnect between the terminate and the drop.
+		if _, err := s.QueryScalar(ctx, "postgres",
+			"select pg_terminate_backend(pid) from pg_stat_activity where datname = "+
+				quoteLiteral(name)+" and pid <> pg_backend_pid()"); err != nil {
+			s.log.Warnf("could not disconnect existing clients of %s: %v", name, err)
+		}
+		out, err := s.runOneShot(ctx,
+			s.plan.PsqlCommand("postgres", "drop database if exists "+quoteIdent(name)),
+			2*time.Minute)
+		if err == nil {
+			return nil
+		}
+		lastOut, lastErr = out, err
+		if !strings.Contains(out, "is being accessed by other users") {
+			break // a different failure; retrying will not help
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(250 * time.Millisecond):
+		}
 	}
-	if out, err := s.runOneShot(ctx,
-		s.plan.PsqlCommand("postgres", "drop database if exists "+quoteIdent(name)),
-		2*time.Minute); err != nil {
-		return fmt.Errorf("drop the %s database: %w\n%s", name, err, tail(out, 10))
-	}
-	return nil
+	return fmt.Errorf("drop the %s database: %w\n%s", name, lastErr, tail(lastOut, 10))
 }
 
 func fileSize(path string) int64 {
