@@ -57,9 +57,13 @@ func (r *runner) start(spec services.Spec) (*child, error) {
 }
 
 func (c *child) spawn() error {
+	logPath := c.runner.logPath(c.spec.Name)
+	if err := rotateIfLarge(logPath); err != nil {
+		c.runner.log.Warnf("could not rotate %s: %v", logPath, err)
+	}
 	// Append, never truncate: a crash-looping service would otherwise erase the output
 	// that explains the crash.
-	logFile, err := os.OpenFile(c.runner.logPath(c.spec.Name), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return fmt.Errorf("open the %s log: %w", c.spec.Name, err)
 	}
@@ -237,6 +241,37 @@ func describeExit(name string, err error) string {
 		return fmt.Sprintf("%s exited with status %d", name, exitErr.ExitCode())
 	}
 	return fmt.Sprintf("%s exited: %v", name, err)
+}
+
+// Log rotation, per plan §3 ("one file per service, rotated"). A Mac mini that is never
+// rebooted would otherwise grow a PowerSync log without bound. One generation is kept:
+// enough to still have the run before the current one when something goes wrong,
+// without turning the data directory into a log archive.
+const (
+	maxLogBytes    = 10 << 20 // 10 MiB
+	rotatedLogKept = 1
+)
+
+// rotateIfLarge is called at spawn — including every restart — so a crash-looping
+// service cannot fill the disk between checks.
+func rotateIfLarge(path string) error {
+	st, err := os.Stat(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	if st.Size() < maxLogBytes {
+		return nil
+	}
+	previous := path + ".1"
+	if rotatedLogKept > 0 {
+		// Rename rather than copy: any writer still holding the old descriptor keeps
+		// writing to the rotated file, which is the correct place for its output.
+		return os.Rename(path, previous)
+	}
+	return os.Remove(path)
 }
 
 func writePidfile(path string, pid int) error {

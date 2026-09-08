@@ -113,6 +113,15 @@ func newSupervisor(c *commonFlags, log *supervisor.Logger) (*supervisor.Supervis
 	return supervisor.New(supervisor.Options{BundleDir: c.bundle, DataDir: c.data, Log: log})
 }
 
+// newInspector is newSupervisor for the read-only commands. They must still work when
+// something has taken one of our ports — that is precisely when someone runs them — so
+// a conflict becomes a reported fault rather than a refusal to start up at all.
+func newInspector(c *commonFlags, log *supervisor.Logger) (*supervisor.Supervisor, error) {
+	return supervisor.New(supervisor.Options{
+		BundleDir: c.bundle, DataDir: c.data, Log: log, TolerateConflicts: true,
+	})
+}
+
 func cmdStart(args []string) error {
 	fs := flag.NewFlagSet("start", flag.ContinueOnError)
 	common := addCommon(fs)
@@ -170,7 +179,7 @@ func cmdStatus(args []string) error {
 		return err
 	}
 	// Status must not narrate; it is parsed.
-	s, err := newSupervisor(common, supervisor.NewLogger(os.Stderr, true))
+	s, err := newInspector(common, supervisor.NewLogger(os.Stderr, true))
 	if err != nil {
 		return err
 	}
@@ -194,7 +203,7 @@ func cmdDoctor(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	s, err := newSupervisor(common, supervisor.NewLogger(os.Stderr, true))
+	s, err := newInspector(common, supervisor.NewLogger(os.Stderr, true))
 	if err != nil {
 		return err
 	}
@@ -223,7 +232,7 @@ func cmdLogs(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	s, err := newSupervisor(common, supervisor.NewLogger(io.Discard, true))
+	s, err := newInspector(common, supervisor.NewLogger(io.Discard, true))
 	if err != nil {
 		return err
 	}

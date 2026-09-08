@@ -65,6 +65,13 @@ type Options struct {
 	DataDir string
 	// Log receives the supervisor's narration.
 	Log *Logger
+	// TolerateConflicts turns a port conflict from a construction failure into a
+	// recorded fault. `status` and `doctor` set it: a port stolen while the stack was
+	// down is the single most likely reason someone runs either command, and refusing
+	// to construct would mean `doctor` never reaches its own port check and
+	// `status --json` emits no JSON for the menu-bar app to read. `start` leaves it
+	// false and still fails hard.
+	TolerateConflicts bool
 }
 
 // Supervisor owns one data directory and the processes serving it.
@@ -166,7 +173,13 @@ func New(opts Options) (*Supervisor, error) {
 	}
 
 	if err := s.settlePorts(!existed); err != nil {
-		return nil, err
+		if !opts.TolerateConflicts {
+			return nil, err
+		}
+		// Record it and carry on, so `doctor` can reach the check that explains it and
+		// `status --json` still produces a document saying what is wrong.
+		s.lastError = err.Error()
+		log.Warnf("%v", err)
 	}
 
 	socketDir, fellBack, err := layout.SocketDir(st.SocketDir)

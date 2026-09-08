@@ -200,6 +200,73 @@ func TestPidfileRoundTrip(t *testing.T) {
 	}
 }
 
+// Plan §3 asks for rotated per-service logs; a Mac mini that is never rebooted would
+// otherwise grow a PowerSync log without bound.
+func TestLogsRotateOnceTheyGetLarge(t *testing.T) {
+	r := newTestRunner(t)
+	logPath := filepath.Join(r.logsDir, "chatty.log")
+	big := make([]byte, maxLogBytes+1024)
+	for i := range big {
+		big[i] = 'x'
+	}
+	if err := os.WriteFile(logPath, big, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	c, err := r.start(shell("chatty", "echo fresh output"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { c.stop(time.Second) })
+
+	waitFor(t, 3*time.Second, func() bool {
+		body, _ := os.ReadFile(logPath)
+		return strings.Contains(string(body), "fresh output")
+	}, "new output never appeared")
+
+	st, err := os.Stat(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Size() >= maxLogBytes {
+		t.Errorf("the log was not rotated: still %d bytes", st.Size())
+	}
+	// The previous generation is kept — it is what explains a crash that just happened.
+	rotated, err := os.Stat(logPath + ".1")
+	if err != nil {
+		t.Fatalf("the rotated log should be kept: %v", err)
+	}
+	if rotated.Size() < maxLogBytes {
+		t.Errorf("the rotated log looks wrong: %d bytes", rotated.Size())
+	}
+}
+
+// A log below the cap must be left alone, so ordinary restarts do not shed history.
+func TestSmallLogsAreNotRotated(t *testing.T) {
+	r := newTestRunner(t)
+	logPath := filepath.Join(r.logsDir, "quiet.log")
+	if err := os.WriteFile(logPath, []byte("earlier run\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := r.start(shell("quiet", "echo more"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { c.stop(time.Second) })
+	waitFor(t, 3*time.Second, func() bool {
+		body, _ := os.ReadFile(logPath)
+		return strings.Contains(string(body), "more")
+	}, "new output never appeared")
+
+	if _, err := os.Stat(logPath + ".1"); !os.IsNotExist(err) {
+		t.Error("a small log must not be rotated")
+	}
+	body, _ := os.ReadFile(logPath)
+	if !strings.Contains(string(body), "earlier run") {
+		t.Error("history was lost")
+	}
+}
+
 // status reads pidfiles across process boundaries, so "is this pid alive" must be
 // answered without having spawned it.
 func TestProcessAliveByPid(t *testing.T) {

@@ -306,6 +306,98 @@ func TestRestartReopensTheSameData(t *testing.T) {
 	assertStatus(t, fmt.Sprintf("http://127.0.0.1:%d/healthz", second.Plan().Ports.Public), 200)
 }
 
+// TestDetachedStartStop drives the real binary the way a person in Terminal and the
+// menu-bar app will: `start` (which re-execs itself with --foreground under setsid),
+// `status --json`, then `stop`. This is the only test that exercises the daemonize
+// path — everything else calls Start/Stop in-process — so it is what proves the
+// supervisor pidfile, the re-exec and the signalled shutdown actually work.
+func TestDetachedStartStop(t *testing.T) {
+	bundle := bundleDir(t)
+	data := dataDir(t)
+	bin := buildBinary(t)
+
+	// Ensure a failure mid-test cannot leave a detached supervisor running.
+	t.Cleanup(func() {
+		_, _ = runCLI(t, bin, 3*time.Minute, "stop", "--bundle", bundle, "--data", data)
+		killLeftovers(t, data)
+	})
+
+	coldStart := time.Now()
+	out, err := runCLI(t, bin, 5*time.Minute, "start", "--bundle", bundle, "--data", data)
+	cold := time.Since(coldStart)
+	if err != nil {
+		dumpLogs(t, data)
+		t.Fatalf("start: %v\n%s", err, out)
+	}
+	t.Logf("COLD START via the CLI (detached; verifies the bundle in both the parent and the child): %s",
+		cold.Round(10*time.Millisecond))
+	if !strings.Contains(out, "Waffled is running") {
+		t.Errorf("start should say where to open it, got:\n%s", out)
+	}
+
+	// The supervisor pidfile is what `stop` and the app find it by.
+	supervisorPid := readFile(t, filepath.Join(data, "pids", "supervisor.pid"))
+	if strings.TrimSpace(supervisorPid) == "" {
+		t.Error("start did not record a supervisor pid")
+	}
+
+	statusOut, err := runCLIJSON(t, bin, time.Minute, "status", "--json", "--bundle", bundle, "--data", data)
+	if err != nil {
+		t.Fatalf("status --json: %v\n%s", err, statusOut)
+	}
+	var report status.Report
+	if err := json.Unmarshal([]byte(statusOut), &report); err != nil {
+		t.Fatalf("status --json is not valid JSON: %v\n%s", err, statusOut)
+	}
+	if report.State != status.StateRunning {
+		t.Errorf("state = %q, want running:\n%s", report.State, statusOut)
+	}
+	if !report.Supervisor.Running || report.Supervisor.PID == 0 {
+		t.Errorf("status should report the running supervisor, got %+v", report.Supervisor)
+	}
+	if report.Schema != status.Schema {
+		t.Errorf("schema = %d, want %d", report.Schema, status.Schema)
+	}
+	assertStatus(t, fmt.Sprintf("http://127.0.0.1:%d/healthz", report.Ports.Public), 200)
+
+	// doctor must run and pass against a healthy stack.
+	doctorOut, err := runCLI(t, bin, 2*time.Minute, "doctor", "--bundle", bundle, "--data", data)
+	if err != nil {
+		t.Errorf("doctor on a healthy stack should pass: %v\n%s", err, doctorOut)
+	}
+	t.Logf("doctor:\n%s", doctorOut)
+
+	stopOut, err := runCLI(t, bin, 3*time.Minute, "stop", "--bundle", bundle, "--data", data)
+	if err != nil {
+		t.Fatalf("stop: %v\n%s", err, stopOut)
+	}
+	// The supervisor removes its own pidfile as it exits.
+	if _, err := os.Stat(filepath.Join(data, "pids", "supervisor.pid")); !os.IsNotExist(err) {
+		t.Error("stop left the supervisor pidfile behind")
+	}
+	for name, port := range map[string]int{
+		"public": report.Ports.Public, "powersync public": report.Ports.PowerSyncPublic,
+		"api": report.Ports.API, "powersync": report.Ports.PowerSync, "postgres": report.Ports.Postgres,
+	} {
+		if isListening(port) {
+			t.Errorf("after `stop`, something is still listening on the %s port %d:\n%s",
+				name, port, describeHolder(port))
+		}
+	}
+
+	// And `status` on a stopped stack still produces a document rather than an error.
+	statusOut, err = runCLIJSON(t, bin, time.Minute, "status", "--json", "--bundle", bundle, "--data", data)
+	if err != nil {
+		t.Fatalf("status --json on a stopped stack: %v\n%s", err, statusOut)
+	}
+	if err := json.Unmarshal([]byte(statusOut), &report); err != nil {
+		t.Fatalf("status --json on a stopped stack is not valid JSON: %v\n%s", err, statusOut)
+	}
+	if report.State != status.StateStopped {
+		t.Errorf("after stop, state = %q, want stopped", report.State)
+	}
+}
+
 // A tampered bundle must never be executed.
 func TestATamperedBundleIsRefused(t *testing.T) {
 	bundle := bundleDir(t)
@@ -333,6 +425,45 @@ func TestATamperedBundleIsRefused(t *testing.T) {
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
+
+// buildBinary compiles the real CLI, so the detached test drives what ships rather than
+// an in-process approximation of it.
+func buildBinary(t *testing.T) string {
+	t.Helper()
+	bin := filepath.Join(t.TempDir(), "waffled-runtime")
+	cmd := exec.Command("go", "build", "-o", bin, "./cmd/waffled-runtime")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("build waffled-runtime: %v\n%s", err, out)
+	}
+	return bin
+}
+
+func runCLI(t *testing.T, bin string, timeout time.Duration, args ...string) (string, error) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin, args...)
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+// runCLIJSON captures stdout ALONE. --json output is a contract another program parses,
+// so it must not be polluted by anything the logger writes to stderr — and asserting
+// that here is what keeps it true.
+func runCLIJSON(t *testing.T, bin string, timeout time.Duration, args ...string) (string, error) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin, args...)
+	var stdout, stderr strings.Builder
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if stderr.Len() > 0 {
+		t.Logf("stderr from %v:\n%s", args, stderr.String())
+	}
+	return stdout.String(), err
+}
 
 func assertStatus(t *testing.T, url string, want int) {
 	t.Helper()
