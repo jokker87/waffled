@@ -3,6 +3,7 @@ package supervisor
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -67,15 +68,40 @@ func (s *Supervisor) initPostgres(ctx context.Context) error {
 		return fmt.Errorf("write pg_hba.conf: %w", err)
 	}
 
-	// Time Machine restoring a live cluster produces a corrupt one (plan §5). Not being
-	// able to set this is worth telling the operator about, never a reason to fail.
+	// The Time Machine exclusion is asserted in New(), when the data directory is
+	// created — earlier than here, and on every install rather than only on the run that
+	// happens to initdb. See excludeDataFromTimeMachine.
+	return nil
+}
+
+// excludeDataFromTimeMachine marks PGDATA so Time Machine skips it.
+//
+// Restoring a live Postgres cluster from a file-level backup produces a corrupt one
+// (plan §5), so the cluster is excluded and backups/ — a consistent pg_dump — is what
+// gets backed up. tmutil is the documented interface and sets the
+// com.apple.metadata:com_apple_backup_excludeItem xattr itself; the sticky form needs no
+// admin rights on a path the user owns.
+//
+// It runs when the data directory is created rather than when the cluster is, so an
+// install that predates this, or one where tmutil failed once, is repaired on its next
+// start. The result is remembered in runtime.json so a settled question is not re-asked
+// on every `status` poll. Failing is always a warning: a household whose Time Machine is
+// misconfigured should still get a server.
+func (s *Supervisor) excludeDataFromTimeMachine() {
+	if s.state.BackupExcluded && datadir.IsExcludedFromBackup(s.plan.Layout.Postgres) {
+		return
+	}
 	if err := datadir.ExcludeFromBackup(s.plan.Layout.Postgres); err != nil {
 		s.log.Warnf("could not exclude the database from Time Machine: %v — "+
 			"back up %s instead of restoring the live cluster", err, s.plan.Layout.Backups)
-	} else {
-		s.log.Infof("excluded %s from Time Machine (the backups folder is what gets backed up)", s.plan.Layout.Postgres)
+		s.state.BackupExcluded = false
+		return
 	}
-	return nil
+	if !s.state.BackupExcluded {
+		s.log.Infof("excluded %s from Time Machine (%s is what gets backed up)",
+			s.plan.Layout.Postgres, s.plan.Layout.Backups)
+	}
+	s.state.BackupExcluded = true
 }
 
 // reconcilePostgresConf rewrites the managed block on every start, so a port that moved
@@ -259,6 +285,14 @@ func normalizeLocale(s string) string {
 
 // runOneShot runs a command to completion and returns its combined output.
 func (s *Supervisor) runOneShot(ctx context.Context, spec services.Spec, timeout time.Duration) (string, error) {
+	return s.runOneShotStdin(ctx, spec, nil, timeout)
+}
+
+// runOneShotStdin is runOneShot with a script on stdin — how a plain SQL dump is fed to
+// psql without ever materialising the decompressed file on disk. A household's dump
+// expands to many times its compressed size, and writing that out only to read it back
+// would need the space and leave a copy of the whole database in a temp directory.
+func (s *Supervisor) runOneShotStdin(ctx context.Context, spec services.Spec, stdin io.Reader, timeout time.Duration) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -266,6 +300,7 @@ func (s *Supervisor) runOneShot(ctx context.Context, spec services.Spec, timeout
 	cmd.Args = spec.Args
 	cmd.Env = spec.Env
 	cmd.Dir = spec.Dir
+	cmd.Stdin = stdin
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }

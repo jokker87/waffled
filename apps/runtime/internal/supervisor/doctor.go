@@ -9,8 +9,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/kevinpsites/waffled/apps/runtime/internal/backup"
 	"github.com/kevinpsites/waffled/apps/runtime/internal/datadir"
 	"github.com/kevinpsites/waffled/apps/runtime/internal/ports"
+	"github.com/kevinpsites/waffled/apps/runtime/internal/schedule"
 	"github.com/kevinpsites/waffled/apps/runtime/internal/services"
 )
 
@@ -72,6 +74,36 @@ func (s *Supervisor) Doctor(ctx context.Context) []Check {
 		add("Time Machine", CheckWarn,
 			"%s is NOT excluded from Time Machine — restoring a live cluster from a file-level backup corrupts it",
 			s.plan.Layout.Postgres)
+	}
+
+	// Backups: the one check whose answer someone only ever wants once it is too late.
+	b := backup.Describe(s.plan.Layout.Backups, s.scheduleInstalled())
+	switch {
+	case b.LastError != "":
+		add("backups", CheckFail, "the last backup failed (%s): %s", b.LastErrorAt, b.LastError)
+	case b.LastBackupAt == "":
+		add("backups", CheckWarn, "no backup has been taken yet — run `waffled-runtime backup`, "+
+			"or `waffled-runtime backup --install-schedule` for a nightly one")
+	default:
+		age := ""
+		if at, err := time.Parse(time.RFC3339, b.LastBackupAt); err == nil {
+			age = fmt.Sprintf(" (%s ago)", time.Since(at).Round(time.Hour))
+		}
+		// The api's own health check calls a backup stale after 48 hours; matching it
+		// means `doctor` and System Health never disagree about the same fact.
+		if at, err := time.Parse(time.RFC3339, b.LastBackupAt); err == nil && time.Since(at) > 48*time.Hour {
+			add("backups", CheckWarn, "the last backup was %s%s — %d kept in %s",
+				b.LastBackupAt, age, b.Count, s.plan.Layout.Backups)
+		} else {
+			add("backups", CheckOK, "last backup %s%s, %.1f MB — %d kept in %s",
+				b.LastBackupAt, age, float64(b.LastSizeBytes)/(1<<20), b.Count, s.plan.Layout.Backups)
+		}
+	}
+	if b.ScheduleInstalled {
+		add("backup schedule", CheckOK, "a nightly backup is installed (%s)", schedule.Label)
+	} else {
+		add("backup schedule", CheckWarn,
+			"no nightly backup is scheduled — install one with `waffled-runtime backup --install-schedule`")
 	}
 
 	if free, err := freeDiskBytes(s.plan.Layout.Root); err != nil {
