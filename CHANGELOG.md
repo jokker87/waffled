@@ -24,6 +24,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **API keys can now reach chore instances, chore proofs, goal lists, pantry staples and
+  currency conversions.** Those endpoint families were refused for every key — "This endpoint
+  is not available to API keys" — no matter which scopes the key held. They now answer to the
+  `chores`, `goals`, `lists` and `rewards` scopes, so an integration or a headless client can
+  drive the whole of each resource rather than most of it. Pantry staples count as `lists`
+  (they live on the grocery board), not `pantry`.
+
 - **A failed refresh no longer makes a saved change look lost.** The web event editor
   now offers Retry when recurring-event details cannot load, and iPhone/iPad Countdowns
   and Family Night say when the server accepted a change but the screen could not
