@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **API bind address is configurable.** Set `HOST` to pin the API to one interface (the
+  native Mac runtime uses `127.0.0.1`, since without Docker's private network nothing else
+  keeps the API off the LAN); unset keeps today's bind-all-interfaces behaviour, so Compose
+  and the demo box are unaffected. The startup log line now includes the bound address.
+
 ### Fixed
 
 - **A failed refresh no longer makes a saved change look lost.** The web event editor
@@ -859,6 +864,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the center, with a consistent gap between them.
 
 ### Fixed
+
+- **Recurring chore edits can now start after a finished chore without rewriting it.**
+  On web, iPhone, and iPad, a completed or awaiting-approval occurrence can be used as
+  the boundary for "This and future chores." The selected historical row stays exactly
+  as completed, only future pending chores change or disappear, and failed web edits
+  keep the scope chooser open so they can be retried.
 
 - **The Waffled-Bite control panel keeps itself up to date.** The panel read the device
   once when you opened it and then never again, so anything your child did on the device
