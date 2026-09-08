@@ -230,33 +230,32 @@ func (s *Supervisor) settlePorts(firstRun bool) error {
 
 	s.plan.Ports = s.state.Ports
 	// A port one of our own live services already holds is fine — `start` is idempotent.
-	checks := []struct {
-		name  string
-		scope ports.Scope
-		port  int
-		mine  func() bool
-	}{
-		{services.Caddy, ports.Public, s.state.Ports.Public, func() bool { return s.serviceRunning(services.Caddy) }},
-		{services.Caddy, ports.Public, s.state.Ports.PowerSyncPublic, func() bool { return s.serviceRunning(services.Caddy) }},
-		{services.API, ports.Loopback, s.state.Ports.API, func() bool { return s.serviceRunning(services.API) }},
-		{services.PowerSync, ports.Loopback, s.state.Ports.PowerSync, func() bool { return s.serviceRunning(services.PowerSync) }},
-		{services.Postgres, ports.Loopback, s.state.Ports.Postgres, func() bool { _, ok := s.postgresPid(); return ok }},
-	}
-	for _, c := range checks {
-		if c.port == 0 {
+	for _, c := range s.plan.PortChecks() {
+		if c.Port == 0 {
 			return fmt.Errorf("%s has no port recorded in %s — the file is incomplete; "+
-				"stop the runtime and remove it to re-pick ports", c.name, s.plan.Layout.RuntimeJSON)
+				"stop the runtime and remove it to re-pick ports", c.Service, s.plan.Layout.RuntimeJSON)
 		}
-		if c.mine() {
+		if s.ownsPort(c.Service) {
 			continue
 		}
-		if err := ports.VerifyAvailable(c.scope, c.port); err != nil {
+		if err := ports.VerifyAvailable(c.Scope, c.Port); err != nil {
 			return fmt.Errorf("%s cannot start: %w.\nThis install has used that port since it was set up, "+
 				"and other devices point at it. Stop whatever took it, or edit %s to choose another",
-				c.name, err, s.plan.Layout.RuntimeJSON)
+				c.Service, err, s.plan.Layout.RuntimeJSON)
 		}
 	}
 	return nil
+}
+
+// ownsPort answers "is that port held by our own copy of this service?" — the one
+// question both settlePorts and doctor ask about every row of the port table. Postgres
+// is the exception: it has no pidfile of ours, so its liveness comes from postmaster.pid.
+func (s *Supervisor) ownsPort(service string) bool {
+	if service == services.Postgres {
+		_, ok := s.postgresPid()
+		return ok
+	}
+	return s.serviceRunning(service)
 }
 
 // serviceRunning answers from the pidfile, so it is true for a stack started by a
@@ -458,7 +457,10 @@ func (s *Supervisor) Stop(ctx context.Context) error {
 		}
 	}
 
-	for _, name := range []string{services.Caddy, services.PowerSync, services.API} {
+	// Dependency order, backwards: Caddy stops answering before the api it fronts does.
+	children := s.plan.Children()
+	for i := len(children) - 1; i >= 0; i-- {
+		name := children[i].Name
 		s.mu.Lock()
 		c := s.children[name]
 		s.mu.Unlock()
@@ -525,7 +527,7 @@ func (s *Supervisor) Status(ctx context.Context) *status.Report {
 	}
 	r.Services = append(r.Services, pgSvc)
 
-	for _, spec := range []services.Spec{s.plan.API(), s.plan.PowerSync(), s.plan.Caddy()} {
+	for _, spec := range s.plan.Children() {
 		r.Services = append(r.Services, s.serviceStatus(ctx, spec))
 	}
 
@@ -539,15 +541,8 @@ func (s *Supervisor) Status(ctx context.Context) *status.Report {
 func (s *Supervisor) serviceStatus(ctx context.Context, spec services.Spec) status.Service {
 	svc := status.Service{
 		Name: spec.Name, State: status.StateStopped,
-		Log: s.plan.Layout.LogPath(spec.Name),
-	}
-	switch spec.Name {
-	case services.API:
-		svc.Port = s.plan.Ports.API
-	case services.PowerSync:
-		svc.Port = s.plan.Ports.PowerSync
-	case services.Caddy:
-		svc.Port = s.plan.Ports.Public
+		Port: spec.Port,
+		Log:  s.plan.Layout.LogPath(spec.Name),
 	}
 
 	s.mu.Lock()

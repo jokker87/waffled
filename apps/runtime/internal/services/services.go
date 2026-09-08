@@ -21,6 +21,7 @@ import (
 	"github.com/kevinpsites/waffled/apps/runtime/internal/configenv"
 	"github.com/kevinpsites/waffled/apps/runtime/internal/datadir"
 	"github.com/kevinpsites/waffled/apps/runtime/internal/manifest"
+	"github.com/kevinpsites/waffled/apps/runtime/internal/ports"
 	"github.com/kevinpsites/waffled/apps/runtime/internal/rtstate"
 )
 
@@ -51,6 +52,52 @@ type Spec struct {
 	HealthURL string
 	// OneShot commands run to completion and must exit 0 (migrate, psql, initdb).
 	OneShot bool
+	// Port is the port this service listens on, and Scope the address it binds. Zero
+	// and Loopback for a one-shot, which listens on nothing. Carrying them here is what
+	// lets status report a service's port without switching on its name — a switch a
+	// new service is easy to forget, and then it shows as Port 0 to the menu-bar app.
+	Port  int
+	Scope ports.Scope
+}
+
+// PortCheck is one port the stack needs: who binds it, on which address, and what to
+// call it when telling a person about it.
+//
+// This table used to exist twice — hand-copied into the supervisor's settlePorts and
+// into doctor, already differing in its labels — so adding a service, or a second Caddy
+// site, meant remembering both. One list now feeds both, and a port doctor reports free
+// can no longer be one start refuses.
+type PortCheck struct {
+	// Service is the managed service that binds it, so the caller can ask "is this one
+	// of ours already running?" rather than treating our own port as a conflict.
+	Service string
+	// Label names the port for a person. Caddy binds two, so the service name alone
+	// would not distinguish them.
+	Label string
+	Scope ports.Scope
+	Port  int
+}
+
+// PortChecks is every port the stack listens on, in start order.
+func (p Plan) PortChecks() []PortCheck {
+	return []PortCheck{
+		{Service: Caddy, Label: "public HTTP", Scope: ports.Public, Port: p.Ports.Public},
+		{Service: Caddy, Label: "public PowerSync", Scope: ports.Public, Port: p.Ports.PowerSyncPublic},
+		{Service: API, Label: "api", Scope: ports.Loopback, Port: p.Ports.API},
+		{Service: PowerSync, Label: "powersync", Scope: ports.Loopback, Port: p.Ports.PowerSync},
+		{Service: Postgres, Label: "postgres", Scope: ports.Loopback, Port: p.Ports.Postgres},
+	}
+}
+
+// Children are the long-running services the supervisor watches, in dependency order.
+// Start walks it forwards (with the config staging each one needs in between) and Stop
+// walks it backwards.
+//
+// Postgres is deliberately not here. pg_ctl exits as soon as the postmaster is
+// accepting connections, so watching it as a child would read a successful start as an
+// immediate crash and restart-loop forever; it is driven through pg_ctl instead.
+func (p Plan) Children() []Spec {
+	return []Spec{p.API(), p.PowerSync(), p.Caddy()}
 }
 
 // Plan holds everything the specs are derived from.
@@ -133,6 +180,8 @@ func (p Plan) API() Spec {
 		Args:      []string{p.node(), filepath.Join(p.Bundle, p.apiServe())},
 		Env:       env,
 		HealthURL: fmt.Sprintf("http://127.0.0.1:%d/healthz", p.Ports.API),
+		Port:      p.Ports.API,
+		Scope:     ports.Loopback,
 	}
 }
 
@@ -177,6 +226,8 @@ func (p Plan) PowerSync() Spec {
 		Env:       env,
 		Dir:       p.Layout.PowerSync,
 		HealthURL: fmt.Sprintf("http://127.0.0.1:%d/probes/liveness", p.Ports.PowerSync),
+		Port:      p.Ports.PowerSync,
+		Scope:     ports.Loopback,
 	}
 }
 
@@ -203,6 +254,10 @@ func (p Plan) Caddy() Spec {
 		Dir: p.Layout.Caddy,
 		// Status only; the body is the SPA (a pre-existing quirk of the shared Caddyfile).
 		HealthURL: fmt.Sprintf("http://127.0.0.1:%d/healthz", p.Ports.Public),
+		// Caddy binds two public ports; Port is the one status reports. Both are in
+		// PortChecks, which is what start and doctor validate against.
+		Port:  p.Ports.Public,
+		Scope: ports.Public,
 	}
 }
 

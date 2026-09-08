@@ -83,29 +83,20 @@ func (s *Supervisor) Doctor(ctx context.Context) []Check {
 	}
 
 	// Ports: free is fine, held by our own service is fine, held by anything else is not.
-	for _, p := range []struct {
-		name  string
-		scope ports.Scope
-		port  int
-		mine  bool
-	}{
-		{"public HTTP", ports.Public, s.plan.Ports.Public, s.serviceRunning(services.Caddy)},
-		{"public PowerSync", ports.Public, s.plan.Ports.PowerSyncPublic, s.serviceRunning(services.Caddy)},
-		{"api", ports.Loopback, s.plan.Ports.API, s.serviceRunning(services.API)},
-		{"powersync", ports.Loopback, s.plan.Ports.PowerSync, s.serviceRunning(services.PowerSync)},
-		{"postgres", ports.Loopback, s.plan.Ports.Postgres, func() bool { _, ok := s.postgresPid(); return ok }()},
-	} {
+	// The table is services.PortChecks — the same one settlePorts validates, so doctor
+	// can never report a port free that start would refuse.
+	for _, c := range s.plan.PortChecks() {
 		switch {
-		case p.mine:
-			add("port "+p.name, CheckOK, "%d — in use by our own %s", p.port, p.name)
-		case ports.IsFree(p.scope, p.port):
-			add("port "+p.name, CheckOK, "%d is free", p.port)
+		case s.ownsPort(c.Service):
+			add("port "+c.Label, CheckOK, "%d — in use by our own %s", c.Port, c.Label)
+		case ports.IsFree(c.Scope, c.Port):
+			add("port "+c.Label, CheckOK, "%d is free", c.Port)
 		default:
-			holder := ports.DescribeHolder(p.port)
+			holder := ports.DescribeHolder(c.Port)
 			if holder == "" {
 				holder = "another process"
 			}
-			add("port "+p.name, CheckFail, "%d is held by %s", p.port, holder)
+			add("port "+c.Label, CheckFail, "%d is held by %s", c.Port, holder)
 		}
 	}
 
