@@ -2713,15 +2713,42 @@ struct WaffledAPI: Sendable {
             let progress, target: Double?
             let pct: Int?            // null for target-less goals (no computable %)
             let streakDays: Int
+            /// The overview already measures each goal on its own axis, so `progress`
+            /// above is a habit's THIS-PERIOD count. These carry the cadence through to
+            /// the goal detail we push, so the hero doesn't flash a lifetime total (or a
+            /// bare 0) before the full detail loads.
+            let periodDone: Double?
+            let habitPeriod: String?
+            let habitTargetPerPeriod: Int?
 
             /// A full `WaffledAPI.Goal` for navigating to the goal detail (which reloads
             /// the rest by id); the missing fields get harmless defaults.
             var asGoal: Goal2 {
                 Goal2(id: id, goalListId: nil, title: title, emoji: emoji, category: category,
-                      goalType: goalType ?? "total", unit: unit, habitPeriod: nil, habitTargetPerPeriod: nil,
+                      goalType: goalType ?? "total", unit: unit, habitPeriod: habitPeriod,
+                      habitTargetPerPeriod: habitTargetPerPeriod,
                       trackingMode: "shared_total", participantMode: nil, targetBasis: nil, deadline: nil, isFeatured: false, isSpotlight: nil, target: target,
-                      totalProgress: progress ?? 0, milestoneTotal: 0, milestoneReached: 0,
-                      streakDays: streakDays, autoFromCalendar: false, healthMetric: nil, createdAt: nil, participants: [])
+                      // `progress`/`target` here are ALREADY on the goal's own axis, so a
+                      // habit's is its period count and a checklist's is its step count.
+                      // Put them back where GoalDisplay looks for them, and leave a
+                      // habit's `totalProgress` at 0 — this payload does not carry a
+                      // lifetime figure, and 0 is honest where the period count would be
+                      // a lie. (A checklist's step count IS its total: each tick logs 1.)
+                      totalProgress: goalType == "habit" ? 0 : (progress ?? 0),
+                      milestoneTotal: 0, milestoneReached: 0,
+                      // Never fall back to `progress` when the server sent no
+                      // `periodDone`: on a server old enough to omit it, `progress` was
+                      // the LIFETIME count, and carrying that over is the very bug this
+                      // helper exists to stop. Unknown stays unknown.
+                      periodDone: periodDone,
+                      stepTotal: goalType == "checklist" ? target.map { Int($0) } : nil,
+                      stepDone: goalType == "checklist" ? progress.map { Int($0) } : nil,
+                      streakDays: streakDays,
+                      // The overview doesn't say who logged today; the goal detail loads
+                      // that a moment later, and until then the server's own dedupe is
+                      // the guard. nil gates nothing.
+                      loggedTodayBy: nil,
+                      autoFromCalendar: false, healthMetric: nil, createdAt: nil, participants: [])
             }
         }
         /// Alias so `asGoal` can name the outer `WaffledAPI.Goal` from inside this nested type.
@@ -3270,27 +3297,23 @@ struct WaffledAPI: Sendable {
         let isSpotlight: Bool?
         let target: Double?
         let totalProgress: Double
-        // THE DISPLAY AXIS. `totalProgress` is the LIFETIME total, and for two goal types
-        // it is the wrong number to show: a habit's question is "how many this period?"
-        // (it resets), and a checklist's is "how many steps?". The server has always sent
-        // these three; iOS simply never decoded them, so every iOS surface has been
-        // showing habits their lifetime count. See `goalDisplayProgress`.
-        //
-        // `var`, not `let`, and deliberately: a `let` with an `= nil` initializer is
-        // excluded from BOTH the memberwise init and synthesized `Decodable`, so it would
-        // silently never decode. A `var` Optional gets an implicit nil default in the
-        // memberwise init — which keeps the four existing `WaffledAPI.Goal(...)` call
-        // sites compiling untouched — and is still decoded with `decodeIfPresent`.
-        var periodDone: Double?
-        var stepDone: Double?
-        var stepTotal: Double?
-        /// How progress is logged (manual | steps | health | calendar) — nil on older responses.
-        var logMethod: String?
-        /// Whether this goal has any milestone rewards attached.
-        var hasRewards: Bool?
         let milestoneTotal: Int
         let milestoneReached: Int
+        /// Habit only: distinct days logged in the CURRENT period (day/week/month, in the
+        /// household's timezone). This — not `totalProgress` — is what a habit displays,
+        /// so the count resets when the period rolls over. Optional so an older/cached
+        /// response still decodes. Read it through `GoalDisplay`, never inline.
+        let periodDone: Double?
+        /// Checklist only: steps done / steps total, the axis a checklist displays on.
+        /// Optional for the same reason as `periodDone`.
+        let stepTotal: Int?
+        let stepDone: Int?
         let streakDays: Int
+        /// Who has already logged this goal TODAY (household timezone) — person ids, with
+        /// `__family__` standing in for a no-person (shared) log. A habit is once per day
+        /// per person, so the Log sheet reads this to say so before you tap. Optional: an
+        /// older/cached response simply gates nothing (the server dedupes regardless).
+        let loggedTodayBy: [String]?
         /// Goal opted in to count matching calendar events (drives "Plan time").
         let autoFromCalendar: Bool
         /// Apple Health metric this goal auto-fills from (nil = manual). See HealthKitBridge.
@@ -3329,11 +3352,12 @@ struct WaffledAPI: Sendable {
         let isSpotlight: Bool?
         let hasRewards: Bool
         let totalProgress: Double
-        // The display axis, as on `Goal` — see `GoalDisplay`. Optional `var`s so an older
-        // response still decodes and so the memberwise init keeps its defaults.
-        var periodDone: Double?
-        var stepDone: Double?
-        var stepTotal: Double?
+        /// See `Goal.periodDone` / `Goal.stepTotal` — the detail carries the same axes so
+        /// the detail hero agrees with the card the user tapped.
+        let periodDone: Double?
+        let stepTotal: Int?
+        let stepDone: Int?
+        let loggedTodayBy: [String]?
         let streakDays: Int
         let deadline: String?
         let createdAt: String
@@ -3632,6 +3656,7 @@ struct WaffledAPI: Sendable {
     /// Returns the new event id; PowerSync down-syncs it for display.
     func createEvent(title: String, startsAtISO: String, endsAtISO: String?, allDay: Bool,
                      location: String?, personIds: [String], goalId: String?, goalStepId: String?,
+                     rhythmId: String? = nil,
                      calendarId: String?, timezone: String?, rrule: String? = nil,
                      recurrenceEndAt: String? = nil, isCountdown: Bool = false) async throws -> String {
         var body: [String: JSONValue] = [
@@ -3646,6 +3671,7 @@ struct WaffledAPI: Sendable {
         if !personIds.isEmpty { body["participantIds"] = .array(personIds.map(JSONValue.string)) }
         if let g = goalId { body["goalId"] = .string(g) }
         if let s = goalStepId { body["goalStepId"] = .string(s) }
+        if let rh = rhythmId { body["rhythmId"] = .string(rh) }
         if let c = calendarId { body["calendarId"] = .string(c) }
         if let tz = timezone { body["timezone"] = .string(tz) }
         if let rr = rrule, !rr.isEmpty { body["rrule"] = .string(rr) }
@@ -3669,6 +3695,11 @@ struct WaffledAPI: Sendable {
         personIds: [String],
         goalId: String?,
         goalStepId: String?,
+        // Which rhythm this event settles. Absent means "leave it alone" — the upload
+        // sink coalesces a missing rhythm_id on purpose, so a client that predates the
+        // picker can't blank a link it never showed. Unlinking is therefore stated.
+        rhythmId: String? = nil,
+        clearRhythmId: Bool = false,
         rrule: String?,
         clearRrule: Bool,
         recurrenceEndAt: String?,
@@ -3695,6 +3726,8 @@ struct WaffledAPI: Sendable {
             body["goalId"] = goalId.map(JSONValue.string) ?? .null
             body["goalStepId"] = goalStepId.map(JSONValue.string) ?? .null
             body["isCountdown"] = .bool(isCountdown)
+            if let rh = rhythmId { body["rhythmId"] = .string(rh) }
+            else if clearRhythmId { body["rhythmId"] = .null }
             if let rr = rrule { body["rrule"] = .string(rr) }
             else if clearRrule { body["rrule"] = .null }
             if let end = recurrenceEndAt { body["recurrenceEndAt"] = .string(end) }
@@ -3706,6 +3739,7 @@ struct WaffledAPI: Sendable {
     func updateEvent(id: String, title: String, startsAtISO: String, endsAtISO: String?,
                      allDay: Bool, location: String?, personIds: [String],
                      goalId: String?, goalStepId: String?,
+                     rhythmId: String? = nil, clearRhythmId: Bool = false,
                      rrule: String? = nil, clearRrule: Bool = false, recurrenceEndAt: String? = nil,
                      clearRecurrenceEndAt: Bool = false,
                      scope: String? = nil, occurrenceStart: String? = nil, isCountdown: Bool = false) async throws {
@@ -3718,6 +3752,8 @@ struct WaffledAPI: Sendable {
             personIds: personIds,
             goalId: goalId,
             goalStepId: goalStepId,
+            rhythmId: rhythmId,
+            clearRhythmId: clearRhythmId,
             rrule: rrule,
             clearRrule: clearRrule,
             recurrenceEndAt: recurrenceEndAt,
@@ -4036,7 +4072,19 @@ struct WaffledAPI: Sendable {
         let startsOn: String?
         let autoSchedule: Bool
         let rrule: String?
-        /// Postgres interval text, clamped server-side to at most half of `every`.
+        /// How much of each period a booking counts in, from the period's start.
+        ///
+        /// Postgres interval text; nil means the whole period, which is what `every` meant
+        /// on its own and what every rhythm made before this column has. It exists because
+        /// `every` was doing two jobs — how often, and how wide a span a booking may land
+        /// in — and "date night, in the first week of the month" needs them separated. The
+        /// period still owns the grid and the skips; this owns where a booking settles
+        /// anything.
+        ///
+        /// Optional so a server that predates it still decodes.
+        let bookWithin: String?
+        /// Postgres interval text, clamped server-side to the booking window where there
+        /// is one and to half of `every` where there isn't.
         let leadTime: String
         let lastCompletedAt: String?
         let nextDueAt: String?
@@ -4047,6 +4095,12 @@ struct WaffledAPI: Sendable {
         // exactly the asymmetry the kiosk-claim decode bug shipped on.
         let currentPeriodStart: String?
         let currentPeriodEnd: String?
+        /// Where the current period stops accepting bookings.
+        ///
+        /// Read it through `windowEnd`, never directly: a server without the column sends
+        /// nothing here, and the period's end is then the right answer rather than a guess
+        /// — without a window the two ARE the same date.
+        let currentWindowEnd: String?
         let satisfied: Bool?
         /// Whether a live recurring event still exists for this rhythm.
         ///
@@ -4071,6 +4125,13 @@ struct WaffledAPI: Sendable {
         /// time for one shows "12:00 AM" — an hour nobody chose and the row's only
         /// falsehood. This is what says to stop at the date.
         let bookedAllDay: Bool?
+
+        /// The deadline a person is actually working against: where bookings stop counting.
+        ///
+        /// Every "how long have I got" line wants this one — a card saying "12 days left"
+        /// beside a picker that refuses day 8 reads as a broken picker. `currentPeriodEnd`
+        /// is only for talking about the cadence and for keying the grid.
+        var windowEnd: String? { currentWindowEnd ?? currentPeriodEnd }
     }
 
     /// Why a rhythm is on the attention feed. `unknown` is the same forward-compatibility
@@ -4094,10 +4155,17 @@ struct WaffledAPI: Sendable {
         let dueAt: String?
         let overdue: Bool?
         let periodStart: String?
+        /// The next period's start — the grid boundary, and what a skip is keyed on.
         let periodEnd: String?
+        /// Where this period stops accepting bookings. See `Rhythm.windowEnd`; read it
+        /// through `bookableUntil`, which falls back for a server without the column.
+        let windowEnd: String?
         /// `.unscheduled` only — see `Rhythm.hasSeries`.
         let hasSeries: Bool?
         var id: String { rhythm.id }
+
+        /// The last boundary a booking still counts against — the window's, not the grid's.
+        var bookableUntil: String? { windowEnd ?? periodEnd }
     }
 
     /// The whole register, each row with its current-period state.
@@ -4239,25 +4307,7 @@ struct WaffledAPI: Sendable {
 
     /// POST/PATCH a JSON body to `path`, throwing on non-2xx. The response body is
     /// ignored — capture commits only care that the write succeeded.
-    // MARK: - Transport
-    //
-    // THESE SIX ARE DELIBERATELY NOT `private`, and it is worth knowing why before
-    // tightening them back up.
-    //
-    // Swift's `private` at type scope is visible inside the type's declaration and any
-    // extension IN THE SAME FILE. This file is already ~4,300 lines because every
-    // feature's endpoints have had to live in it: an `extension WaffledAPI` in its own
-    // file cannot call a private helper, so there was nowhere else for them to go.
-    //
-    // Weekly Planning adds ~25 endpoints across ten steps. Widening these to internal
-    // lets each step keep its own `Planning<Step>API.swift` next to the feature that
-    // uses it, and stops this file growing by another thousand lines. Nothing about the
-    // API surface changes — internal is still module-private, and `url`/`authorize`/
-    // `perform`/`check` below stay private because they are genuinely internal
-    // machinery (token refresh, status checking) that callers must not reach around.
-    //
-    /// POST/PATCH a JSON body with no response to decode, throwing on non-2xx.
-    func send(_ method: String, _ path: String, body: [String: JSONValue]) async throws {
+    private func send(_ method: String, _ path: String, body: [String: JSONValue]) async throws {
         var req = URLRequest(url: try url(path))
         req.httpMethod = method
         authorize(&req)
@@ -4268,7 +4318,7 @@ struct WaffledAPI: Sendable {
     }
 
     /// POST/PATCH a JSON body and decode the JSON response, throwing on non-2xx.
-    func sendReturning<T: Decodable>(_ method: String, _ path: String, body: [String: JSONValue], as: T.Type) async throws -> T {
+    private func sendReturning<T: Decodable>(_ method: String, _ path: String, body: [String: JSONValue], as: T.Type) async throws -> T {
         var req = URLRequest(url: try url(path))
         req.httpMethod = method
         authorize(&req)
@@ -4282,7 +4332,7 @@ struct WaffledAPI: Sendable {
     /// PATCH an arbitrary Encodable body and decode the JSON response. Optionals in
     /// the body are omitted when nil (Swift's `encodeIfPresent`), so only the fields
     /// you set are sent.
-    func patchEncodable<B: Encodable, T: Decodable>(_ path: String, body: B, as: T.Type) async throws -> T {
+    private func patchEncodable<B: Encodable, T: Decodable>(_ path: String, body: B, as: T.Type) async throws -> T {
         var req = URLRequest(url: try url(path))
         req.httpMethod = "PATCH"
         authorize(&req)
@@ -4294,7 +4344,7 @@ struct WaffledAPI: Sendable {
     }
 
     /// POST/PATCH (no body) and decode the JSON response, throwing on non-2xx.
-    func sendJSON<T: Decodable>(_ method: String, _ path: String, as: T.Type) async throws -> T {
+    private func sendJSON<T: Decodable>(_ method: String, _ path: String, as: T.Type) async throws -> T {
         var req = URLRequest(url: try url(path))
         req.httpMethod = method
         authorize(&req)
@@ -4304,7 +4354,7 @@ struct WaffledAPI: Sendable {
     }
 
     /// GET `path` and decode the JSON body, throwing on non-2xx.
-    func getJSON<T: Decodable>(_ path: String, as: T.Type) async throws -> T {
+    private func getJSON<T: Decodable>(_ path: String, as: T.Type) async throws -> T {
         var req = URLRequest(url: try url(path))
         authorize(&req)
         let (data, resp) = try await perform(req)
@@ -4313,7 +4363,7 @@ struct WaffledAPI: Sendable {
     }
 
     /// DELETE `path`, throwing on non-2xx (204 is success).
-    func delete(_ path: String) async throws {
+    private func delete(_ path: String) async throws {
         var req = URLRequest(url: try url(path))
         req.httpMethod = "DELETE"
         authorize(&req)

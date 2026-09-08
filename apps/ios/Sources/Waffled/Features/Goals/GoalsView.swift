@@ -408,10 +408,6 @@ struct GoalsView: View {
     }
 
     private func sharedHero(_ g: WaffledAPI.Goal) -> some View {
-        // Through `GoalDisplay`, never the raw fields: a HABIT's ring is this period's
-        // count against its per-period target (it resets), and a CHECKLIST's is
-        // steps — `totalProgress / target` shows a habit its lifetime total and reads
-        // as long-since-done.
         let frac = GoalDisplay.fraction(g)
         let maxProg = max(1, g.participants.map(\.progress).max() ?? 1)
         return VStack(alignment: .leading, spacing: 14) {
@@ -420,7 +416,7 @@ struct GoalsView: View {
                     VStack(spacing: 0) {
                         Text(ringFmt(GoalDisplay.progress(g))).font(.system(size: 23, weight: .heavy)).foregroundStyle(.white)
                             .lineLimit(1).minimumScaleFactor(0.5)
-                        Text("of \(ringFmt(GoalDisplay.target(g)))\(g.unit.map { " \($0)" } ?? "")")
+                        Text(GoalDisplay.targetCaption(g, unit: g.unit, fmt: ringFmt))
                             .font(.system(size: 9, weight: .bold)).foregroundStyle(.white.opacity(0.85))
                             .lineLimit(1).minimumScaleFactor(0.8)
                     }
@@ -466,7 +462,11 @@ struct GoalsView: View {
             HStack {
                 Text("TOGETHER").font(.system(size: 10, weight: .heavy)).tracking(0.6).foregroundStyle(.white.opacity(0.8))
                 Spacer()
-                Text("\(goalFmt(GoalDisplay.progress(g)))/\(goalFmt(summedTarget))")
+                // Deliberately the POOLED lifetime pair, matching the web's EachHero: the
+                // server's period count has no `person_id` filter (it counts days ANYONE
+                // logged), so pairing it with a per-person cadence would mix scopes and
+                // could read "6/5". Each person's own axis lives in the rows below.
+                Text("\(goalFmt(g.totalProgress))/\(goalFmt(summedTarget))")
                     .font(.system(size: 15, weight: .heavy)).foregroundStyle(.white)
             }
             if !g.participants.isEmpty {
@@ -529,10 +529,6 @@ struct GoalsView: View {
 
     private func moreCard(_ g: WaffledAPI.Goal, pinned: Bool) -> some View {
         let c = GoalStyle.color(g.category)
-        // Through `GoalDisplay`, never the raw fields: a HABIT's ring is this period's
-        // count against its per-period target (it resets), and a CHECKLIST's is
-        // steps — `totalProgress / target` shows a habit its lifetime total and reads
-        // as long-since-done.
         let frac = GoalDisplay.fraction(g)
         return Button { path.append(.goal(g)) } label: {
             VStack(alignment: .leading, spacing: 11) {
@@ -691,7 +687,16 @@ struct GoalLogSheet: View {
     private var eachAdds: Bool { goal.trackingMode == "each_tracks" }
     private var isSplit: Bool { goal.trackingMode == "shared_total" && (goal.participantMode ?? "count_once") == "split" }
     private var whoLabel: String { eachAdds ? "Who took part?" : isSplit ? "Split between" : "Who was there?" }
-    private var confirmLabel: String { isHabit ? "Mark done for today" : isTime ? "Log \(durationLabel)" : "Log \(goalFmt(logAmount))\(unitSuffix)" }
+    /// Everyone picked has already ticked this habit off today, and the entry is dated
+    /// today — the server would silently drop it. Blocks the save, but only for TODAY:
+    /// backdating to catch up a missed day stays open (matching the web Log modal).
+    private var blockedToday: Bool {
+        GoalDisplay.doneToday(goal, who: who) && Cal.current.isDateInToday(loggedOn)
+    }
+    private var confirmLabel: String {
+        if isHabit { return blockedToday ? "Done for today ✓" : "Mark done for today" }
+        return isTime ? "Log \(durationLabel)" : "Log \(goalFmt(logAmount))\(unitSuffix)"
+    }
     private var chips: [GoalLogChips.Chip] { GoalLogChips.chips(isHours: isHours, unit: goal.unit) }
 
     init(goal: WaffledAPI.Goal, onChanged: (() -> Void)? = nil, onSave: @escaping (Double, Int?, Int?, [String], String, String?) -> Void) {
@@ -810,7 +815,7 @@ struct GoalLogSheet: View {
                             dismiss()
                         }
                         .fontWeight(.semibold)
-                        .disabled(logAmount == 0 || whoMissing)
+                        .disabled(logAmount == 0 || whoMissing || blockedToday)
                     }
                 }
             }
@@ -825,10 +830,20 @@ struct GoalLogSheet: View {
             VStack(alignment: .leading, spacing: 9) {
                 SectionLabel(text: "Mark it done")
                 HStack(spacing: 11) {
-                    Image(systemName: "checkmark.circle.fill").font(.system(size: 22)).foregroundStyle(WF.primary)
-                    Text("One tap logs today’s completion — keep the streak going.")
+                    Image(systemName: "checkmark.circle.fill").font(.system(size: 22))
+                        .foregroundStyle(blockedToday ? WF.success : WF.primary)
+                    Text(blockedToday
+                         ? "Already marked done today — pick another day to catch one up."
+                         : "One tap logs today’s completion — keep the streak going.")
                         .font(.system(size: 14, weight: .semibold)).foregroundStyle(WF.ink2)
                     Spacer(minLength: 0)
+                    // Where the cadence stands right now, matching the web log modal:
+                    // this period's count, not the all-time one.
+                    if let t = GoalDisplay.target(goal) {
+                        Text("\(goalFmt(GoalDisplay.progress(goal)))/\(goalFmt(t))")
+                            .font(.system(size: 14, weight: .heavy)).foregroundStyle(WF.primary)
+                            .fixedSize()
+                    }
                 }
                 .padding(14).background(WF.card2).clipShape(RoundedRectangle(cornerRadius: WF.rMD, style: .continuous))
             }
@@ -1201,15 +1216,6 @@ struct GoalCreateSheet: View {
     let members: [SyncedMember]
     /// When set, the sheet prefills from this goal and reads as "Edit goal".
     var editGoal: WaffledAPI.GoalDetail? = nil
-    /// EMBEDDED IN A HOST THAT ALREADY ASKED WHICH GROUP THIS IS ABOUT (Weekly Planning's
-    /// Goals step, whose whole question is per-group). The group is then STATED rather
-    /// than offered: re-offering the picker here would only be a way to answer a
-    /// different group's question by accident. Mirrors the web's `embed.listId`.
-    var lockedListId: String? = nil
-    /// Start on the Pinned tier. What the host means by "a goal for THIS week" — the
-    /// planning step reads a list's lone pin as the group's current focus, so a goal made
-    /// from there comes back already selected. Mirrors the web's `embed.featured`.
-    var startFeatured: Bool = false
     let onSubmit: ([String: JSONValue], String?) -> Void
 
     @State private var didPrefill = false
@@ -1499,13 +1505,8 @@ struct GoalCreateSheet: View {
                     .overlay(RoundedRectangle(cornerRadius: WF.rMD, style: .continuous).strokeBorder(WF.hair, lineWidth: 1.5))
                     .wfShadow1()
             }
-            mockSection(
-                "Who’s it for?",
-                hint: lockedListId == nil
-                    ? "Pick a goal list — the people in it share this goal."
-                    : "The group you’re planning for — this goal joins it."
-            ) {
-                if lockedListId == nil { whoChips } else { lockedWhoChip }
+            mockSection("Who’s it for?", hint: "Pick a goal list — the people in it share this goal.") {
+                whoChips
             }
             mockSection("How do you measure it?", hint: "This shapes how progress is logged and shown.") {
                 measureCards
@@ -1829,20 +1830,6 @@ struct GoalCreateSheet: View {
             }
             .buttonStyle(.plain)
         }
-    }
-
-    /// The locked group, STATED. Same chip as `whoChips`, minus every way to change it —
-    /// no other groups and no "New group", because the host already asked which group
-    /// this goal is for and a different answer here would be silently wrong.
-    private var lockedWhoChip: some View {
-        HStack(spacing: 7) {
-            AvatarStack(members: selectedList?.members ?? [], size: 20)
-            Text(selectedList?.name ?? "This group").font(.system(size: 13, weight: .semibold))
-        }
-        .foregroundStyle(WF.ink)
-        .padding(.horizontal, 12).padding(.vertical, 7)
-        .wfChip(selected: true)
-        .accessibilityLabel("This goal joins \(selectedList?.name ?? "this group")")
     }
 
     private var shareSegment: some View {
@@ -2335,10 +2322,7 @@ struct GoalCreateSheet: View {
         didPrefill = true
         if localLists.isEmpty { localLists = lists }
         guard let g = editGoal else {
-            if goalListId == nil { goalListId = lockedListId ?? defaultListId ?? lists.first?.id }
-            // Set here rather than as a `@State` default so the tier picker shows Pinned
-            // selected — the host's intent is visible and still overridable.
-            if startFeatured { isFeatured = true }
+            if goalListId == nil { goalListId = defaultListId ?? lists.first?.id }
             return
         }
         title = g.title
@@ -2758,20 +2742,14 @@ struct GoalDetailView: View {
 
     // Prefer the freshly-loaded detail, fall back to the goal we were handed.
     private var unit: String? { model.detail?.unit ?? goal.unit }
-    private var target: Double? {
-        if let d = model.detail { return GoalDisplay.target(d) }
-        return GoalDisplay.target(goal)
-    }
-    /// The number on THIS goal's axis, freshest source first — see `GoalDisplay`. A
-    /// habit's detail screen must read this period's count, not its lifetime total.
-    /// `GoalDisplay` has an overload per DTO precisely so this stays two lines and the
-    /// axis rule lives in exactly one place.
-    private var progress: Double {
-        if let d = model.detail { return GoalDisplay.progress(d) }
-        return GoalDisplay.progress(goal)
-    }
+    private var target: Double? { model.detail?.target ?? goal.target }
+    private var progress: Double { model.detail?.totalProgress ?? goal.totalProgress }
     private var participants: [WaffledAPI.Goal.Participant] { model.detail?.participants ?? goal.participants }
-    private var pct: Int { (target ?? 0) > 0 ? min(Int((progress / target!) * 100), 100) : 0 }
+    /// What every measured line on this screen reads off — the hero ring, the percentage
+    /// and the milestone ladder, each on the goal's own axis. `progress` above stays the
+    /// raw LIFETIME figure, handed to the Log sheet as-is.
+    private var displayed: GoalDisplayable { model.detail.map { $0 as GoalDisplayable } ?? goal }
+    private var pct: Int { Int(GoalDisplay.fraction(displayed) * 100) }
 
     /// The goal handed to the Log sheet — participants/unit come from the loaded
     /// detail, so the "Who?" picker shows even when we arrived via a lightweight
@@ -2785,7 +2763,14 @@ struct GoalDetailView: View {
                      targetBasis: model.detail?.targetBasis ?? goal.targetBasis,
                      deadline: goal.deadline, isFeatured: goal.isFeatured, isSpotlight: goal.isSpotlight,
                      target: target, totalProgress: progress, milestoneTotal: goal.milestoneTotal,
-                     milestoneReached: goal.milestoneReached, streakDays: goal.streakDays,
+                     milestoneReached: goal.milestoneReached,
+                     periodDone: model.detail?.periodDone ?? goal.periodDone,
+                     stepTotal: model.detail?.stepTotal ?? goal.stepTotal,
+                     stepDone: model.detail?.stepDone ?? goal.stepDone,
+                     streakDays: goal.streakDays,
+                     // Prefer the freshly-loaded detail: it knows who has ticked this
+                     // habit off today, which is what greys out "Mark done for today".
+                     loggedTodayBy: model.detail?.loggedTodayBy ?? goal.loggedTodayBy,
                      autoFromCalendar: goal.autoFromCalendar, healthMetric: goal.healthMetric,
                      createdAt: goal.createdAt, participants: participants)
     }
@@ -2909,16 +2894,28 @@ struct GoalDetailView: View {
         }
     }
 
+    /// Every person on this habit has already ticked it off today, so the button says so
+    /// rather than promising a completion the server would drop. The web makes its
+    /// version non-clickable; this one still opens, deliberately — the sheet is where you
+    /// backdate a *missed* day, and dead-ending that is the worse trade.
+    private var habitDoneToday: Bool {
+        let ids = participants.map(\.personId)
+        guard !ids.isEmpty else { return false }
+        return GoalDisplay.doneToday(displayed, who: Set(ids))
+    }
+
     private var logActionButton: some View {
         Button { logging = true } label: {
             HStack(spacing: 7) {
-                Image(systemName: "plus.circle.fill").font(.system(size: 15, weight: .bold))
-                Text("Log progress").font(.system(size: 14.5, weight: .bold))
+                Image(systemName: habitDoneToday ? "checkmark.circle.fill" : "plus.circle.fill")
+                    .font(.system(size: 15, weight: .bold))
+                Text(habitDoneToday ? "Done for today" : "Log progress").font(.system(size: 14.5, weight: .bold))
             }
             .foregroundStyle(.white)
             .frame(maxWidth: .infinity).padding(.vertical, 13)
             .background(Self.heroGreen)
             .clipShape(RoundedRectangle(cornerRadius: WF.rMD, style: .continuous))
+            .opacity(habitDoneToday ? 0.65 : 1)
         }
         .buttonStyle(.plain)
     }
@@ -2945,13 +2942,13 @@ struct GoalDetailView: View {
     // MARK: hero
 
     private var hero: some View {
-        let frac = (target ?? 0) > 0 ? min(progress / target!, 1) : 0
+        let frac = GoalDisplay.fraction(displayed)
         return HStack(alignment: .top, spacing: 14) {
             GoalRing(value: frac, size: 104, lineWidth: 9, stroke: .white, track: .white.opacity(0.25)) {
                 VStack(spacing: 0) {
-                    Text(ringFmt(progress)).font(.system(size: 26, weight: .heavy)).foregroundStyle(.white)
+                    Text(ringFmt(GoalDisplay.progress(displayed))).font(.system(size: 26, weight: .heavy)).foregroundStyle(.white)
                         .lineLimit(1).minimumScaleFactor(0.5)
-                    Text("of \(ringFmt(target))\(unit.map { " \($0)" } ?? "")")
+                    Text(GoalDisplay.targetCaption(displayed, unit: unit, fmt: ringFmt))
                         .font(.system(size: 9, weight: .bold)).foregroundStyle(.white.opacity(0.85))
                         .lineLimit(1).minimumScaleFactor(0.7)
                 }
@@ -2980,7 +2977,9 @@ struct GoalDetailView: View {
     private var heroSub: String {
         var parts: [String] = []
         if let c = model.detail?.createdAt { parts.append("Started \(monthDay(c))") }
-        parts.append("\(pct)% complete")
+        // A habit's percentage is of THIS period's cadence, so say which window — "40%
+        // this week" next to a streak, not a bare "40% complete" that reads lifetime.
+        parts.append(GoalDisplay.periodLabel(displayed).map { "\(pct)% \($0)" } ?? "\(pct)% complete")
         let streak = model.detail?.streakDays ?? goal.streakDays
         if streak > 0 { parts.append("🔥 \(streak)-day streak") }
         if let d = model.detail?.deadline ?? goal.deadline { parts.append("by \(monthDay(d))") }
@@ -3011,7 +3010,7 @@ struct GoalDetailView: View {
                             .foregroundStyle(m.reached || isNow ? WF.ink : WF.ink2)
                         Spacer(minLength: 6)
                         Text(m.reached ? "reached"
-                                : isNow ? "\(goalFmt(m.threshold - progress)) to go"
+                                : isNow ? GoalDisplay.milestoneToGo(displayed, threshold: m.threshold, fmt: goalFmt)
                                 : (m.rewardText ?? "—"))
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(m.reached ? FamilyColor.person3.solid : (isNow ? WF.primary : WF.ink3))
@@ -3222,11 +3221,7 @@ struct GoalListCreateSheet: View {
     }
 }
 
-// Internal, not `private`: the Weekly Planning Goals step presents the same editor from
-// its own file, and the whole point is that a goal created mid-session behaves exactly
-// like one created from the Goals screen — same sheet on iPhone, same full-screen cover on
-// the display. A second spelling of this modifier is how the two drift apart.
-extension View {
+private extension View {
     /// Presents the goal editor: full-screen on iPad (web-like, so the two-pane
     /// form + live-preview layout has room), a large sheet on iPhone. The iPad used
     /// to get `.presentationSizing(.page)`, which floated a cramped modal the two

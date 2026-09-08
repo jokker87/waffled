@@ -1,128 +1,141 @@
 import Foundation
 
-/// THE ONE PLACE A GOAL'S PROGRESS IS DECIDED, and the reason it exists.
+/// A goal that can be rendered — the fields every goal surface needs to pick its number.
+/// Both the list `Goal` and the full `GoalDetail` conform, so one helper serves both.
+protocol GoalDisplayable {
+    var goalType: String { get }
+    var target: Double? { get }
+    var totalProgress: Double { get }
+    var habitPeriod: String? { get }
+    var habitTargetPerPeriod: Int? { get }
+    /// Distinct days logged in the CURRENT habit period (household timezone), computed
+    /// server-side. `nil` on an older or cached payload that predates the field.
+    var periodDone: Double? { get }
+    var stepTotal: Int? { get }
+    var stepDone: Int? { get }
+    /// Consecutive days logged — a habit's milestone axis, not just a badge.
+    var streakDays: Int { get }
+    /// family (a flat target) | per_person (the target is PER member, so the ring's is
+    /// that number × the members).
+    var targetBasis: String? { get }
+    /// How many people are on the goal — the multiplier for a per_person target.
+    var participantCount: Int { get }
+    /// Who already logged TODAY — person ids plus the `__family__` sentinel.
+    var loggedTodayBy: [String]? { get }
+}
+
+/// Which number a goal shows, and what it is measured against.
 ///
-/// `Goal.totalProgress` is the LIFETIME total. For two of the three goal types that is
-/// the wrong number to put in front of somebody:
+/// A goal is displayed on its TYPE's axis: a **habit** shows completions in the CURRENT
+/// period against its cadence ("2 of 5 this week") and never a lifetime total; a
+/// **checklist** shows steps done over steps total; everything else shows the cumulative
+/// amount against its target. This is the Swift mirror of `apps/web/src/lib/api/goals.ts`
+/// (`goalDisplayProgress` / `goalDisplayTarget` / `goalFraction`).
 ///
-///   * a **habit** asks "how many this period?" — it RESETS, so a lifetime count of 340
-///     reads as done when this week's answer is 2 of 5;
-///   * a **checklist** asks "how many steps?" — its progress is `stepDone / stepTotal`,
-///     which has nothing to do with an amount;
-///   * everything else is genuinely a lifetime number.
-///
-/// The web has had `goalDisplayProgress` / `goalDisplayTarget` for exactly this since the
-/// goal-axis work; iOS never got them, and never decoded `periodDone` / `stepDone` /
-/// `stepTotal` at all — so every iOS surface has been showing habits their lifetime
-/// count. This is the port, kept deliberately identical to
-/// `apps/web/src/lib/api/goals.ts` so the two platforms cannot drift.
-///
-/// A VIEW MUST NOT READ `totalProgress` DIRECTLY. That is the whole point of the helper:
-/// the axis is a property of the goal's type, not of the screen showing it.
+/// Keeping the rule in ONE place is the point: iOS previously inlined `totalProgress` in
+/// six views, so a "5× a week" habit counted every log it had ever had — logging once
+/// last week and once this week read "2 of 5" instead of resetting with the week.
 enum GoalDisplay {
 
-    // MARK: - The axis, over primitives
-    //
-    // Factored this way because there are TWO goal DTOs that both need it — the list
-    // `Goal` and the `GoalDetail` behind a goal's own screen — and the one thing worse
-    // than a view reading `totalProgress` directly is two copies of the axis rule that
-    // can disagree with each other.
-
-    private static func axisProgress(
-        goalType: String, total: Double, periodDone: Double?, stepDone: Double?
-    ) -> Double {
-        switch goalType {
-        // A habit resets each period, so the period's own count is the answer. `?? 0`
-        // rather than falling back to `total`: a response that omits the field has no
-        // period figure, and showing the lifetime total in its place is the exact bug
-        // this helper exists to prevent.
-        case "habit": return periodDone ?? 0
-        case "checklist": return stepDone ?? 0
-        default: return total
+    /// The progress figure to show. Never falls back to the lifetime total for a habit:
+    /// on an older payload with no `periodDone` that would be exactly the wrong number,
+    /// and a 0 makes the staleness visible instead.
+    static func progress(_ g: GoalDisplayable) -> Double {
+        switch g.goalType {
+        case "habit": return g.periodDone ?? 0
+        case "checklist": return Double(g.stepDone ?? 0)
+        default: return g.totalProgress
         }
     }
 
-    private static func axisTarget(
-        goalType: String, target: Double?, habitTargetPerPeriod: Int?,
-        stepTotal: Double?, targetBasis: String?, participantCount: Int
-    ) -> Double? {
-        switch goalType {
-        case "habit": return habitTargetPerPeriod.map(Double.init) ?? target
-        // `stepTotal` of 0 is an EMPTY checklist, not a target of zero — nil so callers
-        // render "no target" instead of dividing by it.
-        case "checklist": return (stepTotal ?? 0) > 0 ? stepTotal : nil
+    /// What the progress is measured against — the cadence for a habit, the step count
+    /// for a checklist, the goal's target otherwise. `nil` when there is nothing to
+    /// measure against (a target-less goal, an empty checklist).
+    static func target(_ g: GoalDisplayable) -> Double? {
+        switch g.goalType {
+        case "habit": return g.habitTargetPerPeriod.map(Double.init) ?? g.target
+        case "checklist":
+            let total = g.stepTotal ?? 0
+            return total > 0 ? Double(total) : nil
         default:
-            // An each_tracks / per_person goal's ring target is the per-person number
-            // times the household size (read 12 EACH → 48 for four), so it grows as
-            // people join.
-            if targetBasis == "per_person", let t = target {
-                return t * Double(max(1, participantCount))
-            }
-            return target
+            // A per_person target is stated PER member ("read 12 books each"), so the
+            // figure to measure the pooled progress against grows with the household:
+            // 12 each × 4 = 48. It grows as people join, matching the web.
+            guard g.targetBasis == "per_person", let t = g.target else { return g.target }
+            return t * Double(max(1, g.participantCount))
         }
     }
 
-    // MARK: - Goal
-
-    /// The number to show, on the axis this goal is actually measured on.
-    static func progress(_ g: WaffledAPI.Goal) -> Double {
-        axisProgress(goalType: g.goalType, total: g.totalProgress,
-                     periodDone: g.periodDone, stepDone: g.stepDone)
-    }
-
-    /// What that number is measured against, or nil when the goal has no target.
-    static func target(_ g: WaffledAPI.Goal) -> Double? {
-        axisTarget(goalType: g.goalType, target: g.target,
-                   habitTargetPerPeriod: g.habitTargetPerPeriod, stepTotal: g.stepTotal,
-                   targetBasis: g.targetBasis, participantCount: g.participants.count)
-    }
-
-    /// 0…1 completion, clamped. Zero when there is no positive target to measure against.
-    static func fraction(_ g: WaffledAPI.Goal) -> Double {
+    /// 0…1 completion, clamped. 0 when there is no positive target, so a ring or bar
+    /// renders empty rather than NaN.
+    static func fraction(_ g: GoalDisplayable) -> Double {
         guard let t = target(g), t > 0 else { return 0 }
         return min(progress(g) / t, 1)
     }
 
-    // MARK: - GoalDetail
-    //
-    // The same rule for the detail read, so a goal's own screen cannot show a different
-    // number from the row that opened it.
-
-    static func progress(_ d: WaffledAPI.GoalDetail) -> Double {
-        axisProgress(goalType: d.goalType, total: d.totalProgress,
-                     periodDone: d.periodDone, stepDone: d.stepDone)
+    /// The window a habit's count covers — "today" / "this week" / "this month" — for
+    /// appending to a ring's caption. `nil` for every other goal type.
+    static func periodLabel(_ g: GoalDisplayable) -> String? {
+        guard g.goalType == "habit" else { return nil }
+        switch g.habitPeriod {
+        case "day": return "today"
+        case "month": return "this month"
+        default: return "this week"
+        }
     }
 
-    static func target(_ d: WaffledAPI.GoalDetail) -> Double? {
-        axisTarget(goalType: d.goalType, target: d.target,
-                   habitTargetPerPeriod: d.habitTargetPerPeriod, stepTotal: d.stepTotal,
-                   targetBasis: d.targetBasis, participantCount: d.participants.count)
+    /// The value a milestone's threshold is measured against — the SAME axis the server
+    /// used to decide `reached` (`goalDetail`'s `milestoneAxis`): **streak days** for a
+    /// habit, **percent complete** for a checklist, the cumulative total otherwise. A
+    /// milestone measures whatever the goal itself measures, so a habit's "🔥 7 days"
+    /// counts days in a row — never how many times it has ever been logged.
+    static func milestoneAxis(_ g: GoalDisplayable) -> Double {
+        switch g.goalType {
+        case "habit": return Double(g.streakDays)
+        case "checklist":
+            let total = g.stepTotal ?? 0
+            return total > 0 ? Double(g.stepDone ?? 0) / Double(total) * 100 : 0
+        default: return g.totalProgress
+        }
     }
 
-    static func fraction(_ d: WaffledAPI.GoalDetail) -> Double {
-        guard let t = target(d), t > 0 else { return 0 }
-        return min(progress(d) / t, 1)
+    /// How far the next milestone is, in the goal's own units: "4-day streak to go",
+    /// "15% to go", "188 to go". Never negative.
+    static func milestoneToGo(_ g: GoalDisplayable, threshold: Double, fmt: (Double?) -> String) -> String {
+        let toGo = max(0, threshold - milestoneAxis(g))
+        switch g.goalType {
+        case "habit": return "\(fmt(toGo))-day streak to go"
+        case "checklist": return "\(Int(toGo.rounded(.up)))% to go"
+        default: return "\(fmt(toGo)) to go"
+        }
     }
 
-    /// The one place a goal amount is formatted: at most two decimals, trailing zeros
-    /// dropped, thousands grouped.
+    /// Whether a habit is already marked done today for everyone currently picked.
     ///
-    /// Amounts are stored EXACT — an hours-and-minutes log is 1h5m = 1.0833… hours — so a
-    /// raw interpolation prints a repeating decimal. Every amount the UI shows goes
-    /// through here, which is also why it lives beside the axis helpers rather than in a
-    /// view.
-    static func number(_ n: Double?) -> String {
-        guard let n else { return "—" }
-        return Self.formatter.string(from: NSNumber(value: n)) ?? "—"
+    /// A habit is once per day PER PERSON — `logProgress` silently skips a same-day
+    /// duplicate, so without this the Log sheet's button looks like it worked and did
+    /// nothing. `who` holds the ids the sheet has selected, including the `__family__`
+    /// sentinel a no-person (shared) log uses. Nobody picked, a non-habit, or a response
+    /// too old to carry `loggedTodayBy` all gate nothing — the server still dedupes.
+    static func doneToday(_ g: GoalDisplayable, who: Set<String>) -> Bool {
+        guard g.goalType == "habit", !who.isEmpty, let logged = g.loggedTodayBy else { return false }
+        let done = Set(logged)
+        return who.allSatisfy { done.contains($0) }
     }
 
-    /// `static let`, per the project's rule about formatters in a render path: building an
-    /// NSNumberFormatter per row is measurably slow in a scrolling list.
-    private static let formatter: NumberFormatter = {
-        let f = NumberFormatter()
-        f.numberStyle = .decimal
-        f.maximumFractionDigits = 2
-        f.usesGroupingSeparator = true
-        return f
-    }()
+    /// The ring caption under the progress number: "of 5 this week" for a habit, "of 5
+    /// steps" for a checklist, "of 1,000 miles" otherwise.
+    static func targetCaption(_ g: GoalDisplayable, unit: String?, fmt: (Double?) -> String) -> String {
+        let base = "of \(fmt(target(g)))"
+        if let period = periodLabel(g) { return "\(base) \(period)" }
+        if g.goalType == "checklist" { return "\(base) steps" }
+        return base + (unit.map { " \($0)" } ?? "")
+    }
+}
+
+extension WaffledAPI.Goal: GoalDisplayable {
+    var participantCount: Int { participants.count }
+}
+extension WaffledAPI.GoalDetail: GoalDisplayable {
+    var participantCount: Int { participants.count }
 }

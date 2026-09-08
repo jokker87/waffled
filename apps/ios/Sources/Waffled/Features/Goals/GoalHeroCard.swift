@@ -89,10 +89,6 @@ struct GoalHeroCard: View {
     }
 
     private func body(_ g: WaffledAPI.Goal) -> some View {
-        // Through `GoalDisplay`, never the raw fields: a HABIT's ring is this period's
-        // count against its per-period target (it resets), and a CHECKLIST's is
-        // steps — `totalProgress / target` shows a habit its lifetime total and reads
-        // as long-since-done.
         let frac = GoalDisplay.fraction(g)
         let maxProg = max(1, g.participants.map(\.progress).max() ?? 1)
         let ring: CGFloat = kiosk ? 116 : 78
@@ -102,8 +98,8 @@ struct GoalHeroCard: View {
                     VStack(spacing: 1) {
                         Text(goalFmt(GoalDisplay.progress(g))).font(.system(size: kiosk ? 24 : 17, weight: .heavy)).foregroundStyle(.white)
                             .lineLimit(1).minimumScaleFactor(0.5)
-                        if g.target != nil {
-                            Text("of \(goalFmt(g.target))\(g.unit.map { " \($0)" } ?? "")")
+                        if GoalDisplay.target(g) != nil {
+                            Text(GoalDisplay.targetCaption(g, unit: g.unit, fmt: goalFmt))
                                 .font(.system(size: kiosk ? 11 : 9, weight: .bold)).foregroundStyle(.white.opacity(0.85))
                                 .lineLimit(1).minimumScaleFactor(0.7)
                         }

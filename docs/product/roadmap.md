@@ -228,9 +228,20 @@ Legend: ✅ done · 🟡 partial / in progress · 🚧 planned · ⛔ dropped (s
   screen** cover completing, booking, skipping, editing, pausing and retiring — on all three
   surfaces — and completion-shape rhythms join
   countdowns as a fourth source ("18 days until the air filter"). `leadTime` is clamped
-  to half the cadence so a runway can never outlive its cycle, and the shape/anchor fields
+  so a runway can never outlive its cycle — to the whole cadence on a scheduling rhythm
+  (whose feed closes when its window does) and to half of it on a completion rhythm (whose
+  feed never closes on its own) — and the shape/anchor fields
   are immutable after creation because re-anchoring would re-interpret existing skips. REST-only
-  by design (the booked events sync; the register doesn't). Design and schema:
+  by design (the booked events sync; the register doesn't).
+  A **booking window** (`book_within`, mig `0099`) splits the two jobs `every` was doing —
+  how often, and how wide a span a booking may land in — so *"date night, in the first week
+  of the month"* is sayable at all: the period keeps the grid and the skips, the window says
+  how much of it counts, and null (every rhythm predating the column) means the whole
+  period. It is the one part of *when* that is editable in place, since it moves no boundary
+  and re-keys no skip; it is refused alongside auto-schedule, whose rule already picks the
+  day. The **event editor links an existing event to a rhythm** ("Keeps a rhythm"), so an
+  outing planned in the Calendar screen settles the period instead of leaving the rhythm
+  asking for something already booked. Design and schema:
   [Rhythms plan](./rhythms-plan.md); how to use it:
   [docs → Rhythms](https://docs.waffled.app/features/rhythms/). Per-surface status lives in
   the [feature matrix](../../website/docs/src/content/docs/reference/features.md).
@@ -319,6 +330,16 @@ Legend: ✅ done · 🟡 partial / in progress · 🚧 planned · ⛔ dropped (s
 
 ## Planned 🚧
 
+- **Waffled for Mac — a downloadable app that runs the family server natively, no Docker.**
+  Plex-style: the web app stays the UI, the Mac app is a menu-bar icon (running / starting /
+  error) whose menu opens the web UI, copies the server address, toggles start-at-login, and
+  backs up. A non-technical person should go from download to a working household in under
+  five minutes, and relaunching re-opens the existing server. Same API, migrations,
+  PowerSync, Caddy and web build as Compose — only packaging and supervision differ, via a
+  small Go runtime supervisor that is a CLI first (`waffled-runtime start|status|backup`).
+  Mac only for now; Windows follows from the same runtime later. Plan, risks and phases in
+  [`native-mac-plan.md`](./native-mac-plan.md); Phase 1 is a throwaway native spike to prove
+  bundled Postgres and PowerSync-outside-Docker before any Swift is written.
 - **Chore due-dates on the calendar.** The last piece of "the calendar as the all-in-one
   dated view": overlay `chore_instances.due_on` onto the calendar as read-only all-day chips,
   tapping through to the chore rather than the event editor. Deliberately chips, not

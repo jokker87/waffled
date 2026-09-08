@@ -161,6 +161,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     left alone **on purpose**, because deciding something needs nothing is still a decision. Every
     line points at live data rather than copying it, so the record can never quietly disagree with
     your calendar.
+### Changed
+
+- **API bind address is configurable.** Set `HOST` to pin the API to one interface (the
+  native Mac runtime uses `127.0.0.1`, since without Docker's private network nothing else
+  keeps the API off the LAN); unset keeps today's bind-all-interfaces behaviour, so Compose
+  and the demo box are unaffected. The startup log line now includes the bound address.
+
+### Fixed
+
+## [0.14.3] - 2026-09-02
+
+### Added
+
+- **Search a list on the web — including the grocery board.** A long packing list or a
+  week's groceries is now searchable from its header: type and it filters down to
+  matching items by name, section or aisle, quantity, and the store a grocery row is
+  tagged with — the same match the phone app has always done, so a search means the same
+  thing wherever you run it. On the grocery board it works the same in By aisle, By store
+  and By meal. Matches hiding inside a section you'd collapsed, or in the Completed group,
+  are surfaced while you're searching and tuck back exactly the way you left them once you
+  clear it. The header count, Share list and Clear still act on the whole list, not
+  whatever you happened to have typed.
+
+### Changed
+
+### Fixed
+
+## [0.14.2] - 2026-09-02
+
+### Added
+
+- **A rhythm can now ask for a booking window narrower than its cadence.** "Date night,
+  in the first week of the month" used to be unsayable: a rhythm's cadence was both how
+  often it should happen and how wide a span a booking could land in, and the nudge could
+  only be set counting backwards from the end of the period. You can now say that only
+  the first N days of each period count — Waffled asks you at the start of the window,
+  the date picker offers only the days that settle the period, and a booking later in the
+  month leaves it still asking. Leave it blank and a booking anywhere in the period
+  counts, exactly as before.
+- **A rhythm that's on the calendar can now nudge you from the first day of its period.**
+  Some things need *planning* rather than a fixed slot — "remind me at the start of the
+  month to sort out a family outing, and I'll book it for whenever suits." That couldn't be
+  asked for: the reminder counted backwards from the end of the period and was capped at
+  half the cadence, so a monthly rhythm could never speak up before the 16th. You can now
+  ask to be nudged for the whole cycle. Rhythms you mark done are unchanged — they keep
+  asking however late they are, so they'd never go quiet with a runway that long.
+- **Calendar events you booked yourself can now be tied to a rhythm.** Plenty of family
+  outings get planned in the Calendar screen rather than from the rhythms register, and
+  the rhythm went on asking you to book the thing already sitting on the calendar. The
+  event editor on both phone and web now has a "Keeps a rhythm" picker, so an event you
+  made any other way can settle the period it belongs to.
 - **A privacy policy and terms of service on waffled.app.** Two new pages —
   [waffled.app/privacy](https://waffled.app/privacy) and
   [waffled.app/terms](https://waffled.app/terms) — spelling out what a self-hosted install
@@ -289,6 +340,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   grey text; they're now tinted per person exactly as the month and week views do, with
   whole-family events in your family colour. Hovering a decision row also has room around
   it now instead of hugging the text.
+- **"Skip a period" is now "Mark handled".** The button always settled the period without
+  putting anything on the calendar — but it was named for only one reason you'd press it
+  ("this one isn't happening") and hid the commoner one ("it's sorted, just not as a
+  calendar entry"). Same action, same result, clearer name; a settled period now reads
+  *handled without a booking* rather than *skipped this one*. It still records nothing
+  about whether the thing actually happened, because a scheduled rhythm never asks that.
+- **The booking-window field asks its question as a sentence.** It read "Only the first …
+  days of each period count", which stated the rule inside-out and leaned on a word the
+  form never explains. It now reads *"It must be booked in the first ⟨7⟩ days of each
+  month"*, naming the cadence you just chose.
+
+### Fixed
+
+- **A "third Saturday of the month" rhythm no longer nags forever.** Anchored on a date
+  after the 15th, its periods and its repeating event drifted apart — some months ended
+  up with two of the bookings and others with none, and a month with none could never be
+  settled, so it asked to be booked while the outing sat right there on the calendar.
+  Both apps now line these rhythms up with calendar months automatically, and the server
+  refuses a repeat rule that would skip a period, explaining how to fix it.
+- **Habit goals on iPhone/iPad now count the current week, not every log you have ever
+  made.** A "5× a week" habit was showing its lifetime completions on the iOS goal cards,
+  hero and detail — log once last week and once this week and it read "2 of 5" instead of
+  resetting to "1 of 5". The count now rolls over with the habit's own period (day / week
+  / month), the ring says which window it covers ("of 5 this week"), and the Log sheet
+  shows where the cadence stands. The web app was already correct.
+- **A weekly habit now resets on your household's own start-of-week day.** Habit periods
+  were cut on Monday no matter what **Settings → Family & People → Week starts on** said —
+  and that setting defaults to Sunday, so for most households Sunday's completion counted
+  toward the week that was ending instead of the one beginning. Weekly habits (and the
+  goal detail's "this week" total, which also ignored your timezone) now use the same
+  week as the meal planner, the calendar and the goal heatmaps. Existing history re-reads
+  itself against the new boundary — nothing to migrate, and changing the setting later
+  fixes past weeks too.
+- **iPhone/iPad now say when a habit is already done for today.** A habit counts once
+  per day per person, and the server has always quietly dropped a second tap — but iOS
+  gave no sign, so "Mark done for today" looked like it worked and did nothing. The
+  button now reads "Done for today ✓" and steps aside, pointing you at the date picker
+  if you meant to catch up a missed day. The web already behaved this way.
+- **Milestones on iPhone/iPad count what the goal itself counts.** A habit's milestones
+  are streak days ("🔥 7 days") and a checklist's are percent complete, but the iOS
+  milestone track measured every goal by its lifetime total — so a habit with 99 logs and
+  a 3-day streak claimed its 7-day milestone was long past. Each milestone now reads the
+  same axis the server used to award it, and says so: "4-day streak to go", "15% to go".
+- **"Each" goals on iPhone/iPad measure against everyone's target, not one person's.**
+  A goal set as a per-person amount ("read 12 books each") compared the whole family's
+  pooled progress to the single-person number, so four members who had read 30 between
+  them showed "30 / 12". The target now grows with the household — "30 / 48" — as it
+  always has on the web.
+- **Checklist goals on iPhone/iPad show steps done, not an empty ring.** A checklist has
+  no numeric target, so its iOS cards and detail hero were stuck at an empty ring with no
+  figure to measure against; they now read steps done over steps total, matching the web.
 
 ### Security
 
@@ -2569,7 +2671,9 @@ fixes bump **PATCH**. Pre-1.0, expect **MINOR** to carry the weight of feature w
 \* Most `chore`/`refactor`/`test`/`docs` commits are omitted; include one only when a
 user or operator would notice the result.
 
-[Unreleased]: https://github.com/kevinpsites/waffled/compare/v0.14.1...HEAD
+[Unreleased]: https://github.com/kevinpsites/waffled/compare/v0.14.3...HEAD
+[0.14.3]: https://github.com/kevinpsites/waffled/compare/v0.14.2...v0.14.3
+[0.14.2]: https://github.com/kevinpsites/waffled/compare/v0.14.1...v0.14.2
 [0.14.1]: https://github.com/kevinpsites/waffled/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/kevinpsites/waffled/compare/v0.13.1...v0.14.0
 [0.13.1]: https://github.com/kevinpsites/waffled/compare/v0.13.0...v0.13.1

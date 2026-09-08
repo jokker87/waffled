@@ -2,168 +2,258 @@ import Foundation
 import Testing
 @testable import Waffled
 
-// The goal display AXIS: which number a goal is actually measured on.
+// Mirrors apps/web/src/lib/api/goals-display.test.ts — same fixtures, same expectations —
+// so a goal reads identically on both platforms. See GoalDisplay.swift.
 //
-// This is the iOS half of a rule the web has had for a while and iOS never got — the
-// `Goal` DTO here didn't even decode `periodDone`, so every iOS surface showed habits
-// their LIFETIME total. A habit at 340 lifetime reps reads as long-since-done when this
-// week's honest answer is "2 of 5".
-//
-// Kept deliberately parallel to `apps/web/src/lib/api/goals.ts`, because two platforms
-// each deciding this for themselves is how they drift.
+// The bug this locks down: a habit ("5× a week") was showing its LIFETIME log count on
+// every iOS goal surface, so logging once last week and once this week read "2 of 5"
+// instead of resetting to "1 of 5" at the start of the week. The server has always sent
+// the per-period count (`periodDone`); iOS simply never decoded it.
+
+private func goal(
+    goalType: String = "total",
+    target: Double? = nil,
+    totalProgress: Double = 0,
+    habitPeriod: String? = nil,
+    habitTargetPerPeriod: Int? = nil,
+    periodDone: Double? = nil,
+    stepTotal: Int? = nil,
+    stepDone: Int? = nil,
+    streakDays: Int = 0,
+    targetBasis: String? = nil,
+    people: Int = 0,
+    loggedTodayBy: [String]? = nil
+) -> WaffledAPI.Goal {
+    WaffledAPI.Goal(id: "g", goalListId: nil, title: "G", emoji: nil, category: nil,
+                    goalType: goalType, unit: nil, habitPeriod: habitPeriod,
+                    habitTargetPerPeriod: habitTargetPerPeriod, trackingMode: "shared_total",
+                    participantMode: nil, targetBasis: targetBasis, deadline: nil, isFeatured: false,
+                    isSpotlight: nil, target: target, totalProgress: totalProgress,
+                    milestoneTotal: 0, milestoneReached: 0, periodDone: periodDone,
+                    stepTotal: stepTotal, stepDone: stepDone, streakDays: streakDays,
+                    loggedTodayBy: loggedTodayBy,
+                    autoFromCalendar: false, healthMetric: nil, createdAt: nil,
+                    participants: (0..<people).map {
+                        .init(personId: "p\($0)", name: "P\($0)", colorHex: nil,
+                              avatarEmoji: nil, target: target, progress: 0)
+                    })
+}
 
 @Suite struct GoalDisplayTests {
 
-    private func goal(
-        type: String,
-        total: Double = 0,
-        target: Double? = nil,
-        habitTarget: Int? = nil,
-        periodDone: Double? = nil,
-        stepDone: Double? = nil,
-        stepTotal: Double? = nil,
-        targetBasis: String? = nil,
-        participants: Int = 0
-    ) -> WaffledAPI.Goal {
-        var g = WaffledAPI.Goal(
-            id: "g1", goalListId: nil, title: "T", emoji: nil, category: nil,
-            goalType: type, unit: nil, habitPeriod: habitTarget == nil ? nil : "week",
-            habitTargetPerPeriod: habitTarget, trackingMode: "shared",
-            participantMode: nil, targetBasis: targetBasis, deadline: nil,
-            isFeatured: false, isSpotlight: nil, target: target, totalProgress: total,
-            milestoneTotal: 0, milestoneReached: 0, streakDays: 0,
-            autoFromCalendar: false, healthMetric: nil, createdAt: nil,
-            participants: (0..<participants).map {
-                .init(personId: "p\($0)", name: "P\($0)", colorHex: nil, avatarEmoji: nil,
-                      target: nil, progress: 0)
-            }
-        )
-        g.periodDone = periodDone
-        g.stepDone = stepDone
-        g.stepTotal = stepTotal
-        return g
-    }
+    // MARK: habit — the reported bug
 
-    @Test func aHabitReadsThisPeriodsCountNotItsLifetimeTotal() {
-        // The bug this helper exists to stop: 340 lifetime reps against a target of 5.
-        let g = goal(type: "habit", total: 340, habitTarget: 5, periodDone: 2)
+    @Test func habitShowsThisPeriodNotTheLifetimeTotal() {
+        // 99 logs all-time, 2 of them this week: the ring is 2 of 5, not 99 of 5.
+        let g = goal(goalType: "habit", target: 5, totalProgress: 99,
+                     habitPeriod: "week", habitTargetPerPeriod: 5, periodDone: 2)
         #expect(GoalDisplay.progress(g) == 2)
         #expect(GoalDisplay.target(g) == 5)
-        #expect(GoalDisplay.fraction(g) == 0.4)
+        #expect(abs(GoalDisplay.fraction(g) - 0.4) < 0.0001)
     }
 
-    @Test func aHabitWithNoPeriodFigureShowsZeroNotTheLifetimeTotal() {
-        // An older response omits `periodDone`. Falling back to `totalProgress` would
-        // reintroduce the exact defect, so the fallback is 0.
-        let g = goal(type: "habit", total: 340, habitTarget: 5)
+    @Test func habitFallsBackToTheGoalTargetWhenCadenceIsMissing() {
+        // Older goals stored the cadence only in target_value.
+        let g = goal(goalType: "habit", target: 3, totalProgress: 9,
+                     habitPeriod: "week", habitTargetPerPeriod: nil, periodDone: 1)
+        #expect(GoalDisplay.target(g) == 3)
+    }
+
+    @Test func habitFromAnOlderResponseWithoutPeriodDoneReadsZeroNotTheTotal() {
+        // A cached/older payload must never fall back to the lifetime total — that is
+        // exactly the wrong number, and showing 0 makes the staleness obvious instead.
+        let g = goal(goalType: "habit", target: 5, totalProgress: 99,
+                     habitPeriod: "week", habitTargetPerPeriod: 5, periodDone: nil)
         #expect(GoalDisplay.progress(g) == 0)
     }
 
-    @Test func aChecklistIsMeasuredInSteps() {
-        let g = goal(type: "checklist", total: 99, stepDone: 3, stepTotal: 4)
-        #expect(GoalDisplay.progress(g) == 3)
-        #expect(GoalDisplay.target(g) == 4)
-        #expect(GoalDisplay.fraction(g) == 0.75)
+    @Test func habitPeriodLabelNamesTheWindow() {
+        #expect(GoalDisplay.periodLabel(goal(goalType: "habit", habitPeriod: "day")) == "today")
+        #expect(GoalDisplay.periodLabel(goal(goalType: "habit", habitPeriod: "week")) == "this week")
+        #expect(GoalDisplay.periodLabel(goal(goalType: "habit", habitPeriod: "month")) == "this month")
+        // Unset cadence defaults to the week, matching the web goals list.
+        #expect(GoalDisplay.periodLabel(goal(goalType: "habit", habitPeriod: nil)) == "this week")
+        // Only habits carry a period.
+        #expect(GoalDisplay.periodLabel(goal(goalType: "total")) == nil)
     }
 
-    @Test func anEmptyChecklistHasNoTargetRatherThanATargetOfZero() {
-        let g = goal(type: "checklist", stepDone: 0, stepTotal: 0)
+    // MARK: checklist — steps, not the log total
+
+    @Test func checklistShowsStepsDoneOverStepTotal() {
+        let g = goal(goalType: "checklist", target: nil, totalProgress: 3, stepTotal: 5, stepDone: 3)
+        #expect(GoalDisplay.progress(g) == 3)
+        #expect(GoalDisplay.target(g) == 5)
+        #expect(abs(GoalDisplay.fraction(g) - 0.6) < 0.0001)
+    }
+
+    @Test func emptyChecklistHasNoTargetAndAnEmptyBar() {
+        let g = goal(goalType: "checklist", target: nil, totalProgress: 0, stepTotal: 0, stepDone: 0)
         #expect(GoalDisplay.target(g) == nil)
-        // …and nothing divides by it.
         #expect(GoalDisplay.fraction(g) == 0)
     }
 
-    @Test func everythingElseIsGenuinelyALifetimeNumber() {
-        let g = goal(type: "amount", total: 12, target: 20)
-        #expect(GoalDisplay.progress(g) == 12)
-        #expect(GoalDisplay.target(g) == 20)
+    // MARK: everything else keeps the cumulative axis
+
+    @Test func numericGoalStillShowsTheCumulativeTotal() {
+        let g = goal(goalType: "total", target: 1000, totalProgress: 312)
+        #expect(GoalDisplay.progress(g) == 312)
+        #expect(GoalDisplay.target(g) == 1000)
+        #expect(abs(GoalDisplay.fraction(g) - 0.312) < 0.0001)
     }
 
-    @Test func aPerPersonTargetGrowsWithTheHousehold() {
-        // "Read 12 EACH" across four people is a ring of 48, matching the goals list.
-        let g = goal(type: "amount", total: 0, target: 12, targetBasis: "per_person", participants: 4)
-        #expect(GoalDisplay.target(g) == 48)
+    @Test func perPersonTargetIsThePerPersonNumberTimesTheMembers() {
+        // "read 12 books EACH", 2 people, both read 12 → 24 of 24, not 24 of 12.
+        // Mirrors goals-display.test.ts's per_person case.
+        let g = goal(goalType: "count", target: 12, totalProgress: 24, targetBasis: "per_person", people: 2)
+        #expect(GoalDisplay.target(g) == 24)
+        #expect(GoalDisplay.progress(g) == 24)
+        #expect(GoalDisplay.fraction(g) == 1) // full, not overflowing past 100%
     }
 
-    @Test func aPerPersonTargetNeverDividesByZeroPeople() {
-        let g = goal(type: "amount", target: 12, targetBasis: "per_person", participants: 0)
+    @Test func perPersonWithNoMembersYetKeepsTheFlatTarget() {
+        let g = goal(goalType: "count", target: 12, totalProgress: 0, targetBasis: "per_person", people: 0)
         #expect(GoalDisplay.target(g) == 12)
     }
 
-    @Test func fractionIsClampedSoOvershootDoesNotOverflowARing() {
-        let g = goal(type: "habit", habitTarget: 5, periodDone: 9)
-        #expect(GoalDisplay.fraction(g) == 1)
+    @Test func familyBasisTargetIsTheFlatNumber() {
+        let g = goal(goalType: "total", target: 1000, totalProgress: 312, targetBasis: "family", people: 4)
+        #expect(GoalDisplay.target(g) == 1000)
     }
 
-    // MARK: - the GoalDetail overload
-    //
-    // There are two goal DTOs and one axis rule. The overloads are three-line
-    // delegations, which is exactly the shape where a swapped argument (periodDone for
-    // stepDone) compiles fine and shows the wrong number forever — so they get their own
-    // tests, decoded from bytes rather than hand-built.
+    @Test func fractionClampsAtFullAndSurvivesAMissingTarget() {
+        #expect(GoalDisplay.fraction(goal(goalType: "count", target: 10, totalProgress: 25)) == 1)
+        #expect(GoalDisplay.fraction(goal(goalType: "count", target: nil, totalProgress: 25)) == 0)
+        #expect(GoalDisplay.fraction(goal(goalType: "count", target: 0, totalProgress: 25)) == 0)
+    }
 
-    private func detailJSON(type: String, total: Double, habitTarget: Int?,
-                            periodDone: Double?, stepDone: Double?, stepTotal: Double?) -> Data {
-        func num(_ d: Double?) -> String { d.map { "\($0)" } ?? "null" }
+    // MARK: milestones — the axis the SERVER used to decide `reached`
+
+    @Test func habitMilestonesAreMeasuredInStreakDays() {
+        // A habit's milestones are streak days server-side ("🔥 7 days"), so a lifetime
+        // log count would mark them reached far too early — and 99 logs would claim a
+        // 7-day milestone was long past when the streak is only 3.
+        let g = goal(goalType: "habit", target: 5, totalProgress: 99,
+                     habitPeriod: "week", habitTargetPerPeriod: 5, periodDone: 2, streakDays: 3)
+        #expect(GoalDisplay.milestoneAxis(g) == 3)
+        #expect(GoalDisplay.milestoneToGo(g, threshold: 7, fmt: goalFmt) == "4-day streak to go")
+    }
+
+    @Test func checklistMilestonesAreMeasuredInPercentComplete() {
+        let g = goal(goalType: "checklist", totalProgress: 3, stepTotal: 5, stepDone: 3)
+        #expect(GoalDisplay.milestoneAxis(g) == 60)
+        #expect(GoalDisplay.milestoneToGo(g, threshold: 75, fmt: goalFmt) == "15% to go")
+    }
+
+    @Test func emptyChecklistIsZeroPercentNotADivideByZero() {
+        let g = goal(goalType: "checklist", stepTotal: 0, stepDone: 0)
+        #expect(GoalDisplay.milestoneAxis(g) == 0)
+    }
+
+    @Test func numericMilestonesStayOnTheCumulativeTotal() {
+        let g = goal(goalType: "total", target: 1000, totalProgress: 312)
+        #expect(GoalDisplay.milestoneAxis(g) == 312)
+        #expect(GoalDisplay.milestoneToGo(g, threshold: 500, fmt: goalFmt) == "188 to go")
+    }
+
+    @Test func aPassedMilestoneNeverReadsNegative() {
+        let g = goal(goalType: "total", target: 1000, totalProgress: 900)
+        #expect(GoalDisplay.milestoneToGo(g, threshold: 500, fmt: goalFmt) == "0 to go")
+    }
+
+    // MARK: "already done today" — a habit is once per day PER PERSON
+
+    @Test func aHabitIsDoneTodayWhenEveryonePickedHasAlreadyLogged() {
+        let g = goal(goalType: "habit", habitTargetPerPeriod: 5, periodDone: 1, loggedTodayBy: ["p0"])
+        #expect(GoalDisplay.doneToday(g, who: ["p0"]))
+    }
+
+    @Test func aHabitIsNotDoneTodayWhileSomeonePickedStillOwesToday() {
+        // Two people picked, only one has logged — the other's completion is still live,
+        // and the server will write it (it dedupes per person, not per goal).
+        let g = goal(goalType: "habit", habitTargetPerPeriod: 5, periodDone: 1, loggedTodayBy: ["p0"])
+        #expect(!GoalDisplay.doneToday(g, who: ["p0", "p1"]))
+    }
+
+    @Test func aFamilyLogCountsUnderItsOwnSentinel() {
+        // A no-person (shared) log comes back as "__family__", not a person id.
+        let g = goal(goalType: "habit", habitTargetPerPeriod: 5, periodDone: 1,
+                     loggedTodayBy: ["__family__"])
+        #expect(GoalDisplay.doneToday(g, who: ["__family__"]))
+        #expect(!GoalDisplay.doneToday(g, who: ["p0"]))
+    }
+
+    @Test func nothingIsBlockedWithNobodyPickedOrOnANonHabit() {
+        let habit = goal(goalType: "habit", habitTargetPerPeriod: 5, loggedTodayBy: ["p0"])
+        #expect(!GoalDisplay.doneToday(habit, who: []))
+        // Only habits are once-a-day; a count goal can be logged all day long.
+        let count = goal(goalType: "count", target: 20, loggedTodayBy: ["p0"])
+        #expect(!GoalDisplay.doneToday(count, who: ["p0"]))
+    }
+
+    @Test func anOlderResponseWithoutLoggedTodayByBlocksNothing() {
+        // Missing the field must not gate the button shut — the server still dedupes.
+        let g = goal(goalType: "habit", habitTargetPerPeriod: 5, loggedTodayBy: nil)
+        #expect(!GoalDisplay.doneToday(g, who: ["p0"]))
+    }
+
+    // MARK: decoding — the new fields must be optional
+
+    @Test func decodesAGoalPayloadCarryingTheNewFields() throws {
         let json = """
-        {"id":"g1","goalListId":null,"title":"T","emoji":null,"category":null,
-         "goalType":"\(type)","unit":null,"target":null,"trackingMode":"shared",
-         "participantMode":null,"targetBasis":null,"habitPeriod":null,
-         "habitTargetPerPeriod":\(habitTarget.map { "\($0)" } ?? "null"),
-         "isFeatured":false,"isSpotlight":null,"hasRewards":false,
-         "totalProgress":\(total),"periodDone":\(num(periodDone)),
-         "stepDone":\(num(stepDone)),"stepTotal":\(num(stepTotal)),
-         "streakDays":0,"deadline":null,"createdAt":"2026-01-01T00:00:00.000Z",
-         "thisWeek":0,"autoFromCalendar":false,"healthMetric":null,"healthDailyTarget":null,
-         "participants":[],"milestones":[],"steps":[],"recent":[]}
+        {"id":"g1","goalListId":null,"title":"Move","emoji":null,"category":null,
+         "goalType":"habit","unit":null,"habitPeriod":"week","habitTargetPerPeriod":5,
+         "trackingMode":"shared_total","participantMode":"count_once","targetBasis":"family",
+         "deadline":null,"isFeatured":false,"isSpotlight":false,"target":5,"totalProgress":9,
+         "milestoneTotal":0,"milestoneReached":0,"periodDone":2,"stepTotal":0,"stepDone":0,
+         "streakDays":3,"autoFromCalendar":false,"healthMetric":null,"createdAt":null,
+         "participants":[]}
         """
-        return Data(json.utf8)
+        let g = try JSONDecoder().decode(WaffledAPI.Goal.self, from: Data(json.utf8))
+        #expect(g.periodDone == 2)
+        #expect(GoalDisplay.progress(g) == 2)
     }
 
-    @Test func aHabitsDETAILScreenAlsoReadsThisPeriodsCount() {
-        let d = try! WaffledAPI.decoder.decode(
-            WaffledAPI.GoalDetail.self,
-            from: detailJSON(type: "habit", total: 340, habitTarget: 5,
-                             periodDone: 2, stepDone: 99, stepTotal: 99))
-        // 2, not 340 — and not 99, which is what a swapped argument would produce.
-        #expect(GoalDisplay.progress(d) == 2)
-        #expect(GoalDisplay.target(d) == 5)
-        #expect(GoalDisplay.fraction(d) == 0.4)
-    }
-
-    @Test func aChecklistsDETAILScreenIsMeasuredInSteps() {
-        let d = try! WaffledAPI.decoder.decode(
-            WaffledAPI.GoalDetail.self,
-            from: detailJSON(type: "checklist", total: 99, habitTarget: nil,
-                             periodDone: 77, stepDone: 3, stepTotal: 4))
-        // 3 of 4 — 77 is `periodDone`, which the checklist arm must not reach for.
-        #expect(GoalDisplay.progress(d) == 3)
-        #expect(GoalDisplay.target(d) == 4)
-    }
-
-    @Test func aDetailResponseMissingTheAxisFieldsStillDecodes() {
-        // The fields are optional on purpose: an older/cached response must not fail to
-        // decode, which on this app surfaces as a bogus "couldn't reach server".
+    @Test func anOverviewHabitCarriesItsPeriodCountIntoTheGoalItPushes() throws {
+        // The overview measures each goal on its own axis, so `progress` here IS the
+        // period count. Tapping the row pushes a goal detail; its hero must open on the
+        // same number the row showed, not a blank ring.
         let json = """
-        {"id":"g1","goalListId":null,"title":"T","emoji":null,"category":null,
-         "goalType":"amount","unit":null,"target":20,"trackingMode":"shared",
-         "participantMode":null,"targetBasis":null,"habitPeriod":null,
-         "habitTargetPerPeriod":null,"isFeatured":false,"isSpotlight":null,
-         "hasRewards":false,"totalProgress":12,"streakDays":0,"deadline":null,
-         "createdAt":"2026-01-01T00:00:00.000Z","thisWeek":0,"autoFromCalendar":false,
-         "healthMetric":null,"healthDailyTarget":null,
-         "participants":[],"milestones":[],"steps":[],"recent":[]}
+        {"id":"g1","title":"Move","emoji":null,"category":null,"unit":null,
+         "goalType":"habit","progress":2,"target":5,"pct":40,"streakDays":3,
+         "periodDone":2,"habitPeriod":"week","habitTargetPerPeriod":5}
         """
-        let d = try! WaffledAPI.decoder.decode(WaffledAPI.GoalDetail.self, from: Data(json.utf8))
-        #expect(d.periodDone == nil)
-        #expect(GoalDisplay.progress(d) == 12)
+        let row = try JSONDecoder().decode(WaffledAPI.PersonOverview.Goal.self, from: Data(json.utf8))
+        #expect(GoalDisplay.progress(row.asGoal) == 2)
+        #expect(GoalDisplay.target(row.asGoal) == 5)
     }
 
-    @Test func amountsAreFormattedRatherThanInterpolatedRaw() {
-        // 1h5m logged in hours is 1.0833… — a raw interpolation prints the repeater.
-        #expect(GoalDisplay.number(1.0 + 5.0 / 60.0) == "1.08")
-        #expect(GoalDisplay.number(1.5) == "1.5")
-        #expect(GoalDisplay.number(1000) == "1,000")
-        #expect(GoalDisplay.number(nil) == "—")
+    @Test func anOverviewHabitFromAnOlderServerDoesNotPassOffALifetimeTotal() throws {
+        // No `periodDone` means an older server, where `progress` was the LIFETIME count.
+        // Carrying it over would put the original bug back on the pushed detail ("99 of 5
+        // this week"), so the period axis stays unknown here.
+        let json = """
+        {"id":"g1","title":"Move","emoji":null,"category":null,"unit":null,
+         "goalType":"habit","progress":99,"target":5,"pct":100,"streakDays":3}
+        """
+        let row = try JSONDecoder().decode(WaffledAPI.PersonOverview.Goal.self, from: Data(json.utf8))
+        #expect(row.asGoal.periodDone == nil)
+        #expect(GoalDisplay.progress(row.asGoal) == 0)
+    }
+
+    @Test func decodesAnOlderGoalPayloadWithoutTheNewFields() throws {
+        // A response from an older server (or a cached one) must still decode — a strict
+        // Decodable failure surfaces to the user as a bogus "couldn't reach server".
+        let json = """
+        {"id":"g1","goalListId":null,"title":"Move","emoji":null,"category":null,
+         "goalType":"habit","unit":null,"habitPeriod":"week","habitTargetPerPeriod":5,
+         "trackingMode":"shared_total","participantMode":"count_once","targetBasis":"family",
+         "deadline":null,"isFeatured":false,"isSpotlight":false,"target":5,"totalProgress":9,
+         "milestoneTotal":0,"milestoneReached":0,
+         "streakDays":3,"autoFromCalendar":false,"healthMetric":null,"createdAt":null,
+         "participants":[]}
+        """
+        let g = try JSONDecoder().decode(WaffledAPI.Goal.self, from: Data(json.utf8))
+        #expect(g.periodDone == nil)
+        #expect(g.stepTotal == nil)
     }
 }
