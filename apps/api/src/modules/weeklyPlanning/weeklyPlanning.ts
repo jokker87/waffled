@@ -68,6 +68,16 @@ export interface WeeklyPlanningConfig {
   steps: Record<string, boolean>
   // Show the "Sunday's session" prompt on Today (independent of the module toggle).
   showOnToday: boolean
+  // WHICH LISTS STEP 1 IS EVEN ABOUT, keyed by list id. Absent ⇒ relevant, the same
+  // sparse opt-out shape as `steps` above, and for the same reason: a household that
+  // never opens the setting must see exactly what it saw before.
+  //
+  // Only LISTS get this. An overdue chore and a late rhythm are late by definition and a
+  // habit is short or it isn't — but an unchecked row on a long-lived list ("Someday",
+  // "Home projects") is that list working as intended, and it came back every week:
+  // "I have lists on there that are more longer-lived and I don't want the same items to
+  // keep coming up every time."
+  lists: Record<string, boolean>
 }
 
 const DEFAULT_CONFIG: WeeklyPlanningConfig = {
@@ -75,6 +85,7 @@ const DEFAULT_CONFIG: WeeklyPlanningConfig = {
   time: '17:00',
   steps: {},
   showOnToday: true,
+  lists: {},
 }
 
 const clampDow = (n: number) => ((Math.trunc(n) % 7) + 7) % 7
@@ -89,11 +100,20 @@ export async function getConfig(householdId: string): Promise<WeeklyPlanningConf
   if (c.steps && typeof c.steps === 'object') {
     for (const [k, v] of Object.entries(c.steps)) if (isStepKey(k) && typeof v === 'boolean') steps[k] = v
   }
+  // A list key cannot be validated against a catalog the way a step key can — it is a
+  // row id — so the guard is only that it LOOKS like one and carries a boolean. A key for
+  // a list that has since been deleted is harmless (nothing reads it, and the read joins
+  // `lists` anyway), so it is left alone rather than pruned on every read.
+  const lists: Record<string, boolean> = {}
+  if (c.lists && typeof c.lists === 'object') {
+    for (const [k, v] of Object.entries(c.lists)) if (k && typeof v === 'boolean') lists[k] = v
+  }
   return {
     dayOfWeek: typeof c.dayOfWeek === 'number' ? clampDow(c.dayOfWeek) : DEFAULT_CONFIG.dayOfWeek,
     time: typeof c.time === 'string' && /^\d{2}:\d{2}$/.test(c.time) ? c.time : DEFAULT_CONFIG.time,
     steps,
     showOnToday: typeof c.showOnToday === 'boolean' ? c.showOnToday : DEFAULT_CONFIG.showOnToday,
+    lists,
   }
 }
 

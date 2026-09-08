@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState, type FormEvent } from '
 import { useSearchParams } from 'react-router'
 import { useSyncHealth, type SyncHealthStatus } from '../lib/powersync/sync-health'
 import { restartPowerSyncHard } from '../lib/powersync/db'
-import { personsApi, permissionsApi, healthApi, updatesApi, type UpdateInfo, accountApi, type AccountInfo, apiKeysApi, captureApi, calendarsApi, mealsApi, currenciesApi, conversionsApi, rewardsApi, choresApi, goalCalendarApi, groceryApi, authApi, kioskApi, usePantry, pantryApi, useCountdowns, countdownsApi, DEFAULT_BIRTHDAY_HORIZON_DAYS, useFamilyNight, familyNightApi, weekdayName, type FamilyNightPart, useWeeklyPlanning, weeklyPlanningApi, planningDayName, ALLERGEN_LABELS, ALLERGEN_KEYS, isDisplayMode, setDisplayMode, isKioskMode, usePersons, useCurrencies, useConversions, useHousehold, useHouseholdSettings, useWeather, useEventsToday, usePhotos, emitHouseholdChanged, CAPABILITIES, CAPABILITY_LABELS, ROLE_LABELS, type SettingsMember, type CaptureConfig, type Provider, type CalendarStatus, type CalendarLink, type IcsFeed, type MealCalendarSettings, type Currency, type MemoryGroup, type PantryStaple, type OidcConfig, type OidcConfigPatch, type KioskDevice, type DisplayConfig, type StoredProof, type PermissionMatrix, type Role, type Capability, type HealthReport, type HealthStatus, type ApiKey, type ApiScopeDef } from '../lib/api'
+import { personsApi, permissionsApi, healthApi, updatesApi, type UpdateInfo, accountApi, type AccountInfo, apiKeysApi, captureApi, calendarsApi, mealsApi, currenciesApi, conversionsApi, rewardsApi, choresApi, goalCalendarApi, groceryApi, authApi, kioskApi, usePantry, pantryApi, useCountdowns, countdownsApi, DEFAULT_BIRTHDAY_HORIZON_DAYS, useFamilyNight, familyNightApi, weekdayName, type FamilyNightPart, useWeeklyPlanning, weeklyPlanningApi, planningDayName, ALLERGEN_LABELS, ALLERGEN_KEYS, isDisplayMode, setDisplayMode, isKioskMode, usePersons, useCurrencies, useConversions, useHousehold, useHouseholdSettings, useWeather, useEventsToday, usePhotos, emitHouseholdChanged, CAPABILITIES, CAPABILITY_LABELS, ROLE_LABELS, type SettingsMember, type CaptureConfig, type Provider, type CalendarStatus, type CalendarLink, type IcsFeed, type MealCalendarSettings, type Currency, type MemoryGroup, type PantryStaple, type OidcConfig, type OidcConfigPatch, type KioskDevice, type DisplayConfig, type StoredProof, type PermissionMatrix, type Role, type Capability, type HealthReport, type HealthStatus, type ApiKey, type ApiScopeDef, type PlanningListCandidate } from '../lib/api'
 import { MODULES, moduleEnabled } from '../lib/modules'
 import { useThemePref } from '../lib/theme'
 import { eventStyle } from '../lib/display'
@@ -2653,6 +2653,21 @@ function FamilyNightSettings() {
 function WeeklyPlanningSettings() {
   const { view, loading } = useWeeklyPlanning()
   const [saving, setSaving] = useState(false)
+  // The lists step 1 could ask about. Fetched from /config rather than taken off the
+  // session view: which lists are even candidates is step 1's rule (the `custom`
+  // allowlist), and the server resolving it here is what keeps this panel from offering
+  // a switch for the grocery list — which could never have been asked about anyway.
+  //
+  // Only the NAMES are used from this; how each one stands comes from `config.lists`
+  // below, which refetches on save, so the switches cannot go stale.
+  const [candidates, setCandidates] = useState<PlanningListCandidate[]>([])
+  useEffect(() => {
+    let alive = true
+    weeklyPlanningApi.getConfig()
+      .then((r) => { if (alive) setCandidates(r.lists ?? []) })
+      .catch(() => { /* the rest of the panel is unaffected */ })
+    return () => { alive = false }
+  }, [])
   if (loading || !view) return null
   const config = view.config
 
@@ -2706,6 +2721,37 @@ function WeeklyPlanningSettings() {
         <div className="set-module-desc" style={{ marginTop: 8 }}>
           Not in the session because the module it reads is off: {offForModule.map((s) => s.title).join(', ')}.
         </div>
+      )}
+
+      {/* WHICH LISTS THE FIRST STEP IS ABOUT.
+          Only lists get this choice. An overdue chore and a late rhythm are late by
+          definition, and a habit is short or it isn't — but an unchecked row on a
+          long-lived list is that list working as intended, and it came back every week:
+          "I have lists on there that are more longer-lived and I don't want the same
+          items to keep coming up every time."
+          Absent from the map ⇒ relevant, hence `!== false`: a household that never opens
+          this sees exactly what it saw before. */}
+      {candidates.length > 0 && (
+        <>
+          <div className="set-row2-t" style={{ marginTop: 6, marginBottom: 4 }}>Lists it asks about</div>
+          <div className="set-module-desc" style={{ marginBottom: 8 }}>
+            The first step asks about anything still unchecked from before this week. Turn off a
+            list that is meant to stay open — a someday list, a wishlist — and it stops coming up
+            every session. Your grocery list is never asked about: it rebuilds itself from the
+            meal plan.
+          </div>
+          {candidates.map((l) => (
+            <div key={l.id} className="set-module-setrow">
+              <span>{[l.emoji, l.name].filter(Boolean).join(' ')}</span>
+              <Switch
+                checked={config.lists?.[l.id] !== false}
+                disabled={saving}
+                onChange={(v) => save({ lists: { [l.id]: v } })}
+                ariaLabel={`Ask about ${l.name} in the weekly planning session`}
+              />
+            </div>
+          ))}
+        </>
       )}
     </div>
   )

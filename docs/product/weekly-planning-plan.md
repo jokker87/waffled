@@ -317,6 +317,76 @@ happened to end in Done" — leave the step and come back and it reads 0. A prov
 cannot fail that way. The crumbs recap *does* read are the ones that ARE the decision and have
 no module row: the goals focus map and the kids' answers.
 
+### The finished week is read back, and the tick-list is the second reading
+
+The saved record started as ten green ticks against ten step names. That says the session
+finished and nothing whatever about the week it decided — reported as "the web recap page
+shows just the checklist. On the iPhone recap page we had a better experience where we
+showed the actual week decisions."
+
+Nothing new had to be built: the rich read-back was already step 10's, on both clients (the
+iOS one was ported from the web's). What was missing was the SHELL rendering it on a
+finished session, and `RecapStep.tsx` had already recorded the gap and declined to close
+it — "what the shell's version lacks … is a shell change, raised rather than made."
+
+Two things had to be decided to close it:
+
+- **A row on the record cannot link to its step.** The shell force-drops the step from the
+  path the moment a session completes ("Saved: the record is the surface"), so
+  `/planning/<step>` would bounce straight back to the record it was clicked on. That
+  correction is the one piece of the screen carrying a scar — "two routing updates racing
+  in one tick is exactly how the URL ended up back on a step the session had just left" —
+  and an affordance is not worth an exception in it. So a record row goes to the **module**
+  the decision lives in, which is what the recap's own footnote has always promised. The
+  map is deliberately partial: loose ends spans chores, lists and rhythms; family night and
+  the kids' step write events plus their own state; those rows stay plain, because a row
+  that looks tappable and isn't is worse than a plain one.
+- **The tense is the payload's business, not the screen's.** "What tonight changed" is the
+  wrong night for a week saved on Sunday and opened on Thursday, and three sentences
+  promised what *saving* would do after it already had. The switch is `savedAt`, the field
+  the server already ships "so any surface reading the record can date it" — not a flag
+  each screen passes down, which would be a second opinion about something the week
+  already knows and could drift between clients.
+
+The per-step list stays, underneath, because it is the only place that records which steps
+were skipped **on purpose** — an outcome, not a gap.
+
+### Which lists step 1 asks about is the household's call
+
+Step 1 reads four sources, and only one of them needed a switch:
+
+> "I have lists on there that are more longer-lived and I don't want the same items to keep
+> coming up every time. So I'd rather choose what lists are relevant versus not. Chores and
+> rhythms always seem applicable if they're not done, but lists maybe not so much."
+
+That asymmetry is real and worth stating: **an overdue chore and a late rhythm are late by
+definition, and a habit is short or it isn't — but an unchecked row on a long-lived list is
+that list working exactly as intended.** So the choice is per LIST, and the other three
+sources deliberately don't get one.
+
+- **`config.lists`, an opt-out map keyed by list id — absent means relevant.** The same
+  sparse shape as `config.steps`, in the same object, for the same reason: a household
+  that never opens the setting sees precisely what it saw before, and the switch silences
+  the specific offenders instead of asking everyone to re-declare what they already had.
+  No migration — it is household settings jsonb.
+- **The PUT merges, because `settings` is merged with jsonb `||`, which is SHALLOW.** A
+  bare patch would replace the whole `lists` object and quietly rule every other list back
+  in. `steps` already carries this warning; `lists` now shares it.
+- **The candidates come from the server, on `GET /config`.** Which lists are even askable
+  is step 1's own rule (`list_type = 'custom'` — grocery rebuilds itself from the meal plan
+  and a template is unchecked by design), so serving the candidate rows means neither
+  client re-derives that rule against the lists module, and neither can offer a switch for
+  a list that could never have been asked about.
+- **The "we checked chores, lists, rhythms and goals" line had to stop lying.** Rule every
+  list out and it kept claiming lists were checked. Having *no* custom lists is not the
+  same case — that sentence is vacuous rather than false, and it is what the line has
+  always said — so only a household that used the setting loses the word.
+
+The switches live in Settings → Modules → Weekly Planning on both clients, beside the
+per-step ones. Deliberately not in the step itself: `PUT /config` is admin-only like every
+other module config, so an in-session affordance would 403 for whoever happened to be
+driving.
+
 ### The parked-note handoff belongs to the shell
 
 `planning_parked_items.step_key` names a DESTINATION — "which step is going to look at

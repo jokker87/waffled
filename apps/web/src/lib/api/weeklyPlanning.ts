@@ -55,6 +55,25 @@ export interface WeeklyPlanningConfig {
   time: string
   steps: Record<string, boolean>
   showOnToday: boolean
+  /**
+   * Which lists step 1 is even about, keyed by list id. ABSENT MEANS RELEVANT — a sparse
+   * opt-out map like `steps`, so read it as `lists[id] !== false` and never as `lists[id]`.
+   * A patch is merged server-side, so send only what changed.
+   */
+  lists: Record<string, boolean>
+}
+
+/**
+ * A list the loose-ends step could ask about — the `list_type = 'custom'` allowlist,
+ * resolved server-side. Grocery (it rebuilds itself from the meal plan) and templates
+ * (unchecked by design) are not candidates and never appear here, so a client rendering
+ * these as switches cannot offer one that does nothing.
+ */
+export interface PlanningListCandidate {
+  id: string
+  name: string
+  emoji: string | null
+  relevant: boolean
 }
 
 export interface WeeklyPlanningView {
@@ -72,7 +91,10 @@ export interface WeeklyPlanningView {
 export const weeklyPlanningApi = {
   get: (weekStart?: string) =>
     apiGet<WeeklyPlanningView>(`/api/weekly-planning${weekStart ? `?weekStart=${encodeURIComponent(weekStart)}` : ''}`),
-  getConfig: () => apiGet<{ config: WeeklyPlanningConfig; steps: PlanningStep[] }>('/api/weekly-planning/config'),
+  getConfig: () =>
+    apiGet<{ config: WeeklyPlanningConfig; steps: PlanningStep[]; lists: PlanningListCandidate[] }>(
+      '/api/weekly-planning/config'
+    ),
   setConfig: (patch: Partial<WeeklyPlanningConfig>) =>
     apiSend<{ config: WeeklyPlanningConfig }>('PUT', '/api/weekly-planning/config', patch).then((r) => { emit('weeklyPlanning'); return r }),
   startSession: (weekStart?: string) =>

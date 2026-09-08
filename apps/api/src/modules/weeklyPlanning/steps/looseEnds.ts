@@ -38,7 +38,7 @@
 import { query } from '../../../platform/db'
 import { moduleEnabled, type ModuleKey } from '../../../platform/modules'
 import type { Tenant } from '../../households/households'
-import { earliestWeekStart, isStepKey, resolveSteps, STEPS, getSessionById } from '../weeklyPlanning'
+import { earliestWeekStart, isStepKey, resolveSteps, STEPS, getSessionById, getConfig } from '../weeklyPlanning'
 import { completeInstance, ProofRequiredError } from '../../chores/chores.service'
 import { setItemChecked, softDeleteItem } from '../../lists/lists.service'
 import { listAttention, completeRhythm, skipPeriod } from '../../rhythms/rhythms'
@@ -253,7 +253,35 @@ async function overdueChores(householdId: string, today: string): Promise<LooseE
 // the read floods with every unchecked row in the household. Anchored at the current
 // week, "typed this week" is the week you are living in and "still unchecked from
 // before it" is exactly what the step's question asks about.
-async function staleListItems(householdId: string, currentWeek: string, plannedWeek: string): Promise<LooseEnd[]> {
+// The lists this step COULD ask about: the same `list_type = 'custom'` allowlist the read
+// below applies, lifted out so the setting that rules them in and out is offered over
+// exactly the same set. A switch for the grocery list would be a switch that does
+// nothing, because grocery could never have been asked about in the first place.
+export interface PlanningListCandidate {
+  id: string
+  name: string
+  emoji: string | null
+  // How it currently stands: false only when the household has ruled it out.
+  relevant: boolean
+}
+
+export async function planningListCandidates(householdId: string): Promise<PlanningListCandidate[]> {
+  const [{ rows }, config] = await Promise.all([
+    query<{ id: string; name: string; emoji: string | null }>(
+      `select id, name, emoji
+         from lists
+        where household_id = $1 and deleted_at is null and list_type = 'custom'
+        order by lower(name)`,
+      [householdId]
+    ),
+    getConfig(householdId),
+  ])
+  return rows.map((r) => ({ ...r, relevant: config.lists[r.id] !== false }))
+}
+
+async function staleListItems(
+  householdId: string, currentWeek: string, plannedWeek: string, listIds: string[]
+): Promise<LooseEnd[]> {
   const { rows } = await query<{
     id: string
     name: string
@@ -269,6 +297,10 @@ async function staleListItems(householdId: string, currentWeek: string, plannedW
         and li.deleted_at is null
         -- The allowlist. Grocery rebuilds itself; a template is unchecked by design.
         and l.list_type = 'custom'
+        -- …and of those, only the lists this household wants asked about. Never called
+        -- with an empty array: the caller skips the read instead, because matching
+        -- against an empty array is an expensive way to select nothing.
+        and l.id = any($4::uuid[])
         and li.checked = false
         -- 'suggested' rows are a proposal nobody has accepted; they are not open work.
         and li.status = 'active'
@@ -281,7 +313,7 @@ async function staleListItems(householdId: string, currentWeek: string, plannedW
         and (li.week_start is null or li.week_start < $3::date)
       order by li.created_at
       limit ${PER_SOURCE_LIMIT}`,
-    [householdId, currentWeek, plannedWeek]
+    [householdId, currentWeek, plannedWeek, listIds]
   )
   return rows.map((r) => ({
     key: `list:${r.id}`,
@@ -771,9 +803,18 @@ export async function getLooseEnds(householdId: string, weekStart: string, sessi
     earliestWeekStart(householdId),
     availableDestinations(householdId),
   ])
+  // Which lists count is a second gate BEHIND the module toggle: the module being on says
+  // the household keeps lists, and this says which of them this step is about. Only asked
+  // when the module is on, so a household with lists off pays nothing for the setting.
+  //
+  // The CANDIDATES and the ASKABLE ones are kept apart because the sources line below
+  // needs to tell "this household has no custom lists yet" from "this household ruled
+  // them all out" — the first is vacuous, the second is the setting being used.
+  const listCandidates = enabled(settings, 'lists') ? await planningListCandidates(householdId) : []
+  const askableLists = listCandidates.filter((l) => l.relevant).map((l) => l.id)
   const [chores, lists, rhythms, goals, parked, routes] = await Promise.all([
     enabled(settings, 'chores') ? overdueChores(householdId, today) : Promise.resolve([]),
-    enabled(settings, 'lists') ? staleListItems(householdId, currentWeek, weekStart) : Promise.resolve([]),
+    askableLists.length ? staleListItems(householdId, currentWeek, weekStart, askableLists) : Promise.resolve([]),
     enabled(settings, 'rhythms') ? rhythmsPastDue(householdId, today) : Promise.resolve([]),
     enabled(settings, 'goals') ? shortHabits(householdId) : Promise.resolve([]),
     listParked(householdId),
@@ -790,7 +831,18 @@ export async function getLooseEnds(householdId: string, weekStart: string, sessi
     counts: { notDone: notDone.length, parked: parked.length },
     destinations,
     routes,
-    sources: SOURCE_LABELS.filter(([k]) => enabled(settings, k)).map(([, label]) => label),
+    // "We checked chores, lists, rhythms and goals" — the cleared state's own sentence,
+    // and it has to be true. A household that ruled every one of its lists out was not
+    // asking about lists, so claiming they were checked would be telling the user
+    // something untrue to keep a sentence tidy.
+    //
+    // Having NO custom lists is not that case: the sentence is vacuous rather than false,
+    // and it is what this line has always said. Only a household that used the setting
+    // loses the word.
+    sources: SOURCE_LABELS
+      .filter(([k]) => enabled(settings, k)
+        && (k !== 'lists' || listCandidates.length === 0 || askableLists.length > 0))
+      .map(([, label]) => label),
   }
 }
 

@@ -234,6 +234,57 @@ describe('Settings screen', () => {
     await waitFor(() => expect(puts.some((p) => p.birthdayHorizonDays === 92)).toBe(true))
   })
 
+  // "I'd rather choose what lists are relevant versus not." The switches are per LIST,
+  // and which lists are even offered is the server's call — this panel renders what it is
+  // given rather than reaching into the lists module and re-deriving the allowlist.
+  it('lets an admin choose which lists the planning session asks about', async () => {
+    const puts: Array<Record<string, unknown>> = []
+    const config = { dayOfWeek: 0, time: '17:00', steps: {}, showOnToday: true, lists: {} as Record<string, boolean> }
+    const candidates = [
+      { id: 'l1', name: 'Repairs', emoji: '🔧', relevant: true },
+      { id: 'l2', name: 'Someday', emoji: '💭', relevant: true },
+    ]
+    const planningHousehold = { ...household, settings: { modules: { weeklyPlanning: true } } }
+    globalThis.fetch = vi.fn(async (url: string, init?: RequestInit) => {
+      const u = String(url)
+      if (u.includes('/api/weekly-planning/config')) {
+        if ((init?.method ?? 'GET') === 'PUT') {
+          const body = JSON.parse(String(init?.body)) as Record<string, unknown>
+          puts.push(body)
+          return { ok: true, json: async () => ({ config: { ...config, ...body } }) }
+        }
+        return { ok: true, json: async () => ({ config, steps: [], lists: candidates }) }
+      }
+      if (u.includes('/api/weekly-planning')) {
+        return {
+          ok: true,
+          json: async () => ({
+            config, weekStart: '2026-09-06', defaultWeekStart: '2026-09-06',
+            minWeekStart: '2026-08-30', session: null, steps: [],
+          }),
+        }
+      }
+      if (u.includes('/api/household/settings')) return { ok: true, json: async () => ({ household: planningHousehold, members }) }
+      if (u.includes('/api/household')) return { ok: true, json: async () => ({ provisioned: true, household: planningHousehold, person: members[0] }) }
+      if (u.includes('/api/persons')) return { ok: true, json: async () => ({ persons: [] }) }
+      return { ok: false, status: 404, json: async () => ({}) }
+    }) as unknown as typeof fetch
+
+    renderSettings()
+    await screen.findByText('Kevin')
+    fireEvent.click(screen.getByText('Modules'))
+
+    // A switch per list the step could ask about, named — with the list's own emoji, so
+    // the row reads like the list does everywhere else.
+    expect(await screen.findByText(/🔧 Repairs/)).toBeTruthy()
+    expect(screen.getByText(/💭 Someday/)).toBeTruthy()
+
+    // Ruling one out sends only that one — the map is sparse and the server merges it.
+    fireEvent.click(screen.getByLabelText('Ask about Someday in the weekly planning session'))
+    await waitFor(() => expect(puts.some((p) => (p.lists as Record<string, boolean>)?.l2 === false)).toBe(true))
+    expect(puts.every((p) => !('l1' in (p.lists as Record<string, boolean>)))).toBe(true)
+  })
+
   it('shows the System Health panel with component cards (admin)', async () => {
     const report = {
       status: 'degraded',

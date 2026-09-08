@@ -17,6 +17,7 @@ import {
   type WeeklyPlanningConfig,
 } from './weeklyPlanning'
 import { STEP_ROUTE_REGISTRARS } from './steps'
+import { planningListCandidates } from './steps/looseEnds'
 
 type Api = ReturnType<typeof createAPI>
 
@@ -36,8 +37,17 @@ export function registerWeeklyPlanningRoutes(api: Api): void {
   }))
 
   // Bare config — handy for settings, which doesn't need the session.
+  //
+  // `lists` is the CANDIDATES, not the stored map: the settings panel needs a switch per
+  // list with its name on it, and which lists are even askable is step 1's business (the
+  // `list_type = 'custom'` allowlist). Serving them here means neither client has to know
+  // that rule, or reach into the lists module to render the setting.
   api.get('/api/weekly-planning/config', tenantRoute(async (tenant) => {
-    return { config: await getConfig(tenant.householdId), steps: STEPS }
+    const [config, lists] = await Promise.all([
+      getConfig(tenant.householdId),
+      planningListCandidates(tenant.householdId),
+    ])
+    return { config, steps: STEPS, lists }
   }))
 
   // When the session happens, which steps this household runs. Admin-only, like the
@@ -56,6 +66,16 @@ export function registerWeeklyPlanningRoutes(api: Api): void {
       const next: Record<string, boolean> = { ...current }
       for (const [k, v] of Object.entries(body.steps)) if (isStepKey(k) && typeof v === 'boolean') next[k] = v
       patch.steps = next
+    }
+    if (body.lists && typeof body.lists === 'object') {
+      // Merge, for the same reason `steps` merges: this is a sparse opt-out map and a
+      // client ruling one list out must not silently rule the rest back in. `settings` is
+      // merged with jsonb `||`, which is SHALLOW — a bare patch would replace the whole
+      // object.
+      const current = (await getConfig(tenant.householdId)).lists
+      const next: Record<string, boolean> = { ...current }
+      for (const [k, v] of Object.entries(body.lists)) if (k && typeof v === 'boolean') next[k] = v
+      patch.lists = next
     }
     const config = await setConfig(tenant.householdId, patch)
     return { config }

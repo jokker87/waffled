@@ -93,6 +93,26 @@ extension WaffledAPI {
         /// is unavailable regardless of what is in here.
         let steps: [String: Bool]
         let showOnToday: Bool
+        /// Which lists step 1 is even about, keyed by list id — absent ⇒ relevant, the
+        /// same sparse opt-out shape as `steps`. Read it through `asksAbout(_:)` rather
+        /// than subscripting, so "nobody has ruled on this list" cannot be mistaken for
+        /// "ruled out". OPTIONAL because a server that predates the setting sends no key
+        /// at all, and a household running one must not fall silent.
+        let lists: [String: Bool]?
+
+        init(
+            dayOfWeek: Int, time: String, steps: [String: Bool], showOnToday: Bool,
+            lists: [String: Bool]? = nil
+        ) {
+            self.dayOfWeek = dayOfWeek
+            self.time = time
+            self.steps = steps
+            self.showOnToday = showOnToday
+            self.lists = lists
+        }
+
+        /// Whether the loose-ends step should ask about this list. Absent ⇒ yes.
+        func asksAbout(_ listId: String) -> Bool { lists?[listId] != false }
     }
 
     struct WeeklyPlanningView: Decodable, Sendable {

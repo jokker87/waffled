@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// Settings → Weekly Planning — when the session happens, and which of its steps this
-/// household runs. Mirrors the web `WeeklyPlanningSettings` panel.
+/// Settings → Weekly Planning — when the session happens, which of its steps this
+/// household runs, and which of its lists the first step is even about. Mirrors the web
+/// `WeeklyPlanningSettings` panel.
 ///
 /// **A step whose module is off is NOT shown as a choice**, because it isn't one. Turning
 /// chores back on is what brings the Tasks step back, and offering a toggle that cannot
@@ -40,6 +41,7 @@ struct PlanningSettingsView: View {
                     todayCard(config)
                     stepsCard(config)
                     unavailableNote(config)
+                    listsCard(config)
                 } else if model.loaded {
                     Text("Couldn’t load the planning settings.")
                         .font(.system(size: 14)).foregroundStyle(WF.ink3).padding(.vertical, 30)
@@ -52,7 +54,13 @@ struct PlanningSettingsView: View {
         }
         .background(WF.canvas)
         .navigationTitle("Weekly Planning").navigationBarTitleDisplayMode(.inline)
-        .task(id: sync.refreshRev) { await model.load() }
+        .task(id: sync.refreshRev) {
+            await model.load()
+            // A second read, for the list NAMES only — see `loadListCandidates`. After
+            // `load()`, so the panel draws as soon as the config lands rather than
+            // waiting on a card that may not even appear.
+            await model.loadListCandidates()
+        }
     }
 
     // MARK: - When
@@ -164,6 +172,52 @@ struct PlanningSettingsView: View {
                             .accessibilityLabel("Include \(step.title) in the session")
                     }
                     .padding(.horizontal, 11).padding(.vertical, 11)
+                }
+            }
+        }
+    }
+
+    // MARK: - Which lists the first step is about
+
+    /// Only LISTS get this choice, and the asymmetry is the point. An overdue chore and a
+    /// late rhythm are late by definition, and a habit is short or it isn't — but an
+    /// unchecked row on a long-lived list is that list working exactly as intended, and
+    /// it came back every single session: "I have lists on there that are more
+    /// longer-lived and I don't want the same items to keep coming up every time."
+    ///
+    /// Absent from the map ⇒ relevant (`config.asksAbout`), so a household that never
+    /// opens this screen sees precisely what it saw before.
+    ///
+    /// Hidden entirely when there is nothing to choose between — a household with no
+    /// custom lists gets no empty card.
+    @ViewBuilder private func listsCard(_ config: WaffledAPI.WeeklyPlanningConfig) -> some View {
+        if !model.listCandidates.isEmpty {
+            WaffledCard(padding: 4) {
+                VStack(spacing: 0) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Lists it asks about")
+                            .font(.system(size: 14, weight: .bold)).foregroundStyle(WF.ink)
+                        Text("The first step asks about anything still unchecked from before this week. Turn off a list that’s meant to stay open — a someday list, a wishlist — and it stops coming up every session. Your grocery list is never asked about: it rebuilds itself from the meal plan.")
+                            .font(.system(size: 12)).foregroundStyle(WF.ink3)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 11).padding(.top, 11).padding(.bottom, 6)
+
+                    ForEach(Array(model.listCandidates.enumerated()), id: \.element.id) { i, list in
+                        if i > 0 { Divider().background(WF.hair) }
+                        HStack(spacing: 11) {
+                            Text([list.emoji, list.name].compactMap { $0 }.joined(separator: " "))
+                                .font(.system(size: 15, weight: .semibold)).foregroundStyle(WF.ink)
+                            Spacer(minLength: 8)
+                            Toggle("", isOn: Binding(
+                                get: { config.asksAbout(list.id) },
+                                set: { on in Task { await model.saveConfig(lists: [list.id: on]) } }))
+                                .labelsHidden().tint(WF.primary).disabled(locked)
+                                .accessibilityLabel("Ask about \(list.name) in the weekly planning session")
+                        }
+                        .padding(.horizontal, 11).padding(.vertical, 11)
+                    }
                 }
             }
         }

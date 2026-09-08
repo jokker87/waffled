@@ -12,7 +12,7 @@
 //     the only group where Drop is a real answer.
 //   · A source module that is turned off contributes nothing, on the read AND on the
 //     write: planning must not be a hole that reaches into a disabled module.
-import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest'
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from './helpers/pg'
 import jwt from 'jsonwebtoken'
 import { runMigrations } from '../src/migrate'
@@ -503,6 +503,137 @@ describe('loose ends · which lists count', () => {
     // the rows may still be inside the number.
     expect(view.counts.notDone).toBe(view.notDone.length)
     expect(view.notDone.filter((i) => i.kind === 'list').map((i) => i.id)).toContain(customItemId)
+  })
+})
+
+// A household gets to say which of its lists this step is even about.
+//
+// "I have lists on there that are more longer-lived and I don't want the same items to
+// keep coming up every time. So I'd rather choose what lists are relevant versus not.
+// Chores and rhythms always seem applicable if they're not done, but lists maybe not so
+// much." Which is the difference between a list and the other three sources: an overdue
+// chore and a late rhythm are late BY DEFINITION, and a habit is short or it isn't — but
+// an unchecked row on "Someday" is the list working as intended. Only lists get this.
+//
+// OPT-OUT, not opt-in: absent means relevant, so a household that never opens the setting
+// sees exactly what it saw before, and the switch silences the specific offenders rather
+// than asking everyone to re-declare what they already had.
+describe('loose ends · which lists the household wants asked about', () => {
+  let keptId: string
+  let mutedId: string
+  let keptItemId: string
+  let mutedItemId: string
+
+  const config = async () => json(await call('GET', '/api/weekly-planning/config', kevin))
+  const setLists = (lists: Record<string, boolean>) =>
+    call('PUT', '/api/weekly-planning/config', kevin, { lists })
+
+  beforeAll(async () => {
+    const week = await currentWeekStart()
+    const mkList = async (name: string, type = 'custom') => {
+      const { rows } = await query(
+        `insert into lists (household_id, name, list_type) values ($1,$2,$3) returning id`,
+        [householdId, name, type]
+      )
+      return rows[0].id as string
+    }
+    const mkItem = async (listId: string, name: string) => {
+      const { rows } = await query(
+        `insert into list_items (household_id, list_id, name, source, created_at)
+         values ($1,$2,$3,'manual', $4::date - interval '9 days') returning id`,
+        [householdId, listId, name, week]
+      )
+      return rows[0].id as string
+    }
+    keptId = await mkList('Repairs')
+    keptItemId = await mkItem(keptId, 'Fix the gate latch')
+    mutedId = await mkList('Someday')
+    mutedItemId = await mkItem(mutedId, 'Learn the banjo')
+  })
+
+  // Every custom list in the household, ruled out — including the ones other suites in
+  // this file created, since "there are none left to check" means none at all.
+  const allCandidates = async () =>
+    ((await config()).lists as { id: string }[]).map((l) => l.id)
+  const setAll = async (relevant: boolean) => {
+    const ids = await allCandidates()
+    await setLists(Object.fromEntries(ids.map((id) => [id, relevant])))
+  }
+
+  // Every test here leaves the household exactly as it found it: this file's earlier
+  // suites assert on `sources` and on the full "not done" deck, and a stray mute would
+  // quietly rewrite what they see.
+  afterEach(async () => { await setAll(true) })
+
+  it('says nothing about a list nobody has ruled on — absent means relevant', async () => {
+    const ids = (await read()).notDone.map((i) => i.id)
+    expect(ids).toContain(keptItemId)
+    expect(ids).toContain(mutedItemId)
+  })
+
+  it('stops asking about a list that was ruled out, and leaves the others alone', async () => {
+    await setLists({ [mutedId]: false })
+    const view = await read()
+    const ids = view.notDone.map((i) => i.id)
+    expect(ids).not.toContain(mutedItemId)
+    expect(ids).toContain(keptItemId)
+    // The tally is what the switch and both see-all headers render, so nothing dropped
+    // from the rows may still be inside the number.
+    expect(view.counts.notDone).toBe(view.notDone.length)
+  })
+
+  it('asks again the moment the list is ruled back in', async () => {
+    await setLists({ [mutedId]: false })
+    expect((await read()).notDone.map((i) => i.id)).not.toContain(mutedItemId)
+    await setLists({ [mutedId]: true })
+    expect((await read()).notDone.map((i) => i.id)).toContain(mutedItemId)
+  })
+
+  it('merges the ruling rather than replacing it — one switch is not all of them', async () => {
+    await setLists({ [mutedId]: false })
+    await setLists({ [keptId]: false })
+    const c = (await config()).config
+    expect(c.lists[mutedId]).toBe(false)
+    expect(c.lists[keptId]).toBe(false)
+  })
+
+  // The cleared state says "we checked chores, lists, rhythms and goals". With every
+  // list ruled out that is not true, and this codebase does not tell the user something
+  // untrue to keep a sentence tidy.
+  it('stops claiming it checked the lists once there are none left to check', async () => {
+    expect((await read()).sources).toContain('lists')
+    await setAll(false)
+    const view = await read()
+    expect(view.sources).not.toContain('lists')
+    // The other three are unaffected — they were never part of this.
+    expect(view.sources).toEqual(['chores', 'rhythms', 'goals'])
+  })
+
+  it('offers the lists it could ask about, and no list it would never have asked about', async () => {
+    const c = await config()
+    const names = (c.lists as { id: string; name: string; relevant: boolean }[]).map((l) => l.name)
+    expect(names).toContain('Repairs')
+    expect(names).toContain('Someday')
+    // Grocery rebuilds itself and a template is unchecked by design — neither is a
+    // candidate, so neither may appear as a switch that pretends to do something.
+    expect(names).not.toContain('Grocery')
+    expect(names).not.toContain('Camping trip')
+  })
+
+  it('reports each list as it currently stands', async () => {
+    await setLists({ [mutedId]: false })
+    const rows = (await config()).lists as { id: string; relevant: boolean }[]
+    expect(rows.find((l) => l.id === mutedId)?.relevant).toBe(false)
+    expect(rows.find((l) => l.id === keptId)?.relevant).toBe(true)
+  })
+
+  // Both guards, on keys that belong to nothing — so a real list's own ruling cannot be
+  // what makes this pass.
+  it('ignores junk rather than storing it', async () => {
+    await call('PUT', '/api/weekly-planning/config', kevin, { lists: { 'ruled-by-nobody': 'nope', '': true } })
+    const c = (await config()).config
+    expect(c.lists['ruled-by-nobody']).toBeUndefined()
+    expect(Object.keys(c.lists)).not.toContain('')
   })
 })
 

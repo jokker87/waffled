@@ -17,9 +17,12 @@ import SwiftUI
 ///
 /// WHAT IT DELIBERATELY DOES NOT BUILD:
 ///
-///  · A SAVED FRAME. `PlanningShellView` already renders the finished record — the
-///    timestamp, the per-step read-back, "Reopen" and "Start this week over" — so a saved
-///    frame here would be duplicated and unreachable.
+///  · A SAVED FRAME. `PlanningShellView` owns the finished record — the timestamp, the
+///    per-step read-back, "Reopen" and "Start this week over" — so a saved frame here
+///    would be duplicated and unreachable. The shell renders THIS body above its own
+///    tick-list once a week is saved, so the reading is shared and the frame is not: what
+///    changes on a saved week is the TENSE, and that comes off the payload's `savedAt`
+///    (see `PlanningRecapText`), never a flag the shell passes down.
 ///  · A SECOND WAY TO ANSWER A NOTE. Dropping one is step 1's `/loose-ends/resolve`, the
 ///    writer that owns `planning_parked_items`.
 ///  · ITS OWN WRITE OF ANY KIND. Saving the week is the shell's affirmative.

@@ -59,9 +59,33 @@ extension WaffledAPI {
         var id: String { key }
     }
 
+    /// A list the loose-ends step COULD ask about — the `list_type = 'custom'` allowlist,
+    /// resolved server-side. The grocery list (it rebuilds itself from the meal plan) and
+    /// templates (unchecked by design) are not candidates and never appear here, so a
+    /// settings panel rendering these cannot offer a switch that does nothing.
+    struct PlanningListCandidate: Decodable, Identifiable, Hashable, Sendable {
+        let id: String
+        let name: String
+        let emoji: String?
+        /// How it currently stands — false only when the household ruled it out.
+        let relevant: Bool
+    }
+
     struct WeeklyPlanningConfigView: Decodable, Sendable {
         let config: WeeklyPlanningConfig
         let steps: [PlanningStepCatalogEntry]
+        /// Optional for the same reason `WeeklyPlanningConfig.lists` is: an older server
+        /// does not send it.
+        let lists: [PlanningListCandidate]?
+
+        init(
+            config: WeeklyPlanningConfig, steps: [PlanningStepCatalogEntry],
+            lists: [PlanningListCandidate]? = nil
+        ) {
+            self.config = config
+            self.steps = steps
+            self.lists = lists
+        }
     }
 
     /// Config plus the bare catalog — the session-free read. Cheaper than the full view
@@ -80,13 +104,16 @@ extension WaffledAPI {
         dayOfWeek: Int? = nil,
         time: String? = nil,
         showOnToday: Bool? = nil,
-        steps: [String: Bool]? = nil
+        steps: [String: Bool]? = nil,
+        lists: [String: Bool]? = nil
     ) async throws -> WeeklyPlanningConfig {
         var body: [String: JSONValue] = [:]
         if let dayOfWeek { body["dayOfWeek"] = .int(dayOfWeek) }
         if let time { body["time"] = .string(time) }
         if let showOnToday { body["showOnToday"] = .bool(showOnToday) }
         if let steps { body["steps"] = .object(steps.mapValues { JSONValue.bool($0) }) }
+        // `lists` merges server-side exactly as `steps` does, so send only what changed.
+        if let lists { body["lists"] = .object(lists.mapValues { JSONValue.bool($0) }) }
 
         struct Resp: Decodable { let config: WeeklyPlanningConfig }
         return try await sendReturning("PUT", "/api/weekly-planning/config", body: body, as: Resp.self).config

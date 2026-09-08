@@ -42,7 +42,8 @@ final class PlanningModel {
     typealias FetchView = (_ weekStart: String?) async throws -> WaffledAPI.WeeklyPlanningView
     typealias FetchConfig = () async throws -> WaffledAPI.WeeklyPlanningConfigView
     typealias SaveConfig = (
-        _ dayOfWeek: Int?, _ time: String?, _ showOnToday: Bool?, _ steps: [String: Bool]?
+        _ dayOfWeek: Int?, _ time: String?, _ showOnToday: Bool?, _ steps: [String: Bool]?,
+        _ lists: [String: Bool]?
     ) async throws -> WaffledAPI.WeeklyPlanningConfig
     typealias StartSession = (_ weekStart: String?) async throws -> WaffledAPI.PlanningSession
     typealias PatchSession = (
@@ -77,9 +78,10 @@ final class PlanningModel {
         fetchConfig: @escaping FetchConfig = {
             try await WaffledAPI().weeklyPlanningConfig()
         },
-        saveConfig: @escaping SaveConfig = { dayOfWeek, time, showOnToday, steps in
+        saveConfig: @escaping SaveConfig = { dayOfWeek, time, showOnToday, steps, lists in
             try await WaffledAPI().setWeeklyPlanningConfig(
-                dayOfWeek: dayOfWeek, time: time, showOnToday: showOnToday, steps: steps)
+                dayOfWeek: dayOfWeek, time: time, showOnToday: showOnToday, steps: steps,
+                lists: lists)
         },
         startSession: @escaping StartSession = { weekStart in
             try await WaffledAPI().startWeeklyPlanningSession(weekStart: weekStart)
@@ -145,6 +147,10 @@ final class PlanningModel {
     private(set) var sessionDayName = ""
     /// "Sep 2, 5:32 PM" for the completed record's byline, or nil while there is none.
     private(set) var savedAtLabel: String?
+    /// The lists the loose-ends step could ask about. Empty until `loadListCandidates()`,
+    /// and empty is a real answer: a household with no custom lists has nothing to choose
+    /// between, so the setting hides itself rather than showing an empty card.
+    private(set) var listCandidates: [WaffledAPI.PlanningListCandidate] = []
     private(set) var actGroups: [PlanningActGroup] = []
     /// Every runnable step's 1-based position, keyed by step key.
     ///
@@ -473,11 +479,27 @@ final class PlanningModel {
     /// onto the household's existing opt-out map, so sending a whole map built from this
     /// client's snapshot would clobber every step another device had just turned off.
     func saveConfig(
-        dayOfWeek: Int? = nil, time: String? = nil, showOnToday: Bool? = nil, steps: [String: Bool]? = nil
+        dayOfWeek: Int? = nil, time: String? = nil, showOnToday: Bool? = nil,
+        steps: [String: Bool]? = nil, lists: [String: Bool]? = nil
     ) async {
         await go {
-            _ = try await saveConfigCall(dayOfWeek, time, showOnToday, steps)
+            _ = try await saveConfigCall(dayOfWeek, time, showOnToday, steps, lists)
         }
+    }
+
+    /// The lists step 1 could ask about, for the settings panel's switches.
+    ///
+    /// Off the CONFIG read, not the session view: which lists are even candidates is step
+    /// 1's own rule (the `custom` allowlist — the grocery list rebuilds itself and a
+    /// template is unchecked by design), and having the server resolve it is what stops
+    /// this app re-deriving that rule against the lists module and drifting from the web.
+    ///
+    /// Only the names are taken from here. How each list STANDS comes from
+    /// `config.asksAbout(_:)`, which `load()` refreshes after every save, so a switch
+    /// cannot go stale against another device.
+    func loadListCandidates() async {
+        guard let view = try? await fetchConfig() else { return }
+        listCandidates = view.lists ?? []
     }
 
     // MARK: - Formatting

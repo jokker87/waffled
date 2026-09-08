@@ -95,7 +95,12 @@ private final class PlanningFeed {
     var completes: [String] = []
     var discards: [String] = []
     var resolves: [(kind: String, id: String, action: String, sessionId: String?)] = []
-    var configSaves: [(dayOfWeek: Int?, time: String?, showOnToday: Bool?, steps: [String: Bool]?)] = []
+    var configSaves: [(dayOfWeek: Int?, time: String?, showOnToday: Bool?, steps: [String: Bool]?, lists: [String: Bool]?)] = []
+    /// The lists step 1 could ask about, as the config read serves them.
+    var listCandidates: [WaffledAPI.PlanningListCandidate] = [
+        .init(id: "l1", name: "Repairs", emoji: "🔧", relevant: true),
+        .init(id: "l2", name: "Someday", emoji: "💭", relevant: true),
+    ]
 
     init(session: WaffledAPI.PlanningSession? = nil) {
         currentSession = session
@@ -132,10 +137,11 @@ private func makeModel(_ feed: PlanningFeed, defaults: UserDefaults) -> Planning
             return feed.snapshot
         },
         fetchConfig: {
-            WaffledAPI.WeeklyPlanningConfigView(config: feed.config, steps: [])
+            WaffledAPI.WeeklyPlanningConfigView(
+                config: feed.config, steps: [], lists: feed.listCandidates)
         },
-        saveConfig: { dayOfWeek, time, showOnToday, steps in
-            feed.configSaves.append((dayOfWeek, time, showOnToday, steps))
+        saveConfig: { dayOfWeek, time, showOnToday, steps, lists in
+            feed.configSaves.append((dayOfWeek, time, showOnToday, steps, lists))
             return feed.config
         },
         startSession: { week in
@@ -630,6 +636,51 @@ private func scratchDefaults() -> UserDefaults {
         #expect(save.dayOfWeek == nil)
         #expect(save.time == nil)
         #expect(save.showOnToday == nil)
+    }
+
+    // "I'd rather choose what lists are relevant versus not." Same sparse-map discipline
+    // as the steps above, and for the same reason: the server merges, so a whole map
+    // built from this device's snapshot would rule lists back in that somebody else had
+    // just ruled out.
+    @Test func rulingOneListOutSendsOnlyThatList() async throws {
+        let feed = PlanningFeed(session: session())
+        let model = makeModel(feed, defaults: scratchDefaults())
+        await model.load()
+
+        await model.saveConfig(lists: ["l2": false])
+
+        let save = try #require(feed.configSaves.first)
+        #expect(save.lists == ["l2": false])
+        #expect(save.steps == nil)
+        #expect(save.dayOfWeek == nil)
+        #expect(save.time == nil)
+        #expect(save.showOnToday == nil)
+    }
+
+    // The settings panel needs each list's NAME, and which lists are even askable is the
+    // server's rule (the `custom` allowlist) — so they arrive with the config rather than
+    // being re-derived here off the lists module.
+    @Test func theConfigReadCarriesTheListsItCouldAskAbout() async throws {
+        let feed = PlanningFeed(session: session())
+        let model = makeModel(feed, defaults: scratchDefaults())
+
+        await model.loadListCandidates()
+
+        #expect(model.listCandidates.map(\.name) == ["Repairs", "Someday"])
+    }
+
+    // Absent from the map means RELEVANT — the whole reason the setting can ship without
+    // changing what any existing household sees.
+    @Test func aListNobodyHasRuledOnIsStillAskedAbout() {
+        let ruled = WaffledAPI.WeeklyPlanningConfig(
+            dayOfWeek: 0, time: "17:00", steps: [:], showOnToday: true, lists: ["l2": false])
+        #expect(ruled.asksAbout("l2") == false)
+        #expect(ruled.asksAbout("l1"))
+        // And a config from a server that has never heard of the setting asks about
+        // everything, rather than falling silent.
+        let silent = WaffledAPI.WeeklyPlanningConfig(
+            dayOfWeek: 0, time: "17:00", steps: [:], showOnToday: true, lists: nil)
+        #expect(silent.asksAbout("l1"))
     }
 
     @Test func savingTheDayLeavesTheStepMapAlone() async throws {

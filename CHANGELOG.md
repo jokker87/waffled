@@ -201,6 +201,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   much you park. The note explaining the difference between adding an event and parking a
   note has been rewritten, too.
 
+- **You choose which of your lists the planning session asks about.** The session's first
+  step gathers what's still open — overdue chores, late rhythms, short habits and anything
+  left unchecked on your lists — but a list that is *meant* to stay open, a someday list or
+  a wishlist, isn't a loose end, and the same items came back every single week. Settings →
+  Modules → Weekly Planning now has a switch per list: turn one off and the session stops
+  asking about it. Lists you say nothing about keep counting exactly as before, chores and
+  rhythms are never affected (they are late by definition), and your grocery list was never
+  asked about anyway — it rebuilds itself from the meal plan.
+
 - **A finished week reads the week back, instead of ticking off the steps.** Saving a
   planning session used to leave you looking at ten green ticks against ten step names —
   which told you the session had finished and nothing at all about the week it decided. It
@@ -208,7 +217,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   changed grouped by where that change lives, the notes nobody tagged, and what was left
   alone on purpose. The per-step list is still there underneath, because it's the only
   place that records which steps you skipped on purpose. Following a line in the read-back
-  takes you back into the step that owns it.
+  takes you back into the step that owns it — on a finished week, straight to the module
+  the decision lives in. **This now reads the same in the browser as it does on the
+  phone**, where the browser had still been showing the tick-list; and a week you open on
+  Thursday no longer describes itself as though it were still Sunday evening waiting to be
+  saved.
 
 - **Two planning steps were narrower than the other eight.** Family night and Tasks each
   inset their content twice, so their cards sat 32pt narrower than the calendar's on every

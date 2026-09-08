@@ -273,7 +273,15 @@ Legend: ✅ done · 🟡 partial / in progress · 🚧 planned · ⛔ dropped (s
   decision lands in the module that owns it. Step 1 is the one exception and it stores nothing
   either: it *routes* items to later steps, recorded in the session's own jsonb — and the
   step it routes to now opens with the note, a shell-level handoff every step (and the iOS
-  pass) inherits rather than implements. Design:
+  pass) inherits rather than implements. A later validation round added two things worth
+  naming: the **finished week now reads the week back** on both clients — the saved record
+  opens with step 10's own read-back (the seven days, what the session changed grouped by
+  module, the last call, what was left alone) instead of a tick-list of step names, which
+  survives underneath as the record of what was skipped on purpose — and **which of your
+  lists step 1 asks about is now a household choice** (Settings → Modules → Weekly
+  Planning), an opt-out map where absent means relevant, so a long-lived "someday" list
+  stops coming up every session while overdue chores, late rhythms and short habits still
+  always count. Design:
   `Weekly Planning v4` canvas; plan: `docs/product/weekly-planning-plan.md`.
 
 - **Waffled-Bites (kid companion device)** — the pairing system and the parent-facing
