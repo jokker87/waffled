@@ -357,6 +357,67 @@ describe('chore management (edit/delete)', () => {
     choreId = (await instances()).find((i) => i.choreTitle === 'Walk dog')!.choreId
   })
 
+  // TURNING A RECURRING CHORE INTO A ONE-OFF used to 500.
+  //
+  // The `dueOn` move updates EVERY pending instance of the chore, and its guard reads
+  // `updated.rrule` — the value AFTER the update. So `ChoreModal`'s "Repeats → Once" sends
+  // `rrule: null` + `dueOn` in one PATCH, the guard passes, and every pending row collapses
+  // onto one date. `uq_chore_inst (chore_id, due_on)` is a plain unique index, so a chore
+  // with two un-ticked days violated it: 500, "couldn't save", straight off the Tasks screen.
+  //
+  // A one-off has ONE pending instance by definition, so that is what the conversion now
+  // leaves behind. Done/awaiting rows are still never touched (stars-ledger integrity).
+  it('turns a recurring chore into a one-off without colliding on due_on', async () => {
+    const { query } = await import('../src/platform/db')
+    const made = await call('POST', '/api/chores', kevin, {
+      title: 'Water plants', personId: kevinId, rrule: 'FREQ=DAILY', rewardAmount: 1,
+    })
+    expect(made.statusCode).toBe(201)
+    const id = JSON.parse(made.body).chore.id as string
+    // Instances are materialised lazily by the today read, so ask for it before copying.
+    await call('GET', '/api/chore-instances/today', kevin)
+
+    // Two more pending days, so the collapse has something to collide with.
+    await query(
+      `insert into chore_instances (household_id, chore_id, person_id, due_on, status)
+       select household_id, chore_id, person_id, due_on + 1, 'pending' from chore_instances
+        where chore_id = $1 and deleted_at is null order by due_on limit 1`,
+      [id]
+    )
+    await query(
+      `insert into chore_instances (household_id, chore_id, person_id, due_on, status)
+       select household_id, chore_id, person_id, due_on + 2, 'pending' from chore_instances
+        where chore_id = $1 and deleted_at is null order by due_on limit 1`,
+      [id]
+    )
+    const pending = async () => {
+      const { rows } = await query<{ due_on: string }>(
+        `select to_char(due_on,'YYYY-MM-DD') as due_on from chore_instances
+          where chore_id = $1 and deleted_at is null and status = 'pending' order by due_on`,
+        [id]
+      )
+      return rows.map((r) => r.due_on)
+    }
+    expect((await pending()).length).toBeGreaterThan(1)
+
+    const target = (await pending())[0]
+    const res = await call('PATCH', `/api/chores/${id}`, kevin, { rrule: null, dueOn: target })
+    expect(res.statusCode).toBe(200)
+    // Exactly one pending instance, on the day asked for.
+    expect(await pending()).toEqual([target])
+  })
+
+  // Shape is not a date. `2026-02-31` passed a /^\d{4}-\d{2}-\d{2}$/ check and then failed
+  // in Postgres, so a typo answered 500 instead of the 400 the guard exists to give.
+  it('refuses a date that looks right but does not exist', async () => {
+    const made = await call('POST', '/api/chores', kevin, { title: 'Impossible', personId: kevinId })
+    const id = JSON.parse(made.body).chore.id as string
+    expect((await call('PATCH', `/api/chores/${id}`, kevin, { dueOn: '2026-02-31' })).statusCode).toBe(400)
+    expect((await call('PATCH', `/api/chores/${id}`, kevin, { dueOn: '2026-13-01' })).statusCode).toBe(400)
+    // A real date still works.
+    expect((await call('PATCH', `/api/chores/${id}`, kevin, { dueOn: '2026-02-28' })).statusCode).toBe(200)
+  })
+
   it('edits a chore, reflected in the instance list', async () => {
     const res = await call('PATCH', `/api/chores/${choreId}`, kevin, { title: 'Walk the dog', rewardAmount: 5 })
     expect(res.statusCode).toBe(200)

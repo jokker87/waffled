@@ -44,6 +44,19 @@ const { tenantRoute, adminRoute, capRoute } = moduleRoutes('chores')
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/
+// SHAPE IS NOT EXISTENCE. `2026-02-31` matches the shape, so it passed this guard and then
+// failed in Postgres — answering 500 for the typo the guard exists to turn into a 400.
+// Round-tripping through `Date` rejects the impossible ones (JS rolls Feb 31 to Mar 3, so
+// the string comes back different).
+const isCalendarDate = (v: string): boolean => {
+  if (!DATE_ONLY_RE.test(v)) return false
+  const d = new Date(`${v}T00:00:00Z`)
+  // Two ways to be impossible: `2026-13-01` parses to an Invalid Date (and .toISOString()
+  // THROWS on one, which turned this guard into the very 500 it was added to prevent), and
+  // `2026-02-31` can round-trip to a different day.
+  if (Number.isNaN(d.getTime())) return false
+  return d.toISOString().slice(0, 10) === v
+}
 
 export function registerChoreRoutes(api: Api): void {
   // Household chore settings — the photo-proof retention window and the rewards
@@ -127,7 +140,7 @@ export function registerChoreRoutes(api: Api): void {
     // ignores it. Absent, null and empty all keep meaning "don't move the day" — what
     // clients have always sent — so only a value that tried to be a date and isn't one
     // is an error.
-    if (patch.dueOn != null && patch.dueOn !== '' && (typeof patch.dueOn !== 'string' || !DATE_ONLY_RE.test(patch.dueOn))) {
+    if (patch.dueOn != null && patch.dueOn !== '' && (typeof patch.dueOn !== 'string' || !isCalendarDate(patch.dueOn))) {
       return res.status(400).json({ error: 'BadRequest', message: 'dueOn must be a YYYY-MM-DD date' })
     }
     if (!PATCHABLE_CHORE_FIELDS.some((field) => field in patch)) {

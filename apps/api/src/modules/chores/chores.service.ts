@@ -490,6 +490,24 @@ export async function updateChore(
   // edit that changes the due date must move that instance. Recurring chores (rrule set)
   // ignore dueOn. Done/awaiting instances are left alone (stars-ledger integrity).
   if (updated && updated.rrule === null && typeof patch.dueOn === 'string' && patch.dueOn.trim()) {
+    // A ONE-OFF HAS ONE PENDING INSTANCE, by definition — and this branch is reached with
+    // several of them whenever a RECURRING chore is switched to "Once", because the guard
+    // above reads `updated.rrule` (the value after the update) and `ChoreModal` sends
+    // `rrule: null` + `dueOn` in the same PATCH. Moving them all onto one date is not a
+    // move: `uq_chore_inst (chore_id, due_on)` is a plain unique index, so a chore with two
+    // un-ticked days violated it and the save answered 500.
+    //
+    // So retire the surplus first and move what's left. Done/awaiting rows are still never
+    // touched — the stars ledger references them.
+    await query(
+      `update chore_instances set deleted_at = now()
+        where household_id = $1 and chore_id = $2 and deleted_at is null and status = 'pending'
+          and id <> (select id from chore_instances
+                      where household_id = $1 and chore_id = $2
+                        and deleted_at is null and status = 'pending'
+                      order by due_on limit 1)`,
+      [householdId, id]
+    )
     await query(
       `update chore_instances
           set due_on = $1
