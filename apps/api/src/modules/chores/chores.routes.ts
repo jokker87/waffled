@@ -3,7 +3,7 @@
 import createAPI, { type Request, type Response } from 'lambda-api'
 import { requireCapability } from '../../platform/permissions'
 import { moduleRoutes } from '../../platform/route-guards'
-import type { CreateChoreInput } from './chores.types'
+import type { ChoreEditScope, CreateChoreInput } from './chores.types'
 import {
   createChore,
   updateChore,
@@ -24,6 +24,7 @@ import {
   rejectInstance,
   presentChore,
   presentInstance,
+  UPDATABLE_CHORE,
   PATCHABLE_CHORE_FIELDS,
   ProofRequiredError,
   listStoredProofs,
@@ -31,6 +32,7 @@ import {
   clearStoredProofs,
   getChoreRewardsEnabled,
   setChoreRewardsEnabled,
+  ChoreScopeError,
 } from './chores.service'
 import { getProofTtlDays, setProofTtlDays } from './chore-proof-cleanup.service'
 import { assertPersonInHousehold } from '../../platform/household-refs'
@@ -44,18 +46,29 @@ const { tenantRoute, adminRoute, capRoute } = moduleRoutes('chores')
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/
-// SHAPE IS NOT EXISTENCE. `2026-02-31` matches the shape, so it passed this guard and then
-// failed in Postgres — answering 500 for the typo the guard exists to turn into a 400.
-// Round-tripping through `Date` rejects the impossible ones (JS rolls Feb 31 to Mar 3, so
-// the string comes back different).
+// Shape is not existence, and `Date` throws on the unparseable ones — `toISOString()` on an
+// Invalid Date raises, which would turn this guard into the 500 it exists to prevent. So:
+// shape, then parseability, then a round trip (JS rolls Feb 31 to Mar 3).
 const isCalendarDate = (v: string): boolean => {
   if (!DATE_ONLY_RE.test(v)) return false
   const d = new Date(`${v}T00:00:00Z`)
-  // Two ways to be impossible: `2026-13-01` parses to an Invalid Date (and .toISOString()
-  // THROWS on one, which turned this guard into the very 500 it was added to prevent), and
-  // `2026-02-31` can round-trip to a different day.
   if (Number.isNaN(d.getTime())) return false
   return d.toISOString().slice(0, 10) === v
+}
+const CHORE_SCOPES = new Set<ChoreEditScope>(['this', 'following', 'all'])
+
+function editTarget(body: Record<string, unknown>, res: Response): { scope: ChoreEditScope; instanceId?: string } | null {
+  const scope = (body.scope ?? 'all') as ChoreEditScope
+  if (!CHORE_SCOPES.has(scope)) {
+    res.status(400).json({ error: 'BadRequest', message: 'scope must be this, following, or all' })
+    return null
+  }
+  const instanceId = typeof body.instanceId === 'string' ? body.instanceId : undefined
+  if (scope !== 'all' && (!instanceId || !UUID_RE.test(instanceId))) {
+    res.status(400).json({ error: 'BadRequest', message: 'valid instanceId required for this scope' })
+    return null
+  }
+  return { scope, instanceId }
 }
 
 export function registerChoreRoutes(api: Api): void {
@@ -125,39 +138,63 @@ export function registerChoreRoutes(api: Api): void {
   api.patch('/api/chores/:id', capRoute('chore.manage', async (tenant, req: Request, res: Response) => {
     const id = req.params.id ?? ''
     if (!UUID_RE.test(id)) return res.status(404).json({ error: 'NotFound', message: 'chore not found' })
-    const patch = (req.body ?? {}) as Record<string, unknown>
+    const body = (req.body ?? {}) as Record<string, unknown>
+    const target = editTarget(body, res)
+    if (!target) return
+    const { scope: _scope, instanceId: _instanceId, ...patch } = body
     if (typeof patch.title === 'string' && !patch.title.trim()) {
       return res.status(400).json({ error: 'BadRequest', message: 'title cannot be empty' })
     }
+    if (typeof patch.title === 'string') patch.title = patch.title.trim()
     if (patch.personId != null) {
       if (typeof patch.personId !== 'string' || !UUID_RE.test(patch.personId)) {
         return res.status(400).json({ error: 'BadRequest', message: 'valid personId required' })
       }
       await assertPersonInHousehold(tenant.householdId, patch.personId)
     }
-    // Moving a one-off's day: a plain calendar date. It lands on the chore's pending
-    // instance rather than on a chores column (updateChore), and a recurring chore
-    // ignores it. Absent, null and empty all keep meaning "don't move the day" — what
-    // clients have always sent — so only a value that tried to be a date and isn't one
-    // is an error.
-    if (patch.dueOn != null && patch.dueOn !== '' && (typeof patch.dueOn !== 'string' || !isCalendarDate(patch.dueOn))) {
-      return res.status(400).json({ error: 'BadRequest', message: 'dueOn must be a YYYY-MM-DD date' })
+    // A REAL DATE, not just the shape. `2026-02-31` matches /^\d{4}-\d{2}-\d{2}$/ and then
+    // fails in Postgres — `date/time field value out of range` — so a typo answered 500
+    // where this should answer 400. Reachable from the chore editor, which sends `dueOn`
+    // alongside the rest of the form.
+    if (patch.dueOn != null && patch.dueOn !== '') {
+      if (typeof patch.dueOn !== 'string' || !isCalendarDate(patch.dueOn)) {
+        return res.status(400).json({ error: 'BadRequest', message: 'dueOn must be a real YYYY-MM-DD date' })
+      }
+      patch.dueOn = patch.dueOn.trim()
     }
     if (!PATCHABLE_CHORE_FIELDS.some((field) => field in patch)) {
       return res.status(400).json({ error: 'BadRequest', message: 'no updatable fields provided' })
     }
-    const chore = await updateChore(tenant.householdId, id, patch)
-    if (!chore) return res.status(404).json({ error: 'NotFound', message: 'chore not found' })
-    return { chore: presentChore(chore) }
+    try {
+      const chore = await updateChore(tenant.householdId, id, patch, target.scope, target.instanceId)
+      if (!chore) return res.status(404).json({ error: 'NotFound', message: 'chore not found' })
+      return { chore: presentChore(chore) }
+    } catch (error) {
+      if (error instanceof ChoreScopeError) {
+        return res.status(error.statusCode).json({ error: error.statusCode === 409 ? 'Conflict' : 'BadRequest', message: error.message })
+      }
+      throw error
+    }
   }))
 
-  // Delete a chore (chore.manage). Hides it + today's instances from the Tasks view.
+  // Delete one occurrence, this-and-following, or the entire active series. Settled
+  // occurrences remain immutable history and keep their snapshotted display fields.
   api.delete('/api/chores/:id', capRoute('chore.manage', async (tenant, req: Request, res: Response) => {
     const id = req.params.id ?? ''
     if (!UUID_RE.test(id)) return res.status(404).json({ error: 'NotFound', message: 'chore not found' })
-    const ok = await softDeleteChore(tenant.householdId, id)
-    if (!ok) return res.status(404).json({ error: 'NotFound', message: 'chore not found' })
-    return res.status(204).send('')
+    const body = (req.body ?? {}) as Record<string, unknown>
+    const target = editTarget(body, res)
+    if (!target) return
+    try {
+      const ok = await softDeleteChore(tenant.householdId, id, target.scope, target.instanceId)
+      if (!ok) return res.status(404).json({ error: 'NotFound', message: 'chore not found' })
+      return res.status(204).send('')
+    } catch (error) {
+      if (error instanceof ChoreScopeError) {
+        return res.status(error.statusCode).json({ error: error.statusCode === 409 ? 'Conflict' : 'BadRequest', message: error.message })
+      }
+      throw error
+    }
   }))
 
   // Per-person chore summary (rings + stars) for a day (default today, household-local).

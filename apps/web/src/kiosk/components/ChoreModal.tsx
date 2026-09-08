@@ -3,20 +3,18 @@ import { api, usePersons, useCurrencies, localToday } from '../../lib/api'
 
 export interface ChoreDraft {
   id: string
+  instanceId?: string
   title: string
   emoji: string | null
   personId: string | null
   rewardAmount: number | null
   rewardCurrency?: string | null
   rrule?: string | null
-  // The day a one-off lands on. Required so a caller that forgets it fails to
-  // compile rather than silently moving the chore to today — `initialForm`'s
-  // fallback makes omission indistinguishable from "move it to now". null for a
-  // recurring chore, whose days come from its rrule.
-  dueOn: string | null
   dueTime?: string | null
+  dueOn?: string | null
   requiresApproval?: boolean
   requiresPhoto?: boolean
+  status?: string
 }
 
 const DAYS: Array<[string, string]> = [
@@ -24,22 +22,20 @@ const DAYS: Array<[string, string]> = [
 ]
 
 type Freq = 'once' | 'daily' | 'weekly'
+type ChoreScope = 'this' | 'following' | 'all'
+type ScopeAction =
+  | { kind: 'save'; payload: Record<string, unknown>; repeatChanged: boolean }
+  | { kind: 'delete'; repeatChanged: false }
 
-function parseRrule(
-  rrule: string | null | undefined,
-  editing: boolean,
-  defaultFreq: Freq = 'daily'
-): { freq: Freq; days: string[] } {
+function parseRrule(rrule: string | null | undefined, editing: boolean): { freq: Freq; days: string[] } {
   if (rrule && /FREQ=WEEKLY/i.test(rrule)) {
     const m = rrule.match(/BYDAY=([A-Z,]+)/i)
     return { freq: 'weekly', days: m ? m[1].toUpperCase().split(',') : [] }
   }
   if (rrule && /FREQ=DAILY/i.test(rrule)) return { freq: 'daily', days: [] }
   // No rrule: an existing chore with null rrule is a one-off; a brand-new chore
-  // defaults to "Every day" (the common case on the Chores screen) unless the surface
-  // opening the modal knows better — Weekly Planning adds mostly one-offs, so it asks
-  // for 'once'. The default stays put for everyone who doesn't pass one.
-  return { freq: editing ? 'once' : defaultFreq, days: [] }
+  // still defaults to "Every day" (the common case).
+  return { freq: editing ? 'once' : 'daily', days: [] }
 }
 
 function buildRrule(freq: Freq, days: string[]): string | null {
@@ -51,35 +47,22 @@ function buildRrule(freq: Freq, days: string[]): string | null {
   return 'FREQ=DAILY'
 }
 
-function initialForm(
-  chore?: ChoreDraft,
-  personId?: string | null,
-  canAssignOthers = true,
-  selfPersonId?: string | null,
-  defaultFreq?: Freq,
-  defaultDueOn?: string,
-  defaultTitle?: string
-) {
-  const sched = parseRrule(chore?.rrule, !!chore, defaultFreq)
+function initialForm(chore?: ChoreDraft, personId?: string | null, canAssignOthers = true, selfPersonId?: string | null) {
+  const sched = parseRrule(chore?.rrule, !!chore)
   // Restricted users (no chore.manage) can only target themselves or up-for-grabs;
   // default them to self rather than the full-list default.
   const prefill = chore?.personId ?? personId ?? (canAssignOthers ? '' : selfPersonId ?? '')
   return {
-    // An existing chore's own title wins; otherwise a caller that already knows what
-    // this is about can say so (Weekly Planning turning a parked note into a task),
-    // and failing both it is an empty box.
-    title: chore?.title ?? defaultTitle ?? '',
+    title: chore?.title ?? '',
     emoji: chore?.emoji ?? '',
     personId: prefill,
     rewardAmount: chore?.rewardAmount ?? 1,
     rewardCurrency: chore?.rewardCurrency ?? '',
     freq: sched.freq,
     days: sched.days,
-    // One-off (freq === 'once') only: which day the single task lands on. An
-    // existing one-off opens on its OWN day; a new one defaults to today unless the
-    // surface opening the modal knows a better day — Weekly Planning passes the week
-    // it is planning, so a task added there doesn't quietly land on today.
-    dueOn: chore?.dueOn || defaultDueOn || localToday(),
+    // One-off (freq === 'once') only: which day the single task lands on. New
+    // one-offs default to today; editing can't move an already-materialized one.
+    dueOn: chore?.dueOn ?? localToday(),
     // Optional time-of-day the chore is due (HH:MM). Applies to one-offs and each
     // recurring occurrence; empty = no specific time.
     dueTime: (chore?.dueTime ?? '').slice(0, 5),
@@ -92,10 +75,6 @@ function initialForm(
 export function ChoreModal({
   chore,
   personId,
-  defaultFreq,
-  defaultDueOn,
-  defaultTitle,
-  canDelete = true,
   canAssignOthers = true,
   selfPersonId,
   onClose,
@@ -103,23 +82,6 @@ export function ChoreModal({
 }: {
   chore?: ChoreDraft
   personId?: string | null
-  // Which "Repeats" a NEW chore starts on. Omit it for the app-wide default ('daily');
-  // a surface where most additions are one-offs (Weekly Planning's Tasks step) passes
-  // 'once'. Ignored when editing — an existing chore's cadence is its own.
-  defaultFreq?: Freq
-  // Which day a NEW one-off starts on (YYYY-MM-DD). Omit it for today; a surface
-  // planning a different week passes that week's day, so the task lands where the
-  // person is looking. Still editable in the modal, and ignored when editing.
-  defaultDueOn?: string
-  // What a NEW chore's title starts as. Weekly Planning passes a parked note's words
-  // when the banner's "Make a task" opened this, so nobody retypes what they already
-  // wrote down. Ignored when editing.
-  defaultTitle?: string
-  // Whether editing may also DELETE the chore. Defaults to true (the Chores screen,
-  // which is where a chore's existence is managed); a surface with a narrower question
-  // than "should this chore exist" — Weekly Planning's Tasks step asks only who does
-  // what — passes false, and gets an editor without the removal it isn't offering.
-  canDelete?: boolean
   // Without chore.manage, restrict the assignee picker to self + up-for-grabs.
   canAssignOthers?: boolean
   selfPersonId?: string | null
@@ -129,7 +91,7 @@ export function ChoreModal({
   const editing = !!chore
   const { persons } = usePersons()
   const { currencies, defaultCurrency } = useCurrencies()
-  const [form, setForm] = useState(() => initialForm(chore, personId, canAssignOthers, selfPersonId, defaultFreq, defaultDueOn, defaultTitle))
+  const [form, setForm] = useState(() => initialForm(chore, personId, canAssignOthers, selfPersonId))
   // Restricted users see only themselves; everyone else sees the full member list.
   const pickable = canAssignOthers ? persons : persons.filter((p) => p.id === selfPersonId)
   // A parent doesn't need another parent's OK: hide the approval toggle when the
@@ -141,11 +103,15 @@ export function ChoreModal({
   const selectedCur = currencies.find((c) => c.key === curKey)
   const [saving, setSaving] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [scopeAction, setScopeAction] = useState<ScopeAction | null>(null)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const selectedOccurrenceIsPending = chore?.status === 'pending'
   const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => setForm((f) => ({ ...f, [k]: v }))
 
   async function submit(e: FormEvent) {
     e.preventDefault()
     if (!form.title.trim() || saving) return
+    setSaveError(null)
     setSaving(true)
     const payload = {
       title: form.title.trim(),
@@ -160,15 +126,19 @@ export function ChoreModal({
       requiresPhoto: form.requiresPhoto,
     }
     try {
-      // A one-off carries its day either way — on create it's where the single
-      // instance lands, on edit it MOVES that instance. A recurring chore sends
-      // none: its days are the rrule's, and the server ignores dueOn for one.
-      const withDay = form.freq === 'once' ? { ...payload, dueOn: form.dueOn } : payload
-      if (editing) await api.updateChore(chore!.id, withDay)
-      else await api.createChore(withDay)
+      if (editing && chore?.rrule && chore.instanceId) {
+        setSaving(false)
+        setScopeAction({ kind: 'save', payload, repeatChanged: buildRrule(form.freq, form.days) !== chore.rrule })
+        return
+      }
+      if (editing) await api.updateChore(chore!.id, payload)
+      // On create, a one-off also carries its due date (where its single instance
+      // lands). Editing can't move an already-materialized one-off's date.
+      else await api.createChore(form.freq === 'once' ? { ...payload, dueOn: form.dueOn } : payload)
       onSaved()
       onClose()
     } catch {
+      setSaveError('Couldn\'t save this chore. Check your connection and try again.')
       setSaving(false)
     }
   }
@@ -179,12 +149,39 @@ export function ChoreModal({
       setConfirmDelete(true)
       return
     }
+    if (chore?.rrule && chore.instanceId) {
+      setConfirmDelete(false)
+      setScopeAction({ kind: 'delete', repeatChanged: false })
+      return
+    }
     setSaving(true)
+    setSaveError(null)
     try {
       await api.deleteChore(chore!.id)
       onSaved()
       onClose()
     } catch {
+      setSaveError('Couldn\'t delete this chore. Check your connection and try again.')
+      setSaving(false)
+    }
+  }
+
+  async function applyScope(scope: ChoreScope) {
+    if (!scopeAction || !chore?.instanceId) return
+    setSaveError(null)
+    setSaving(true)
+    try {
+      const target = { scope, instanceId: chore.instanceId }
+      if (scopeAction.kind === 'save') await api.updateChore(chore.id, scopeAction.payload, target)
+      else await api.deleteChore(chore.id, target)
+      onSaved()
+      onClose()
+    } catch {
+      setSaveError(
+        scopeAction.kind === 'save'
+          ? 'Couldn\'t save this chore. Check your connection and try again.'
+          : 'Couldn\'t delete this chore. Check your connection and try again.'
+      )
       setSaving(false)
     }
   }
@@ -198,6 +195,12 @@ export function ChoreModal({
         <div className="wf-serif" style={{ fontSize: 22, fontWeight: 600, marginBottom: 14 }}>
           {editing ? 'Edit chore' : 'New chore'}
         </div>
+
+        {saveError && (
+          <div role="alert" className="tiny" style={{ color: 'var(--primary)', fontWeight: 700, marginBottom: 12 }}>
+            {saveError}
+          </div>
+        )}
 
         <form onSubmit={submit}>
           <div className="field-row">
@@ -232,24 +235,13 @@ export function ChoreModal({
                 ))}
               </div>
             )}
-            {/* One-off: which day it lands on — on create AND on edit. Moving an
-                existing one-off's day is a PATCH the server already honors (it lands
-                on the pending instance), and this modal is now the only way in: the
-                surfaces that used to offer an inline date picker send people here.
-
-                `min` is create-only. A chore carried over from last week is dated in
-                the PAST and is the likeliest thing anybody opens here — Save lives
-                inside a <form>, so flooring the input at today would let the browser
-                refuse the submit and make Save look dead on exactly those cards. */}
-            {form.freq === 'once' && (
+            {/* One-off: pick the day (today by default). Only on create — an
+                existing one-off's instance is already on the calendar. It also
+                carries forward until done unless rollover is turned off. */}
+            {form.freq === 'once' && !editing && (
               <label className="field" style={{ marginTop: 8 }}>
                 <span>On</span>
-                <input
-                  type="date"
-                  {...(editing ? {} : { min: localToday() })}
-                  value={form.dueOn}
-                  onChange={(e) => set('dueOn', e.target.value || localToday())}
-                />
+                <input type="date" min={localToday()} value={form.dueOn} onChange={(e) => set('dueOn', e.target.value || localToday())} />
               </label>
             )}
           </div>
@@ -329,8 +321,42 @@ export function ChoreModal({
             </span>
           </button>
 
+          {scopeAction && (
+            <div role="dialog" aria-label="Choose recurring chore scope" className="wf-field" style={{ marginTop: 12, padding: 13 }}>
+              <div style={{ fontWeight: 800, marginBottom: 4 }}>
+                {scopeAction.kind === 'save' ? 'Which chores should change?' : 'Which chores should be deleted?'}
+              </div>
+              <div className="tiny muted" style={{ marginBottom: 10 }}>
+                {selectedOccurrenceIsPending
+                  ? 'Completed chores and items awaiting approval always stay unchanged.'
+                  : 'The selected completed or awaiting-approval chore stays unchanged. Only future pending chores are affected.'}
+              </div>
+              <div style={{ display: 'grid', gap: 7 }}>
+                {!scopeAction.repeatChanged && selectedOccurrenceIsPending && (
+                  <button type="button" className="btn" disabled={saving} onClick={() => applyScope('this')}>
+                    This chore only
+                  </button>
+                )}
+                <button type="button" className="btn" disabled={saving} onClick={() => applyScope('following')}>
+                  This and future chores
+                </button>
+                <button type="button" className="btn" disabled={saving} onClick={() => applyScope('all')}>
+                  Entire active series
+                </button>
+                <button type="button" className="btn btn-ghost" disabled={saving} onClick={() => { setScopeAction(null); setSaveError(null) }}>
+                  Cancel
+                </button>
+              </div>
+              {scopeAction.repeatChanged && (
+                <div className="tiny muted" style={{ marginTop: 8 }}>
+                  Repeat changes must apply from this chore forward or to the entire series.
+                </div>
+              )}
+            </div>
+          )}
+
           <div style={{ display: 'flex', gap: 9, marginTop: 6, alignItems: 'center' }}>
-            {editing && canDelete && (
+            {editing && (
               <button
                 type="button"
                 onClick={del}

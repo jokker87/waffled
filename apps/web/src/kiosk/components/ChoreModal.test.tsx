@@ -1,7 +1,7 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { ChoreModal } from './ChoreModal'
 
-function mockApi(opts: { created?: unknown[]; patched?: unknown[]; deleted?: string[] }) {
+function mockApi(opts: { created?: unknown[]; patched?: unknown[]; deleted?: unknown[]; failNextPatch?: boolean }) {
   globalThis.fetch = vi.fn(async (url: string, init?: { method?: string; body?: string }) => {
     const u = String(url)
     const m = init?.method
@@ -22,17 +22,21 @@ function mockApi(opts: { created?: unknown[]; patched?: unknown[]; deleted?: str
     }
     if (/\/api\/chores\/[^/]+$/.test(u) && m === 'PATCH') {
       opts.patched?.push(JSON.parse(init!.body!))
+      if (opts.failNextPatch) {
+        opts.failNextPatch = false
+        return { ok: false, status: 503, json: async () => ({ error: 'temporarily unavailable' }) }
+      }
       return { ok: true, json: async () => ({ chore: { id: 'c1' } }) }
     }
     if (/\/api\/chores\/[^/]+$/.test(u) && m === 'DELETE') {
-      opts.deleted?.push(u)
+      opts.deleted?.push({ url: u, body: init?.body ? JSON.parse(init.body) : null })
       return { ok: true, status: 204, json: async () => ({}) }
     }
     return { ok: false, status: 404, json: async () => ({}) }
   }) as unknown as typeof fetch
 }
 
-const chore = { id: 'c1', title: 'Old chore', emoji: '🐶', personId: 'p1', rewardAmount: 3, dueOn: '2099-03-04' }
+const chore = { id: 'c1', title: 'Old chore', emoji: '🐶', personId: 'p1', rewardAmount: 3 }
 
 describe('ChoreModal', () => {
   it('creates a chore for the prefilled person', async () => {
@@ -72,7 +76,7 @@ describe('ChoreModal', () => {
   })
 
   it('deletes only after a confirm tap', async () => {
-    const deleted: string[] = []
+    const deleted: unknown[] = []
     mockApi({ deleted })
     render(<ChoreModal chore={chore} onClose={vi.fn()} onSaved={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
@@ -80,90 +84,59 @@ describe('ChoreModal', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Tap again to delete' }))
     await waitFor(() => expect(deleted).toHaveLength(1))
   })
-  // The surface that opens the modal can say what a NEW chore should start as. Nothing
-  // else changes: leave the props off and the Chores screen gets what it always got.
-  it('a new chore still defaults to Every day, dated by the modal itself', async () => {
-    const created: unknown[] = []
-    mockApi({ created })
-    render(<ChoreModal personId="p1" onClose={vi.fn()} onSaved={vi.fn()} />)
-    expect(screen.getByRole('button', { name: 'Every day' }).className).toContain('on')
-    fireEvent.change(screen.getByPlaceholderText('Feed the dog'), { target: { value: 'Tidy room' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Add chore' }))
-    await waitFor(() => expect(created).toHaveLength(1))
-    // Recurring, so no day is sent at all — the rrule decides.
-    expect(created[0]).toMatchObject({ rrule: 'FREQ=DAILY' })
-    expect((created[0] as { dueOn?: string }).dueOn).toBeUndefined()
-  })
 
-  it('takes a starting cadence and day from the surface that opened it', async () => {
-    const created: unknown[] = []
-    mockApi({ created })
-    render(<ChoreModal personId="p1" defaultFreq="once" defaultDueOn="2099-03-04" onClose={vi.fn()} onSaved={vi.fn()} />)
-    expect(screen.getByRole('button', { name: 'Just once' }).className).toContain('on')
-    fireEvent.change(screen.getByPlaceholderText('Feed the dog'), { target: { value: 'Book the sitter' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Add chore' }))
-    await waitFor(() => expect(created).toHaveLength(1))
-    expect(created[0]).toMatchObject({ rrule: null, dueOn: '2099-03-04' })
-  })
-  it('hides Delete where removal isn’t on offer', async () => {
-    const deleted: string[] = []
-    mockApi({ deleted })
-    // Weekly Planning edits a chore without offering to remove it — deleting one
-    // reaches far outside the week the session is deciding.
-    render(<ChoreModal chore={chore} canDelete={false} onClose={vi.fn()} onSaved={vi.fn()} />)
-    expect(screen.queryByRole('button', { name: 'Delete' })).toBeNull()
-    // The rest of the editor is untouched.
-    expect(screen.getByRole('button', { name: 'Save' })).toBeTruthy()
-  })
-  // ── The day is editable, not just settable at birth ──────────────────────────
-  // Tapping the day on a card is the ONLY way into this now (Weekly Planning's Tasks
-  // step dropped its inline date input), so an existing one-off has to be able to move.
-  it('a one-off shows its own day when edited, and moves it', async () => {
+  it('asks for a recurring scope and sends the selected occurrence', async () => {
     const patched: unknown[] = []
     mockApi({ patched })
-    render(<ChoreModal chore={chore} onClose={vi.fn()} onSaved={vi.fn()} />)
-    const day = screen.getByLabelText('On') as HTMLInputElement
-    expect(day.value).toBe('2099-03-04')
-    fireEvent.change(day, { target: { value: '2099-03-06' } })
+    render(<ChoreModal chore={{ ...chore, instanceId: 'i1', rrule: 'FREQ=DAILY', dueOn: '2026-07-31', status: 'pending' }} onClose={vi.fn()} onSaved={vi.fn()} />)
+    fireEvent.change(screen.getByDisplayValue('Old chore'), { target: { value: 'New chore' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    expect(await screen.findByRole('dialog', { name: 'Choose recurring chore scope' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'This chore only' }))
+
     await waitFor(() => expect(patched).toHaveLength(1))
-    expect(patched[0]).toMatchObject({ dueOn: '2099-03-06' })
+    expect(patched[0]).toMatchObject({ title: 'New chore', scope: 'this', instanceId: 'i1' })
   })
 
-  // A PAST day is the likeliest thing anyone opens here: Weekly Planning's Tasks step
-  // shows carried-over items, and the day chip is the way in. Save lives inside a
-  // <form>, so a `min` of today would let the browser refuse the submit and make Save
-  // look dead on exactly those cards. jsdom does not enforce constraint validation, so
-  // the attribute assertion — not the click — is what actually holds this down.
-  it('an already-dated one-off is not floored at today', async () => {
-    const patched: unknown[] = []
-    mockApi({ patched })
-    const stale = { ...chore, dueOn: '2020-01-02' }
-    render(<ChoreModal chore={stale} onClose={vi.fn()} onSaved={vi.fn()} />)
-    const day = screen.getByLabelText('On') as HTMLInputElement
-    expect(day.value).toBe('2020-01-02')
-    expect(day.hasAttribute('min')).toBe(false)
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
-    await waitFor(() => expect(patched).toHaveLength(1))
-    expect(patched[0]).toMatchObject({ dueOn: '2020-01-02' })
-  })
-
-  // A NEW chore still can't be dated into the past — nothing about that changed.
-  it('a new one-off is still floored at today', async () => {
+  it('does not offer a single occurrence for a repeat-rule change', async () => {
     mockApi({})
-    render(<ChoreModal personId="p1" defaultFreq="once" onClose={vi.fn()} onSaved={vi.fn()} />)
-    expect((screen.getByLabelText('On') as HTMLInputElement).hasAttribute('min')).toBe(true)
+    render(<ChoreModal chore={{ ...chore, instanceId: 'i1', rrule: 'FREQ=DAILY', dueOn: '2026-07-31', status: 'pending' }} onClose={vi.fn()} onSaved={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Just once' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    expect(await screen.findByRole('dialog', { name: 'Choose recurring chore scope' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'This chore only' })).not.toBeInTheDocument()
+    expect(screen.getByText(/Repeat changes must apply/)).toBeInTheDocument()
   })
 
-  // A recurring chore's days come from its rrule; there is no single day to move, and
-  // the server ignores dueOn for one anyway. Offering the field would be a lie.
-  it('a recurring chore offers no day, and sends none', async () => {
-    const patched: unknown[] = []
-    mockApi({ patched })
-    render(<ChoreModal chore={{ ...chore, rrule: 'FREQ=DAILY' }} onClose={vi.fn()} onSaved={vi.fn()} />)
-    expect(screen.queryByLabelText('On')).toBeNull()
+  it.each(['done', 'awaiting'])('does not offer a single-occurrence action for a %s chore', async (status) => {
+    mockApi({})
+    render(<ChoreModal chore={{ ...chore, instanceId: 'i1', rrule: 'FREQ=DAILY', status }} onClose={vi.fn()} onSaved={vi.fn()} />)
+    fireEvent.change(screen.getByDisplayValue('Old chore'), { target: { value: 'Future chore' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
-    await waitFor(() => expect(patched).toHaveLength(1))
-    expect((patched[0] as { dueOn?: string }).dueOn).toBeUndefined()
+
+    expect(await screen.findByRole('dialog', { name: 'Choose recurring chore scope' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'This chore only' })).not.toBeInTheDocument()
+    expect(screen.getByText(/selected completed or awaiting-approval chore stays unchanged/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'This and future chores' })).toBeInTheDocument()
+  })
+
+  it('keeps a failed recurring edit visible and retryable', async () => {
+    const patched: unknown[] = []
+    const onClose = vi.fn()
+    mockApi({ patched, failNextPatch: true })
+    render(<ChoreModal chore={{ ...chore, instanceId: 'i1', rrule: 'FREQ=DAILY', status: 'pending' }} onClose={onClose} onSaved={vi.fn()} />)
+    fireEvent.change(screen.getByDisplayValue('Old chore'), { target: { value: 'Retry chore' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'This and future chores' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/try again/i)
+    expect(screen.getByRole('dialog', { name: 'Choose recurring chore scope' })).toBeInTheDocument()
+    expect(onClose).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'This and future chores' }))
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1))
+    expect(patched).toHaveLength(2)
   })
 })
