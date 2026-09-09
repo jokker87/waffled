@@ -29,6 +29,16 @@ type Sidecar struct {
 	Collation string `json:"collation"`
 	SizeBytes int64  `json:"sizeBytes"`
 	TakenAt   string `json:"takenAt"`
+	// FromVersion and ToVersion are set on a pre-migrate snapshot only, and record the
+	// crossing it was taken for: the build that wrote the data, and the build about to
+	// change its schema. A routine backup leaves them empty — it marks no crossing, and
+	// its WaffledVersion above already says which build took it.
+	//
+	// They are in here as well as in the filename because a filename is prose: reading
+	// a crossing back out of one means splitting on dashes that also appear inside
+	// versions, and the whole reason this file exists is not having to do that.
+	FromVersion string `json:"fromVersion,omitempty"`
+	ToVersion   string `json:"toVersion,omitempty"`
 }
 
 // WriteSidecar records a dump's metadata beside it.

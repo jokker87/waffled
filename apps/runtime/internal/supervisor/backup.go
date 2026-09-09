@@ -125,7 +125,7 @@ func (s *Supervisor) Backup(ctx context.Context, opts BackupOptions) (path strin
 
 	size := fileSize(out)
 	if generated {
-		s.writeSidecar(ctx, out, db, size, takenAt)
+		s.writeSidecar(ctx, out, db, size, takenAt, crossing{})
 	}
 	s.closeBackupRun(ctx, db, runID, filepath.Base(out), size, started, nil)
 
@@ -205,13 +205,20 @@ func (s *Supervisor) dumpTo(ctx context.Context, db, out string) error {
 	return nil
 }
 
+// crossing is the version change a pre-migrate snapshot is taken for: the build that
+// wrote the data, and the build about to change its schema. A routine backup marks no
+// crossing and passes the zero value.
+type crossing struct{ from, to string }
+
 // writeSidecar records what the dump is, beside it. Best-effort: a dump with no sidecar
 // still restores, it just has to be unpacked to learn its level.
-func (s *Supervisor) writeSidecar(ctx context.Context, out, db string, size int64, at time.Time) {
+func (s *Supervisor) writeSidecar(ctx context.Context, out, db string, size int64, at time.Time, cross crossing) {
 	side := backup.Sidecar{
-		Database:  db,
-		SizeBytes: size,
-		TakenAt:   at.UTC().Format(time.RFC3339),
+		Database:    db,
+		SizeBytes:   size,
+		TakenAt:     at.UTC().Format(time.RFC3339),
+		FromVersion: cross.from,
+		ToVersion:   cross.to,
 	}
 	if m := s.manifest; m != nil {
 		side.WaffledVersion, side.GitSha = m.WaffledVersion, m.GitSha
@@ -442,14 +449,16 @@ func (s *Supervisor) snapshotBeforeMigrate(ctx context.Context) (string, error) 
 		return "", nil
 	}
 
-	version := "unknown"
-	if s.manifest != nil && s.manifest.WaffledVersion != "" {
-		version = s.manifest.WaffledVersion
-	}
+	// The crossing this snapshot marks. `to` is the running build; `from` is whatever
+	// runtime.json remembered when this Supervisor was constructed, which is "" — named
+	// "unknown" — on data written before that was recorded. They are equal when a start
+	// re-runs a migration under the same build, and that is a fact worth showing rather
+	// than hiding: the snapshot still marks a schema change.
+	cross := crossing{from: s.startedVersion, to: s.bundleVersion()}
 	if err := os.MkdirAll(s.plan.Layout.Backups, 0o700); err != nil {
 		return "", fmt.Errorf("create %s: %w", s.plan.Layout.Backups, err)
 	}
-	out := filepath.Join(s.plan.Layout.Backups, backup.SnapshotName(version, time.Now()))
+	out := filepath.Join(s.plan.Layout.Backups, backup.SnapshotName(cross.from, cross.to, time.Now()))
 
 	s.log.Infof("%d migration(s) pending (%s…); taking a rollback snapshot first",
 		len(pending), pending[0])
@@ -461,7 +470,7 @@ func (s *Supervisor) snapshotBeforeMigrate(ctx context.Context) (string, error) 
 		return "", fmt.Errorf("could not take a pre-migration snapshot, so the schema change "+
 			"has been stopped rather than run without a way back: %w", err)
 	}
-	s.writeSidecar(ctx, out, db, fileSize(out), time.Now())
+	s.writeSidecar(ctx, out, db, fileSize(out), time.Now(), cross)
 
 	removed, perr := backup.Prune(s.plan.Layout.Backups, backup.KindSnapshot, backup.DefaultKeepSnapshots)
 	if perr != nil {
