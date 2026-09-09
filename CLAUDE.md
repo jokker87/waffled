@@ -40,6 +40,41 @@ real HTTP routes against a throwaway Postgres (`@testcontainers/postgresql` + `r
 (`*.unit.test.ts`) only when the logic is genuinely isolated (pure helpers). Run with `npm test`
 (vitest) in `apps/api`.
 
+## Comments & reuse — leaner than we have been (repo-wide)
+
+**Comment the WHY, only when it isn't inferable from the code.** Measured on the Weekly
+Planning PR, 23% of the added lines were comments (11,956 of 52,172). That is too high, and
+most of the excess was one category: source files re-narrating a user report or a past bug.
+
+- **Cap a block at ~6 lines.** Longer than that, the explanation belongs in
+  `docs/product/*-plan.md` with a one-line pointer from the code.
+- **No historical narration in source.** "Reported as…", "this used to…", "my first
+  diagnosis was wrong…", "lost once already in a merge…" — that is what commit messages and
+  plan docs are for, and they already hold it. A comment describes the code as it *is*.
+- **One rationale lives in one place.** Cross-reference it (`see PlanningShellView.sessionScreen`);
+  don't restate the same paragraph in three files.
+- **Never put a backtick in a SQL or CSS comment that lives inside a JS template literal.**
+  It terminates the string and the error surfaces far away. This cost three separate
+  debugging detours in one session.
+- **Never a comment that restates the line under it.** If the code needs the sentence to be
+  readable, rename the thing instead.
+- Keep the comments that stop a re-break: a non-obvious constraint, a load-bearing access
+  level, an ordering that looks arbitrary and isn't.
+
+**Reuse before you define — and CHECK before you conclude nothing fits.** The same PR
+hand-rolled an avatar chip while `DesignSystem/Components.swift` already exported `Avatar`,
+which did the identical job. Before writing a view/component, grep the design system and the
+feature that owns the concept (`Components.swift`, `FieldStyles.swift`, `apps/web/src/kiosk/components/`).
+
+- If something close exists, use it. If it exists but is `private`/`fileprivate`, **widen it
+  rather than copy it** — and say in a comment why it is internal, or the next merge that
+  takes the file from `main` will silently narrow it again.
+- If nothing fits and the piece is generic, put it in the DESIGN SYSTEM, not in your feature —
+  so the next feature finds it instead of writing a third one.
+- If you must copy, say so in the file header with the constraint that forced it, and open a
+  follow-up to extract. (`PlanningMonthGrid` is the worked example: copied because
+  `CalendarView`'s grid is private and that change wasn't allowed to touch the calendar.)
+
 ## Git & pull requests (repo-wide)
 
 **Open PRs ready for review — never as drafts.** Use `gh pr create` (no `--draft`); if a
