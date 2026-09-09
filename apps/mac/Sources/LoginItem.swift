@@ -51,17 +51,11 @@ final class LoginItem {
             // Expected in a development build: launchd will not adopt an app running from
             // DerivedData, and an ad-hoc signature is not an identity it will keep across
             // rebuilds. Say so rather than leaving a toggle that silently does nothing.
+            //
+            // Re-read the real state, but keep the reason we just captured — a plain
+            // `refresh()` here would clear the only explanation there is.
+            isEnabled = SMAppService.mainApp.status == .enabled
             unavailableReason = error.localizedDescription
-            refresh_afterFailure(attempted: enabled)
         }
-    }
-
-    /// Re-read the real state after a failed attempt, without letting a second failure
-    /// overwrite the reason we just captured.
-    private func refresh_afterFailure(attempted: Bool) {
-        let reason = unavailableReason
-        isEnabled = SMAppService.mainApp.status == .enabled
-        unavailableReason = reason
-        _ = attempted
     }
 }
