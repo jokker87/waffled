@@ -67,6 +67,9 @@ struct MenuPresentation: Equatable {
     var showLogs: Bool
     /// Present and inert until the Sparkle appcast (plan §7, Phase 3 item 6).
     var checkForUpdatesEnabled: Bool
+    /// "Quit anyway (server keeps running)" once a stop has refused — the second question
+    /// the alert cannot ask, because by then the app is no longer on its way out.
+    var quitTitle: String
 
     /// - Parameters:
     ///   - status: the last document that decoded, or nil before the first poll returns.
@@ -77,12 +80,16 @@ struct MenuPresentation: Equatable {
     ///   - busy: a start, stop or backup is in flight.
     ///   - runtimeAvailable: false when no `waffled-runtime` could be located at all, in
     ///     which case there is nothing for `Start Waffled` to run.
+    ///   - stopFailure: a `stop` that refused while quitting. Held apart from `failure`
+    ///     because the server it describes is still *running* — so a successful poll must
+    ///     not clear it — and because it is what changes the quit item.
     static func make(
         status: RuntimeStatus?,
         failure: String? = nil,
         transient: String? = nil,
         busy: Bool = false,
-        runtimeAvailable: Bool = true
+        runtimeAvailable: Bool = true,
+        stopFailure: String? = nil
     ) -> MenuPresentation {
         let state = status?.state
         let address = status?.serverAddress
@@ -91,14 +98,20 @@ struct MenuPresentation: Equatable {
         // A fault is a fault whether the runtime reported it or we caught it ourselves,
         // and either way `logs/` is the next place to look.
         let hasFailure = failure != nil
-        let faulted = hasFailure || state == .unhealthy
+        let faulted = hasFailure || stopFailure != nil || state == .unhealthy
         // Something to start: a stack that is down, or one whose start refused — which
-        // leaves the document reading `stopped` with the reason held here.
+        // leaves the document reading `stopped` with the reason held here. A stop that
+        // refused is the opposite situation: the server is still up.
         let startable = runtimeAvailable && (state == .stopped || (hasFailure && state != .running))
 
         let baseLine: String
         let tint: StatusTint
-        switch (hasFailure, state) {
+        switch (hasFailure || stopFailure != nil, state) {
+        case (true, _) where stopFailure != nil:
+            // The most recent thing that happened, and what the quit item is now about.
+            baseLine = "Could not stop Waffled: "
+                + (Self.firstLine(stopFailure) ?? "the runtime refused")
+            tint = .fault
         case (true, _):
             baseLine = Self.firstLine(failure) ?? "Waffled could not start"
             tint = .fault
@@ -132,7 +145,9 @@ struct MenuPresentation: Equatable {
             showStart: startable,
             startEnabled: startable && !busy,
             showLogs: faulted,
-            checkForUpdatesEnabled: false)
+            checkForUpdatesEnabled: false,
+            quitTitle: stopFailure == nil
+                ? "Quit Waffled" : "Quit anyway (server keeps running)")
     }
 
     private static func firstLine(_ text: String?) -> String? {
@@ -188,6 +203,30 @@ enum Lifecycle {
         newState: RuntimeState, startWasAppInitiated: Bool, alreadyOpened: Bool
     ) -> Bool {
         newState == .running && startWasAppInitiated && !alreadyOpened
+    }
+
+    /// What a click on the quit item means. The first click asks the alert and stops the
+    /// server; if that stop refused, the item itself has become the second question
+    /// ("Quit anyway — the server keeps running") and the next click is its answer.
+    enum QuitAction: Equatable {
+        case confirmThenStop
+        case quitWithoutStopping
+    }
+
+    static func quitAction(stopHasFailed: Bool) -> QuitAction {
+        stopHasFailed ? .quitWithoutStopping : .confirmThenStop
+    }
+
+    /// What to do when `stop` comes back. The alert promised the server would stop, so a
+    /// refusal cannot end in a silent exit that leaves it running with no icon left to
+    /// say so.
+    enum StopOutcome: Equatable {
+        case terminate
+        case report(String)
+    }
+
+    static func outcomeAfterStop(error: String?) -> StopOutcome {
+        error.map { StopOutcome.report($0) } ?? .terminate
     }
 
     /// Polling spawns a process, so it is deliberately unhurried once the answer has

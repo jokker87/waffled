@@ -89,7 +89,9 @@ private struct MenuContent: View {
 
         Divider()
 
-        Button("Quit Waffled") { model.confirmAndQuit() }
+        // The title carries the second question after a stop that refused, because an
+        // alert cannot ask it: by then the app is staying, not leaving.
+        Button(menu.quitTitle) { model.confirmAndQuit() }
     }
 }
 

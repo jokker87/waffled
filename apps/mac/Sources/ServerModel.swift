@@ -20,6 +20,9 @@ final class ServerModel {
     /// which on its own would look like a server nobody had tried to start.
     private(set) var failure: String?
     private(set) var transient: String?
+    /// A `stop` that refused. Kept apart from `failure` because the server it describes
+    /// is still running, so the next successful poll must not wipe it.
+    private(set) var stopFailure: String?
     private(set) var busy = false
 
     let location: RuntimeLocation?
@@ -68,7 +71,8 @@ final class ServerModel {
 
     var presentation: MenuPresentation {
         MenuPresentation.make(status: status, failure: failure, transient: transient,
-                              busy: busy, runtimeAvailable: client != nil)
+                              busy: busy, runtimeAvailable: client != nil,
+                              stopFailure: stopFailure)
     }
 
     var isDevMode: Bool { location?.isDevMode ?? false }
@@ -189,6 +193,7 @@ final class ServerModel {
         guard let client, operationTask == nil else { return }
         startWasAppInitiated = true
         failure = nil
+        stopFailure = nil
         busy = true
         operationTask = Task { [weak self] in
             defer { self?.finishOperation() }
@@ -250,6 +255,18 @@ final class ServerModel {
     /// run modally after activating; a `.confirmationDialog` inside a `.menu`-style
     /// `MenuBarExtra` has nothing to present from and never appears.
     func confirmAndQuit() {
+        switch Lifecycle.quitAction(stopHasFailed: stopFailure != nil) {
+        case .quitWithoutStopping:
+            // The menu item is already the second question — "Quit anyway (server keeps
+            // running)" — and this click is its answer. Nothing is asked twice.
+            NSApp.terminate(nil)
+        case .confirmThenStop:
+            guard askToQuit(), operationTask == nil else { return }
+            stopThenQuit()
+        }
+    }
+
+    private func askToQuit() -> Bool {
         NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
         alert.messageText = "Quit Waffled?"
@@ -260,12 +277,36 @@ final class ServerModel {
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Quit and Stop the Server")
         alert.addButton(withTitle: "Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        return alert.runModal() == .alertFirstButtonReturn
+    }
 
-        Task { [weak self] in
-            // `stop` is synchronous by contract: when it returns, the stack is down.
-            try? await self?.client?.stop()
-            await MainActor.run { NSApp.terminate(nil) }
+    /// `stop` can take up to two and a half minutes (a graceful shutdown, then SIGKILL),
+    /// so the menu says `Stopping…` and disables the actions throughout — and if it
+    /// refuses, the app stays where it is and says so. Exiting anyway would leave the
+    /// household's server running with no icon left to explain it.
+    private func stopThenQuit() {
+        busy = true
+        stopFailure = nil
+        note("Stopping…", clearAfter: nil)
+        operationTask = Task { [weak self] in
+            defer { self?.finishOperation() }
+            var stopError: String?
+            do {
+                // `stop` is synchronous by contract: when it returns, the stack is down.
+                try await self?.client?.stop()
+            } catch let error as RuntimeClientError {
+                stopError = error.firstLine
+            } catch {
+                stopError = error.localizedDescription
+            }
+
+            switch Lifecycle.outcomeAfterStop(error: stopError) {
+            case .terminate:
+                NSApp.terminate(nil)
+            case let .report(message):
+                self?.recordStopFailure(message)
+                await self?.refresh()
+            }
         }
     }
 
@@ -278,6 +319,14 @@ final class ServerModel {
 
     private func recordFailure(_ message: String) {
         failure = message
+    }
+
+    /// The `Stopping…` note has to go with it: `transient` outranks everything in the
+    /// status line, and this one was left up deliberately until something replaced it.
+    private func recordStopFailure(_ message: String) {
+        transientTask?.cancel()
+        transient = nil
+        stopFailure = message
     }
 
     /// A few seconds of answer in the status line. `clearAfter: nil` leaves it up until

@@ -169,6 +169,33 @@ final class MenuPresentationTests: XCTestCase {
         XCTAssertFalse(m.openEnabled)
     }
 
+    /// A `stop` that refused during quit: the app is still here, the server is still
+    /// running, and the menu has to say both. The quit item becomes the second question.
+    func testAFailedStopIsReportedAndChangesTheQuitItem() throws {
+        let s = try RuntimeStatus.decode(Fixtures.data(Fixtures.fullRunning))
+        let m = MenuPresentation.make(status: s, stopFailure: "postgres would not shut down")
+
+        XCTAssertEqual(m.statusLine, "Could not stop Waffled: postgres would not shut down")
+        XCTAssertEqual(m.statusTint, .fault)
+        XCTAssertTrue(m.showLogs, "a stop that failed is exactly a logs question")
+        XCTAssertEqual(m.quitTitle, "Quit anyway (server keeps running)")
+        XCTAssertFalse(m.showStart, "the server never stopped — there is nothing to start")
+
+        let ordinary = MenuPresentation.make(status: s)
+        XCTAssertEqual(ordinary.quitTitle, "Quit Waffled")
+    }
+
+    /// While the stop is in flight the status line says so and the actions are off: it
+    /// can take two and a half minutes, and a menu that looks idle invites a second click.
+    func testStoppingIsShownAndTheActionsAreDisabled() throws {
+        let s = try RuntimeStatus.decode(Fixtures.data(Fixtures.fullRunning))
+        let m = MenuPresentation.make(status: s, transient: "Stopping…", busy: true)
+
+        XCTAssertEqual(m.statusLine, "Stopping…")
+        XCTAssertFalse(m.backupEnabled)
+        XCTAssertFalse(m.startEnabled)
+    }
+
     /// "Back up now" and the address click both answer in the status line for a few
     /// seconds. A transient message wins over everything, including a failure.
     func testATransientMessageTakesTheStatusLine() throws {

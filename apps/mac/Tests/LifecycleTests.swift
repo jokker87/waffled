@@ -60,6 +60,19 @@ final class LifecycleTests: XCTestCase {
         }
     }
 
+    /// Quitting stops the household's server, so a `stop` that refuses must not be
+    /// swallowed on the way out: the app stays, says why, and the quit item asks a second
+    /// question — whose answer is the next click on it.
+    func testAFailedStopTurnsQuitIntoAQuestionRatherThanAnExit() {
+        XCTAssertEqual(Lifecycle.outcomeAfterStop(error: nil), .terminate)
+        XCTAssertEqual(Lifecycle.outcomeAfterStop(error: "postgres would not shut down"),
+                       .report("postgres would not shut down"))
+
+        XCTAssertEqual(Lifecycle.quitAction(stopHasFailed: false), .confirmThenStop)
+        XCTAssertEqual(Lifecycle.quitAction(stopHasFailed: true), .quitWithoutStopping,
+                       "the changed menu item is the second confirmation")
+    }
+
     /// Polling is cheap but not free (it spawns a process), so it slows down once the
     /// answer stops changing.
     func testPollingIsFasterWhileSomethingIsHappening() {
