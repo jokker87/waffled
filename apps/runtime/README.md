@@ -100,7 +100,7 @@ directory.
 ```text
 ~/Library/Application Support/Waffled/
   config.env             0600 — the same variables as infra/compose/.env
-  runtime.json           ports, install id, socket dir, the bundle build last used
+  runtime.json           ports, install id, socket dir, the bundle build and version last used
   postgres/              PGDATA — excluded from Time Machine
   media/                 uploaded blobs (the api writes, Caddy serves)
   backups/               pg_dump output: routine backups and pre-migration snapshots
@@ -487,7 +487,20 @@ Plan §5: *rollback means restore, not reverse migrations.* Before `start` runs 
 it checks whether any are actually pending — comparing the bundle's migration **names**
 against `pgmigrations`, because the api runs node-pg-migrate with `checkOrder:false` and
 a database can legitimately hold a later migration while an earlier one is still pending.
-If any are, it dumps to `backups/pre-migrate-<version>-<stamp>.dump` first.
+If any are, it dumps to `backups/pre-migrate-<from>-to-<to>-<stamp>.dump` first — both
+versions, because a snapshot marks a *crossing* and the question anyone asks of one is
+which way it was going. `to` is the running build; `from` is the version `runtime.json`
+recorded on the last successful start, or `unknown` on data written before that was kept.
+The sidecar carries the same pair as `fromVersion`/`toVersion`, so a program never has to
+split a filename on dashes that also appear inside version numbers. Names written by
+earlier builds still parse: the timestamp is the last two dash-separated fields and
+everything before it is prose.
+
+One rough edge, recorded rather than papered over: a **retried** update names its snapshot
+`<new>-to-<new>`. The first attempt migrated and failed, so it never recorded a version,
+while the successful start before it did — so the second attempt's "from" is already the
+new build. Two failed updates in a row therefore leave several same-looking names, and it
+is their timestamps and sidecars, not their names, that put the story back in order.
 
 If the api then fails its health gate, that snapshot is **restored automatically** and
 the start fails, naming the file. The rollback stops **PowerSync as well as the api**
@@ -512,6 +525,18 @@ costs a household nothing: retention removes only files *beyond* the limit, so a
 run in a directory holding `keep` or fewer removes none at all. Snapshots are ordered by
 their parsed timestamp, not their name — sorting `pre-migrate-0.9.0-…` as a string puts
 it after `0.14.3` and would delete the newest.
+
+**A refused start prunes nothing.** Retention lives inside `snapshotBeforeMigrate` and
+`Backup`, both of which are downstream of the downgrade guard, so a start that refuses
+leaves `backups/` exactly as it found it. That is not incidental: the file the refusal
+recommends is in that directory, and a guard that pruned on its way out could delete the
+one thing it just told someone to restore.
+
+There is **one** snapshot per schema change, not two. An earlier draft of the plan
+reserved a second retention prefix for the updater, on the assumption that swapping
+binaries and changing the schema were separate events that should not evict each other's
+rollback points. With the one-unit decision below they are the same event — a `start` from
+a newer bundle — so `pre-migrate-` is the only snapshot pool there is.
 
 ### Schedule
 
@@ -541,6 +566,73 @@ Recorded because each looks like a bug to anyone who reads only one side:
 | retention | age (`find -mtime +14`) | count (last 14) | a family Mac asleep for a fortnight would wake to an age-based pruner having deleted every backup it had and taken no new one |
 | `backup_runs` on restore | n/a | **not written** | the table has a `kind` column but the api reads `where status in ('success','failed') order by finished_at desc limit 1` with no filter on it, so a restore row would be reported as "the last backup" and a household that restored last week would be told its backups were current |
 | `BACKUP_ENABLED` | `true` | `true` (was `false`) | the api short-circuits its backup health check to "turned off" on `false`, which would hide the rows the runtime writes — a nightly backup failing for a week would look exactly like one succeeding for a week |
+
+## Updates
+
+**The Mac app is one unit, Plex-style.** Sparkle swaps the whole `Waffled.app` — with this
+runtime bundle inside it — relaunches, and the menu-bar app runs `waffled-runtime start`
+from the *new* bundle against the *existing* data directory. **A `start` from a newer
+bundle IS the update.** There is no binary-swap step for the runtime to perform, no
+`update` subcommand, and no second copy of the old bundle on disk to fall back to.
+
+So "rollback" has two halves, and only one of them is ours:
+
+| | who does it | how |
+|---|---|---|
+| the **data** | the runtime | snapshot → migrate → api health gate → restore the snapshot and refuse to come up |
+| the **availability** | a person | re-install the previous DMG, which must then start cleanly on the restored data |
+
+**What a failed update looks like.** The new build starts, sees migrations pending, dumps
+`pre-migrate-<old>-to-<new>-<stamp>.dump`, migrates, and the api fails its health gate.
+The database is restored from that snapshot and `start` exits with an error naming the
+file. Nothing is left running. The household is exactly where they were, on a schema their
+*previous* build can serve — which is what makes the second half work at all.
+
+**Going back.** Re-installing the previous version and starting is supported and tested:
+the older bundle finds nothing pending, takes no snapshot, and comes up on the restored
+data with PowerSync's storage and replication slot rebuilt. What it must never do is open
+a database a *newer* build already migrated, which is the state after an update that
+succeeded, or one that failed somewhere the automatic restore could not reach.
+
+### The downgrade guard
+
+`start` compares `pgmigrations` against the migrations the bundle ships and **refuses**
+when the database holds any this build does not — after Postgres is up, before migrate and
+the api. Migrations only run forward: there is no way to bring a schema back down, and an
+api serving tables and columns its code does not know about fails silently rather than
+loudly. `doctor` reports the same condition as a **FAIL**, starting Postgres for itself the
+way `backup` does — a refused start leaves nothing running, so a check that needed a live
+server would be dead code in the one case it exists for.
+
+The refusal names both versions, the migrations this build lacks, and the newest snapshot
+in `backups/` that **this** build could actually restore (checked with the same
+`CheckRestorable` `restore` uses, so it can never recommend a file that would then be
+refused), and then the two ways out: re-install the newer version, or
+`waffled-runtime restore <that file> --yes`.
+
+It **does not auto-restore**. Everything the newer version wrote is still on disk, and
+restoring is the one action here that discards it — that is a person's decision, not a
+guard's, running at startup on a Mac nobody is sitting at.
+
+Two cases it keeps apart. Migrations *above* this build's newest are evidence of a newer
+Waffled. Migrations *below* it are not — this repo has renumbered before (0084→0086) — so
+that case refuses with its own wording rather than sending someone after a download that
+does not exist. And a version is never described as newer than itself: the newer build can
+migrate and then fail before it goes green, so it never records itself in `runtime.json`.
+
+### What `runtime.json` and `status` remember
+
+`bundleVersion` is the version the data was last **started** with, written only once a
+start has gone green. The timing is the whole point: recording the new version on the way
+in would overwrite the only record of what wrote the data with the thing about to change
+it, and a start that fails must leave that record intact. It is the `from` half of a
+snapshot's name and of the guard's message.
+
+A start that finds a different version than the file remembered also writes
+`previousBundleVersion` and `bundleUpdatedAt`, which surface additively in `status --json`
+as `bundle.version`, `bundle.previousVersion` and `bundle.updatedAt` — what the menu-bar
+app turns into "Updated to 0.15.0". They come from the file rather than from the process
+that did the updating, because `status` is a separate command run seconds later.
 
 ## Tests
 
@@ -603,6 +695,21 @@ real bundle into a temp data directory **whose path contains a space**:
   objects still exist, so the migration fails and nothing ever reaches the gate. It then
   asserts the restored state is the **pre-migration** one specifically, since a snapshot
   taken a moment too late would still restore something and still look like it worked.
+- `TestUpdateAcrossTwoBundleVersions` (also `internal/supervisor`) is the only test that
+  runs **two** bundles against one data directory, which is the only way to reach the
+  things that exist between versions: A → a canary row → B (the update) → B with a forced
+  api-gate failure (the rollback) → **A again**, the re-install path, on the restored data
+  → B → A refused by the downgrade guard. It asserts one snapshot per schema change, named
+  and sidecar'd for the crossing and taken *before* the migration; `status` reporting the
+  new version and the old one as previous, read through a **fresh** supervisor because the
+  menu-bar app is a separate process; and a refusal that names a file which exists and
+  which `CheckRestorable` agrees the older build could serve. Bundle B is the real bundle
+  APFS-cloned (`cp -c`, ~7s) with its version bumped, one leaf-table migration added and
+  its manifest re-scanned. The whole loop takes **about 55s**.
+- `TestStartRefusesADatabaseMigratedByANewerBuild` (there too, for the unexported helpers)
+  is the guard on its own, at the cost of one start: a single `pgmigrations` row is all a
+  newer build would leave behind, and it is what the guard reads. It also asserts `doctor` reports the same thing with the stack
+  **down** and puts Postgres back afterwards.
 - `TestTheAdvertisementFollowsSetupBeingFinished` lives there for the same kind of reason:
   watching `setup=1` flip to the household's own name in seconds rather than a minute means
   shortening `bonjourSetupPoll`, which is unexported and never written in production.
@@ -638,14 +745,15 @@ The plan's Phase 2 exit criterion is under 60s; the test fails if a cold start e
 
 ## Not this task
 
-The updater is deliberately absent, with a seam left for it.
-The updater's flow — snapshot → stop → swap the runtime → migrate → health → restore on
-failure — is the sequence `start` already runs, so it should reuse `ensurePostgres`,
-`snapshotBeforeMigrate`, `rollbackTo`, `replaceDatabase` and `backup.CheckRestorable`
-rather than growing a second copy. It will want its **own** retention prefix beside
-`pre-migrate-`: a snapshot taken before swapping binaries answers a different question
-from one taken before a schema change, and sharing a pool would let either evict the
-other.
+The updater's **data** half is done — see [Updates](#updates): the snapshot, the migration,
+the health gate, the automatic restore and the downgrade guard, proven across two real
+bundle versions. There is no `update` subcommand and there should not be one: a `start`
+from a newer bundle already is the update, and a subcommand would have to know about DMGs
+and app bundles, which is the other half's job.
+
+What remains is that other half, in Phase 3: **Sparkle** — the appcast, the signed DMG,
+swapping `Waffled.app` and relaunching. None of it is the runtime's; the runtime's part is
+to be started afterwards and do the right thing, which is what it now does.
 
 ## Portability
 

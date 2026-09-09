@@ -194,13 +194,21 @@ uses bash because it is throwaway and the point is to learn, not to build.
   created, so installs predating this are repaired on their next start; `doctor` re-asks
   tmutil itself rather than trusting the memo. `backups/` *is* backed up. Same for iCloud
   Drive: `doctor` warns when the data dir sits under Desktop/Documents/iCloud.
-- **Rollback means restore, not reverse migrations.** *(done for migrations — PR #186;
-  the binary swap is still Phase 3 item 6)* → `start` takes a `pg_dump` snapshot before
-  migrating, but only when migrations are genuinely pending, and a failed api health gate
-  restores it automatically and refuses to come up, naming the file. A snapshot that
-  cannot be taken stops the start rather than proceeding without a way back. The updater
-  reuses this sequence with a binary swap inserted; it needs its own retention prefix, so
-  an update snapshot and a migration snapshot cannot evict each other.
+- **Rollback means restore, not reverse migrations.** *(done — PR #186, and PR #TBD across
+  two bundle versions)* → `start` takes a `pg_dump` snapshot before migrating, but only when
+  migrations are genuinely pending, and a failed api health gate restores it automatically
+  and refuses to come up, naming the file. A snapshot that cannot be taken stops the start
+  rather than proceeding without a way back. Snapshots are named
+  `pre-migrate-<from>-to-<to>-<stamp>.dump` for the crossing they mark, and there is exactly
+  **one** per schema change — an earlier draft of this bullet reserved a second retention
+  prefix for the updater, which the one-unit decision in §6 makes unnecessary: swapping the
+  app and changing the schema are the same event. The whole loop is now tested across two
+  genuinely different bundles, including the half the runtime cannot do for anyone —
+  re-installing the previous version and starting on the restored data. And an older bundle
+  now **refuses** data a newer one has already migrated (the state after a rollback if
+  someone re-installs before the restore, or after a partial failure), naming the newest
+  snapshot it could actually restore and the two ways out, rather than serving a schema its
+  code does not know.
 - **Postgres major upgrades** are now ours. → Pin PG 16 for the whole 1.x line; build the
   dump/restore upgrader before ever bumping.
 - **Architectures.** arm64 first (the only Mac we can test on today); x86_64 via a universal
@@ -231,9 +239,15 @@ uses bash because it is throwaway and the point is to learn, not to build.
 
 - ~~PowerSync path (a) build from tag vs (b) own entry over npm packages.~~ **Resolved: (a).** The spike built from the `v1.22.0` tag on the first try; (b) was never needed.
 - Whether the default public port stays 8080 or moves to something less collision-prone.
-- Sparkle vs a home-grown updater. Sparkle for the app bundle is the obvious choice; the
-  question is whether the *runtime* updates independently of the app (Plex does not; keep it
-  one unit unless a reason appears).
+- ~~Sparkle vs a home-grown updater, and whether the *runtime* updates independently of the
+  app.~~ **Resolved: Sparkle, and one unit.** The app is updated whole, Plex-style: Sparkle
+  swaps `Waffled.app` with the runtime bundle inside it, relaunches, and the menu-bar app
+  starts the *new* runtime against the *existing* data directory — so **a `start` from a
+  newer bundle IS the update**, and the runtime needs no `update` subcommand, no binary-swap
+  step and no second copy of the old bundle on disk. That splits rollback in two: the
+  runtime protects the data (snapshot → migrate → health gate → restore), and a person
+  recovers availability by re-installing the previous DMG, which now starts cleanly on the
+  restored data or refuses with instructions. Proven end to end in PR #TBD.
 - ~~Whether to bind Bonjour advertisement into the runtime (Go, cross-platform later) or the
   Swift app (`NWListener` is trivial).~~ **Resolved: the runtime**, by supervising
   `/usr/bin/dns-sd -R` as one more child rather than linking a responder. It registers
@@ -318,7 +332,16 @@ Throwaway bash under `infra/native/spike/`. Purpose: **learn**, not build.
    (macOS runner) and hits the same health endpoints as Phase 1. `.github/workflows/native-runtime.yml`
    runs `apps/runtime`'s Go checks on every PR, plus a `macos-15` job that builds the real
    bundle (`build.sh fetch|build|verify`) and runs the `-tags integration` suite against it.
-5. **Exit criterion:** `waffled-runtime start` on a fresh Mac user account reaches green in
+5. *(done — PR #TBD)* The update path, across two bundle versions. A `start` from a newer
+   bundle is the update (§6), so the runtime's half is the data: snapshot named for the
+   crossing → migrate → api health gate → automatic restore, then a **downgrade guard** that
+   refuses to open data a newer build has already migrated and says how to get out of it —
+   re-install the newer version, or restore the newest snapshot this build can actually
+   serve. `status --json` grows `bundle.version`, `bundle.previousVersion` and
+   `bundle.updatedAt` for the menu bar's "Updated to X". The whole loop is tested against two
+   real bundles over one data directory, including re-installing the previous version onto
+   rolled-back data — the half a person does, which nothing had exercised before.
+6. **Exit criterion:** `waffled-runtime start` on a fresh Mac user account reaches green in
    under 60s and `stop`/`start` re-opens the same data.
 
 ### Phase 3 — Menu-bar app
@@ -330,8 +353,9 @@ Throwaway bash under `infra/native/spike/`. Purpose: **learn**, not build.
    warning.
 4. Login item via `SMAppService`.
 5. Signing + notarization pipeline (every embedded binary), DMG build, Sparkle appcast.
-6. Updater flow: snapshot → stop → swap runtime → migrate → health → start, with restore on
-   failure.
+6. Updater: the Sparkle appcast, swapping `Waffled.app` and relaunching. The **data** half —
+   snapshot → migrate → health gate → restore on failure, plus the downgrade guard — is done
+   in the runtime (Phase 2 item 5), because a `start` from the newer bundle is the update.
 7. **Exit criterion:** a fresh Mac, no dev tools, download → household created in under
    five minutes, timed by someone who didn't build it.
 
