@@ -57,11 +57,8 @@ final class ServerModel {
 
     // MARK: what the menu bar draws
 
-    /// A held failure outranks the document: the icon has to show the fault even though
-    /// the stack it describes is, technically, merely stopped.
     var iconState: RuntimeState {
-        if failure != nil { return .unhealthy }
-        return status?.state ?? .stopped
+        Lifecycle.iconState(reported: status?.state, failure: failure, stopFailure: stopFailure)
     }
 
     var icon: IconAppearance { IconAppearance.forState(iconState) }
@@ -159,6 +156,9 @@ final class ServerModel {
             // clearing it on any successful poll would erase the message a moment after
             // it appeared, since `status` keeps answering fine when `start` refuses.
             if fresh.state == .running { failure = nil }
+            // The opposite rule for a failed stop: it describes a server that is still
+            // up, and is forgotten the moment a poll says it no longer is.
+            if !Lifecycle.stopFailureStillApplies(reported: fresh.state) { stopFailure = nil }
             openBrowserIfThisAppStartedIt(fresh)
         } catch {
             status = nil

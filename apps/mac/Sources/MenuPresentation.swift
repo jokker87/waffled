@@ -221,6 +221,22 @@ enum Lifecycle {
         stopHasFailed ? .quitWithoutStopping : .confirmThenStop
     }
 
+    /// What the icon draws. A held failure outranks the document — a start that refused
+    /// or a stop that refused are both faults a person has to see without opening the
+    /// menu, even though the stack behind them is, technically, merely stopped or merely
+    /// running.
+    static func iconState(reported: RuntimeState?, failure: String?, stopFailure: String?) -> RuntimeState {
+        if failure != nil || stopFailure != nil { return .unhealthy }
+        return reported ?? .stopped
+    }
+
+    /// A failed stop describes a server that is still up. The moment a poll says it is
+    /// not — stopped from Terminal, fallen over and restarted — the refusal is stale, and
+    /// holding it would put "Start Waffled" beside "Could not stop Waffled".
+    static func stopFailureStillApplies(reported: RuntimeState) -> Bool {
+        reported == .running || reported == .unhealthy
+    }
+
     /// What to do when `stop` comes back. The alert promised the server would stop, so a
     /// refusal cannot end in a silent exit that leaves it running with no icon left to
     /// say so.

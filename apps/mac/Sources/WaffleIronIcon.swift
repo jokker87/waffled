@@ -11,12 +11,17 @@ import AppKit
 ///
 /// The geometry is fractions of the square with the origin bottom-left, which is how it
 /// was drawn and approved at 18 pt; everything scales from `pointSize`.
+///
+/// Main-actor by declaration, not by convention: the cache below is a plain dictionary,
+/// and every caller today is the main-actor model — this makes the compiler hold that
+/// line for whoever adds the next caller.
+@MainActor
 enum WaffleIronIcon {
     /// The lid carries a 3 × 2 grid — six holes, which is also the length of the cooking
     /// animation.
-    static let columns = 3
-    static let rows = 2
-    static var holeCount: Int { columns * rows }
+    nonisolated static let columns = 3
+    nonisolated static let rows = 2
+    nonisolated static var holeCount: Int { columns * rows }
 
     // Fractions of the square. Bottom-left origin, matching CoreGraphics.
     private static let knobFraction = CGRect(x: 0.38, y: 0.86, width: 0.24, height: 0.10)

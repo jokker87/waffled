@@ -73,6 +73,29 @@ final class LifecycleTests: XCTestCase {
                        "the changed menu item is the second confirmation")
     }
 
+    /// The icon is the only thing a person sees without opening the menu, so a failed
+    /// stop — the one situation that needs a person — has to reach it, exactly as a
+    /// failed start does.
+    func testTheIconShowsAFailedStopAsWellAsAFailedStart() {
+        XCTAssertEqual(Lifecycle.iconState(reported: .running, failure: nil, stopFailure: nil), .running)
+        XCTAssertEqual(Lifecycle.iconState(reported: .stopped, failure: "start refused", stopFailure: nil), .unhealthy)
+        XCTAssertEqual(Lifecycle.iconState(reported: .running, failure: nil, stopFailure: "postgres would not shut down"),
+                       .unhealthy, "a server that would not stop is a fault the icon must show")
+        XCTAssertEqual(Lifecycle.iconState(reported: nil, failure: nil, stopFailure: nil), .stopped)
+    }
+
+    /// A failed stop describes a server that is still running. Once a poll says it is
+    /// not — someone stopped it from Terminal, or it fell over — the message is stale,
+    /// and keeping it would show "Start Waffled" beside "Could not stop Waffled".
+    func testAFailedStopIsForgottenOnceTheServerIsNoLongerRunning() {
+        XCTAssertTrue(Lifecycle.stopFailureStillApplies(reported: .running))
+        XCTAssertTrue(Lifecycle.stopFailureStillApplies(reported: .unhealthy),
+                      "part of the stack is still up; the refusal still describes it")
+        XCTAssertFalse(Lifecycle.stopFailureStillApplies(reported: .stopped))
+        XCTAssertFalse(Lifecycle.stopFailureStillApplies(reported: .starting),
+                       "a start after a failed stop is a new story")
+    }
+
     /// Polling is cheap but not free (it spawns a process), so it slows down once the
     /// answer stops changing.
     func testPollingIsFasterWhileSomethingIsHappening() {

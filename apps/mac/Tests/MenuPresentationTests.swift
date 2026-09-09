@@ -50,7 +50,7 @@ final class MenuPresentationTests: XCTestCase {
 
     /// The mark is drawn, not a symbol, so the thing worth asserting is that the four
     /// states really do look different — that is the whole job of a menu-bar icon.
-    func testTheFourStatesDrawFourDifferentImages() throws {
+    @MainActor func testTheFourStatesDrawFourDifferentImages() throws {
         let images = try [RuntimeState.stopped, .starting, .running, .unhealthy].map { state in
             let icon = IconAppearance.forState(state)
             return try XCTUnwrap(
@@ -61,7 +61,7 @@ final class MenuPresentationTests: XCTestCase {
     }
 
     /// Template, or macOS will not recolour it for a dark menu bar and it disappears.
-    func testTheImageIsATemplateSizedInPoints() {
+    @MainActor func testTheImageIsATemplateSizedInPoints() {
         let image = WaffleIronIcon.image(state: .running, fillCount: 0, pointSize: 18)
 
         XCTAssertTrue(image.isTemplate)
@@ -70,7 +70,7 @@ final class MenuPresentationTests: XCTestCase {
 
     /// Redrawn on every poll it would be a needless allocation twice a second, so the
     /// frames are drawn once and handed back.
-    func testRenderedFramesAreCached() {
+    @MainActor func testRenderedFramesAreCached() {
         let first = WaffleIronIcon.image(state: .starting, fillCount: 2, pointSize: 18)
         let second = WaffleIronIcon.image(state: .starting, fillCount: 2, pointSize: 18)
         let other = WaffleIronIcon.image(state: .starting, fillCount: 3, pointSize: 18)
@@ -233,12 +233,17 @@ final class MenuPresentationTests: XCTestCase {
     /// While the stop is in flight the status line says so and the actions are off: it
     /// can take two and a half minutes, and a menu that looks idle invites a second click.
     func testStoppingIsShownAndTheActionsAreDisabled() throws {
-        let s = try RuntimeStatus.decode(Fixtures.data(Fixtures.fullRunning))
+        // A stopped document, so that `startEnabled` would be true if `busy` were not
+        // holding it off — against a running one this asserts nothing about `busy`.
+        let s = try RuntimeStatus.decode(Fixtures.data(Fixtures.minimalStopped))
+        let idle = MenuPresentation.make(status: s)
+        XCTAssertTrue(idle.startEnabled, "precondition: start is offered while stopped")
+
         let m = MenuPresentation.make(status: s, transient: "Stopping…", busy: true)
 
         XCTAssertEqual(m.statusLine, "Stopping…")
         XCTAssertFalse(m.backupEnabled)
-        XCTAssertFalse(m.startEnabled)
+        XCTAssertFalse(m.startEnabled, "busy holds the actions off, whatever the state")
     }
 
     /// "Back up now" and the address click both answer in the status line for a few
