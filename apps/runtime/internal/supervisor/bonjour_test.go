@@ -300,3 +300,29 @@ func TestAHealthlessChildThatStaysUpStartsCleanly(t *testing.T) {
 		t.Error("the child is not running after a successful start")
 	}
 }
+
+// Every advertisement used to fork scutil for a computer name a settled install throws
+// away: Census.Advertise returns the household's own name and never looks at it. The name
+// is now asked for only where the fallback needs it.
+func TestASettledInstallNeverForksForTheComputerName(t *testing.T) {
+	restore := computerName
+	asked := 0
+	computerName = func() string {
+		asked++
+		return "Kevin’s MacBook Pro"
+	}
+	t.Cleanup(func() { computerName = restore })
+
+	if a := plannedAdvertisement(bonjour.Census{Known: true, Count: 1, Name: "The Seinfelds"}); a.name != "The Seinfelds" {
+		t.Fatalf("name = %q, want the household's own", a.name)
+	}
+	if asked != 0 {
+		t.Errorf("scutil was forked %d times for a name the household does not need", asked)
+	}
+	if a := plannedAdvertisement(bonjour.Census{Known: true, Count: 0}); a.name != "Waffled on Kevin’s MacBook Pro" {
+		t.Errorf("name = %q, want the machine fallback", a.name)
+	}
+	if asked != 1 {
+		t.Errorf("the fallback asked %d times, want once", asked)
+	}
+}

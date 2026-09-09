@@ -6,8 +6,11 @@ import (
 	"unicode/utf8"
 )
 
+// machine stands in for the callback that asks this Mac its name.
+func machine(name string) func() string { return func() string { return name } }
+
 func TestCensusPicksTheHouseholdNameWhenThereIsExactlyOne(t *testing.T) {
-	name, setup := Census{Known: true, Count: 1, Name: "The Seinfelds"}.Advertise("Kevin’s MacBook Pro")
+	name, setup := Census{Known: true, Count: 1, Name: "The Seinfelds"}.Advertise(machine("Kevin’s MacBook Pro"))
 	if name != "The Seinfelds" {
 		t.Errorf("name = %q, want the household name", name)
 	}
@@ -34,7 +37,7 @@ func TestCensusFallsBackToTheComputerName(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.what, func(t *testing.T) {
-			name, setup := tc.census.Advertise("Kevin’s MacBook Pro")
+			name, setup := tc.census.Advertise(machine("Kevin’s MacBook Pro"))
 			if name != "Waffled on Kevin’s MacBook Pro" {
 				t.Errorf("name = %q, want the computer-name fallback", name)
 			}
@@ -46,7 +49,7 @@ func TestCensusFallsBackToTheComputerName(t *testing.T) {
 }
 
 func TestCensusSurvivesAnEmptyComputerName(t *testing.T) {
-	name, _ := Census{}.Advertise("  ")
+	name, _ := Census{}.Advertise(machine("  "))
 	if name != "Waffled" {
 		t.Errorf("name = %q, want plain %q when the machine has no name", name, "Waffled")
 	}
@@ -56,7 +59,7 @@ func TestCensusSurvivesAnEmptyComputerName(t *testing.T) {
 // person typed. Cutting mid-rune would put an invalid UTF-8 sequence on the wire.
 func TestInstanceNameIsTruncatedOnARuneBoundary(t *testing.T) {
 	long := strings.Repeat("é", 100) // 200 bytes
-	name, _ := Census{Known: true, Count: 1, Name: long}.Advertise("mac")
+	name, _ := Census{Known: true, Count: 1, Name: long}.Advertise(machine("mac"))
 	if len(name) > MaxInstanceNameBytes {
 		t.Errorf("name is %d bytes, want at most %d", len(name), MaxInstanceNameBytes)
 	}
@@ -174,5 +177,36 @@ func TestHostAlwaysNamesTheMulticastDomain(t *testing.T) {
 		if got := Host(in); got != want {
 			t.Errorf("Host(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// Asking the Mac its name means forking scutil with a three-second timeout, and a settled
+// install never uses the answer: the household names itself. So the question is asked
+// only where it is needed, not on every advertisement.
+func TestASettledCensusNeverAsksForTheComputerName(t *testing.T) {
+	asked := 0
+	counted := func() string {
+		asked++
+		return "Kevin’s MacBook Pro"
+	}
+	if name, _ := (Census{Known: true, Count: 1, Name: "The Seinfelds"}).Advertise(counted); name != "The Seinfelds" {
+		t.Fatalf("name = %q", name)
+	}
+	if asked != 0 {
+		t.Errorf("the computer name was asked for %d times by a census that cannot use it", asked)
+	}
+	// The fallback still gets it.
+	if name, _ := (Census{Known: true, Count: 0}).Advertise(counted); name != "Waffled on Kevin’s MacBook Pro" {
+		t.Errorf("name = %q, want the machine fallback", name)
+	}
+	if asked != 1 {
+		t.Errorf("the fallback asked for the computer name %d times, want once", asked)
+	}
+}
+
+// A caller with nothing to offer must still get a name.
+func TestCensusSurvivesNoComputerNameCallback(t *testing.T) {
+	if name, _ := (Census{}).Advertise(nil); name != "Waffled" {
+		t.Errorf("name = %q, want the bare product name", name)
 	}
 }

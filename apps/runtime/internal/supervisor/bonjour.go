@@ -149,9 +149,15 @@ type advertisement struct {
 	settled bool
 }
 
+// computerName goes through a package var so a test can count how often this Mac is asked
+// its name — it costs a scutil fork with a three-second timeout, which a settled install
+// must never pay. Always the real function in production.
+var computerName = bonjour.ComputerName
+
 // plannedAdvertisement is what a census asks for, before anything is registered.
 func plannedAdvertisement(c bonjour.Census) advertisement {
-	name, setup := c.Advertise(bonjour.ComputerName())
+	// The callback is passed, not called: a household that names itself never needs it.
+	name, setup := c.Advertise(computerName)
 	return advertisement{name: name, setup: setup, settled: c.Known && c.Count >= 1}
 }
 

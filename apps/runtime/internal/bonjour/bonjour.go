@@ -54,15 +54,22 @@ type Census struct {
 
 // Advertise turns the census and this machine's name into the instance name to publish
 // and the value of the `setup` flag.
-func (c Census) Advertise(computerName string) (name string, setup bool) {
+//
+// The machine's name arrives as a callback rather than a string because asking for it
+// costs a subprocess (scutil, with a timeout) and a settled install never uses the answer
+// — the household names itself. Nil is allowed, and means this machine has no name to
+// offer.
+func (c Census) Advertise(computerName func() string) (name string, setup bool) {
 	if c.Known && c.Count == 1 {
 		if household := strings.TrimSpace(c.Name); household != "" {
 			return truncate(household, MaxInstanceNameBytes), false
 		}
 	}
 	fallback := productName
-	if machine := strings.TrimSpace(computerName); machine != "" {
-		fallback = fallbackPrefix + machine
+	if computerName != nil {
+		if machine := strings.TrimSpace(computerName()); machine != "" {
+			fallback = fallbackPrefix + machine
+		}
 	}
 	return truncate(fallback, MaxInstanceNameBytes), c.Known && c.Count == 0
 }
