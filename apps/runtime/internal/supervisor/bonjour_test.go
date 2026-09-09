@@ -335,3 +335,62 @@ func TestASettledInstallNeverForksForTheComputerName(t *testing.T) {
 		t.Errorf("the fallback asked %d times, want once", asked)
 	}
 }
+
+// An exit reason that arrives while bonjour.json is missing used to be dropped on the
+// floor: reportBonjourExit read the file, found nothing and returned without writing or
+// logging. The file can genuinely be absent — the very first writeBonjour only WARNS on
+// failure, and a removed or half-written file reads the same way — and status runs in a
+// different process with nothing else to read, so the advertiser would report as "not
+// advertising" with an empty reason for the rest of the run. That is precisely the state
+// this callback exists to make visible.
+func TestAnExitReasonSurvivesAMissingStateFile(t *testing.T) {
+	s := &Supervisor{
+		log: testLogger(t), runner: newTestRunner(t), children: map[string]*child{},
+		plan: services.Plan{Layout: datadir.At(t.TempDir())},
+	}
+	if _, ok := readBonjourState(s.plan.Layout.BonjourState); ok {
+		t.Fatal("a state file exists before anything wrote one")
+	}
+
+	s.reportBonjourExit("dns-sd exited with status 1", true)
+
+	st, ok := readBonjourState(s.plan.Layout.BonjourState)
+	if !ok {
+		t.Fatal("no bonjour.json was written, so the exit reason is unreadable to status")
+	}
+	if !strings.Contains(st.Error, "status 1") {
+		t.Errorf("error = %q, want the reason supervision reported", st.Error)
+	}
+	// Giving up is the half a person has to act on: nothing retries without them.
+	if !strings.Contains(st.Error, "restart the server") {
+		t.Errorf("error = %q, want the advice that goes with giving up", st.Error)
+	}
+}
+
+// A reconstructed record should still name what was being advertised. Once bonjour.json
+// is gone, the dying child's own argv is the only place that survives, and a record that
+// names the instance is the difference between "something failed" and a line status can
+// actually print.
+func TestAReconstructedStateNamesWhatWasBeingAdvertised(t *testing.T) {
+	s := &Supervisor{
+		log: testLogger(t), runner: newTestRunner(t), children: map[string]*child{},
+		plan: services.Plan{Layout: datadir.At(t.TempDir())},
+	}
+	inst := bonjour.Instance{Name: "The Seinfelds", Port: 8080, URL: "http://192.168.1.5:8080", Version: "0.15.0"}
+	s.children[services.Bonjour] = &child{spec: services.Spec{
+		Name: services.Bonjour, Path: "dns-sd", Args: inst.Args("dns-sd"),
+	}}
+
+	s.reportBonjourExit("dns-sd exited with status 1", false)
+
+	st, ok := readBonjourState(s.plan.Layout.BonjourState)
+	if !ok {
+		t.Fatal("no bonjour.json was written")
+	}
+	if st.Name != inst.Name || st.Port != inst.Port {
+		t.Errorf("recovered %q port %d, want %q port %d", st.Name, st.Port, inst.Name, inst.Port)
+	}
+	if !strings.Contains(st.Error, "status 1") {
+		t.Errorf("error = %q, want the reason supervision reported", st.Error)
+	}
+}

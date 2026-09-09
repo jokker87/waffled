@@ -96,6 +96,10 @@ type Supervisor struct {
 	// bonjourMu serialises the read-modify-write of bonjour.json, which the refresh poll
 	// and the advertiser's restart supervisor both touch.
 	bonjourMu sync.Mutex
+	// bonjourMissingOnce keeps "bonjour.json has gone missing" to a single log line. It
+	// is one condition, not one per exit, and a flapping advertiser would otherwise
+	// report it on every death right up to the cap.
+	bonjourMissingOnce sync.Once
 
 	// startedVersion is the Waffled version runtime.json recorded when this Supervisor
 	// was constructed — the build that last had this data open, before we touched it.

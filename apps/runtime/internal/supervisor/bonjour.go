@@ -313,14 +313,48 @@ func (s *Supervisor) reportBonjourExit(reason string, gaveUp bool) {
 	if gaveUp {
 		reason += " — not advertising any more; restart the server to try again"
 	}
+	// Read the child before taking bonjourMu. It is only needed on the recovery path
+	// below, but doing it here keeps the two locks from ever nesting — no path holds s.mu
+	// and then reaches for bonjourMu, and a map lookup on a child's exit is not a cost
+	// worth reasoning about lock order for.
+	fallback := s.advertisedByChild()
+
 	s.bonjourMu.Lock()
 	defer s.bonjourMu.Unlock()
 	st, ok := readBonjourState(s.plan.Layout.BonjourState)
 	if !ok {
-		return
+		// The file is gone or unreadable — the first writeBonjour only warned, or
+		// something removed it mid-run. Returning here dropped the single fact this
+		// callback exists to carry: `status` is a different process with nothing else to
+		// read, and bonjourRefresh stops polling once an advertisement has settled, so a
+		// child that had been given up on would report as "not advertising" with an empty
+		// reason for the rest of the run. A fresh record saying only why is worth more
+		// than silence.
+		st = fallback
+		s.bonjourMissingOnce.Do(func() {
+			s.log.Warnf("%s was missing when the advertiser failed, so the reason is being recorded in a fresh one: %s",
+				s.plan.Layout.BonjourState, reason)
+		})
 	}
 	st.Error = reason
 	s.writeBonjour(st)
+}
+
+// advertisedByChild recovers what is being advertised from the argv of the child holding
+// it. It is the fallback for a lost bonjour.json, and never the primary source: the file
+// records what was ASKED FOR, including the attempts that never got a child at all.
+func (s *Supervisor) advertisedByChild() bonjourState {
+	s.mu.Lock()
+	c := s.children[services.Bonjour]
+	s.mu.Unlock()
+	if c == nil {
+		return bonjourState{}
+	}
+	name, port, ok := bonjour.NameAndPort(c.spec.Args)
+	if !ok {
+		return bonjourState{}
+	}
+	return bonjourState{Name: name, Port: port}
 }
 
 func (s *Supervisor) recordBonjour(st bonjourState) {
