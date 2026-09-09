@@ -255,10 +255,13 @@ household called `Kevin's Home` travels as one argument with real spaces in it.
   not a reason to send them back to one they already finished. `setup=1` is only ever
   advertised on a positive read of an empty install.
 
-The name is computed at start, and then re-checked once a minute **only while the install
-has no household** — the one transition a person watches happen, since creating a household
-changes the name and the flag together. Polling stops for good the moment a household
-exists, so a settled install pays nothing.
+The name is computed at start and then re-checked once a minute until a household is
+genuinely **on the network** under the name it will keep — the one transition a person
+watches happen, since creating a household changes the name and the flag together. That
+includes the awkward first-boot cases: a census psql was too busy to answer, and a
+registration that failed to exec, are both states that can still change, so both keep
+polling. Polling stops for good once one household has been advertised, so a settled
+install pays nothing at all.
 
 **The limitation that leaves:** renaming a household later does not change what is
 advertised until the next restart. That is deliberate — a rename is rare, a restart fixes

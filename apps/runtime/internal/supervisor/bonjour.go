@@ -135,6 +135,26 @@ func (s *Supervisor) BonjourStatus() status.Bonjour {
 	return b
 }
 
+// advertisement is what the last attempt put on the network — enough for the poll below
+// to decide whether anything has changed since.
+type advertisement struct {
+	name  string
+	setup bool
+	// live is true when dns-sd was actually started. A failed registration still has a
+	// name and a flag; what it does not have is a presence on the network.
+	live bool
+	// settled is true when the census behind it was a POSITIVE read of an install that
+	// has at least one household. Nothing about the name can change after that without a
+	// restart, which is what ends the polling below.
+	settled bool
+}
+
+// plannedAdvertisement is what a census asks for, before anything is registered.
+func plannedAdvertisement(c bonjour.Census) advertisement {
+	name, setup := c.Advertise(bonjour.ComputerName())
+	return advertisement{name: name, setup: setup, settled: c.Known && c.Count >= 1}
+}
+
 // startBonjour advertises the server, and is called once Caddy is healthy. It never
 // returns an error: every failure is recorded and logged instead.
 func (s *Supervisor) startBonjour(ctx context.Context) {
@@ -150,63 +170,90 @@ func (s *Supervisor) startBonjour(ctx context.Context) {
 	stop := s.bonjourStop
 	s.mu.Unlock()
 
-	census := s.householdCensus(ctx)
-	if !s.advertise(ctx, census) {
-		return
-	}
+	s.bonjourRefresh(ctx, stop, s.householdCensus, s.advertise)
+}
 
-	// Re-checking is narrowed to the ONE transition that matters to a person: an install
-	// with no household yet advertises `setup=1`, and the moment the wizard creates one
-	// the name and the flag both change. Polling stops for good as soon as a household
-	// exists, so a settled install pays nothing at all and this goroutine stops existing
-	// minutes into the life of a fresh one.
-	//
-	// The limitation this leaves is deliberate and documented: renaming a household
-	// later does not change what is advertised until the next restart.
-	if _, setup := census.Advertise(""); !setup {
+// bonjourRefresh registers what the census describes and, unless that has settled the
+// question for good, keeps re-asking in the background.
+//
+// The census and the advertise step are parameters rather than direct calls so that the
+// polling decision — which has three states and used to get two of them wrong — can be
+// driven through all of them in a unit test without registering anything on the real
+// network. Production always passes the real pair, one line above.
+func (s *Supervisor) bonjourRefresh(ctx context.Context, stop <-chan struct{},
+	census func(context.Context) bonjour.Census,
+	advertise func(context.Context, bonjour.Census) advertisement) {
+
+	cur := advertise(ctx, census(ctx))
+	// Polling ends only when a household is genuinely ON the network. Everything else —
+	// an install with no household yet, a census psql was too busy to answer, a dns-sd
+	// that failed to exec — is a state that can still change, and the old code that
+	// latched on the first census left a fresh install advertising `setup=1` (or nothing
+	// at all) until somebody restarted the server.
+	if cur.live && cur.settled {
 		return
 	}
 	s.bonjourWait.Add(1)
 	go func() {
 		defer s.bonjourWait.Done()
-		ticker := time.NewTicker(bonjourSetupPoll)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-stop:
-				return
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-			}
-			c := s.householdCensus(ctx)
-			if !c.Known || c.Count == 0 {
-				continue
-			}
-			// The query took time; a Stop may have arrived while it ran.
-			select {
-			case <-stop:
-				return
-			default:
-			}
-			s.log.Infof("a household now exists — re-advertising it on Bonjour")
-			s.stopBonjourChild()
-			s.advertise(ctx, c)
-			return
-		}
+		s.bonjourPoll(ctx, stop, cur, census, advertise)
 	}()
 }
 
-// advertise (re)registers the instance the census describes, and reports whether it is
-// now on the network.
-func (s *Supervisor) advertise(ctx context.Context, census bonjour.Census) bool {
-	name, setup := census.Advertise(bonjour.ComputerName())
+// bonjourPoll re-advertises whenever what the census now asks for differs from what is
+// actually on the network.
+//
+// The limitation this leaves is deliberate and documented: once a household exists the
+// polling stops, so renaming it later does not change what is advertised until the next
+// restart.
+func (s *Supervisor) bonjourPoll(ctx context.Context, stop <-chan struct{}, cur advertisement,
+	census func(context.Context) bonjour.Census,
+	advertise func(context.Context, bonjour.Census) advertisement) {
+
+	ticker := time.NewTicker(bonjourSetupPoll)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		c := census(ctx)
+		want := plannedAdvertisement(c)
+		if cur.live && want.name == cur.name && want.setup == cur.setup {
+			if want.settled {
+				// On the network, under the name it will keep. Nothing left to watch.
+				return
+			}
+			continue
+		}
+		// The query took time; a Stop may have arrived while it ran.
+		select {
+		case <-stop:
+			return
+		default:
+		}
+		s.log.Infof("re-advertising on Bonjour as %q (setup=%v)", want.name, want.setup)
+		s.stopBonjourChild()
+		cur = advertise(ctx, c)
+		if cur.live && cur.settled {
+			return
+		}
+	}
+}
+
+// advertise (re)registers the instance the census describes, and reports what is now on
+// the network.
+func (s *Supervisor) advertise(ctx context.Context, census bonjour.Census) advertisement {
+	a := plannedAdvertisement(census)
 	inst := bonjour.Instance{
-		Name:    name,
+		Name:    a.name,
 		Port:    s.plan.Ports.Public,
 		URL:     s.advertisedURL(),
 		Version: s.waffledVersion(),
-		Setup:   setup,
+		Setup:   a.setup,
 	}
 	st := bonjourState{Name: inst.Name, Port: inst.Port, URL: inst.URL, Setup: inst.Setup}
 
@@ -215,11 +262,12 @@ func (s *Supervisor) advertise(ctx context.Context, census bonjour.Census) bool 
 		s.recordBonjour(st)
 		// Warn, never fail: discovery is a convenience on top of a server that works.
 		s.log.Warnf("could not advertise on Bonjour (the server is fine; devices will need the address): %v", err)
-		return false
+		return a
 	}
 	s.recordBonjour(st)
-	s.log.Infof("advertising %q on %s port %d (setup=%v)", inst.Name, bonjour.ServiceType, inst.Port, setup)
-	return true
+	s.log.Infof("advertising %q on %s port %d (setup=%v)", inst.Name, bonjour.ServiceType, inst.Port, a.setup)
+	a.live = true
+	return a
 }
 
 func (s *Supervisor) recordBonjour(st bonjourState) {

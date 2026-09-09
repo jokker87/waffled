@@ -1,9 +1,12 @@
 package supervisor
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/kevinpsites/waffled/apps/runtime/internal/bonjour"
 )
@@ -149,5 +152,114 @@ func TestBonjourStatusCarriesTheFailureReason(t *testing.T) {
 	}
 	if got.Error == "" {
 		t.Error("the failure reason was dropped — `status` is where someone looks for it")
+	}
+}
+
+// The setup→household transition is the one a person watches happen, and the poll that
+// notices it used to be armed only when the FIRST census was a positive read of an empty
+// install. A first-boot hiccup — a psql too slow to answer, a dns-sd that failed to exec
+// — latched the wrong advertisement until the next restart.
+//
+// The census and the advertise step are parameters so the decision logic can be driven
+// through all three of its states without registering anything on the real network.
+func TestTheAdvertisementIsRecheckedUntilAHouseholdIsOnTheNetwork(t *testing.T) {
+	restore := bonjourSetupPoll
+	bonjourSetupPoll = 10 * time.Millisecond
+	t.Cleanup(func() { bonjourSetupPoll = restore })
+
+	s := &Supervisor{log: testLogger(t), runner: newTestRunner(t), children: map[string]*child{}}
+	stop := make(chan struct{})
+	t.Cleanup(func() { close(stop); s.bonjourWait.Wait() })
+
+	// Unknown (psql could not be asked), then a positive read of an empty install, then
+	// the household the wizard just created.
+	censuses := []bonjour.Census{
+		{},
+		{Known: true, Count: 0},
+		{Known: true, Count: 1, Name: "The Seinfelds"},
+	}
+	var mu sync.Mutex
+	asked := 0
+	census := func(context.Context) bonjour.Census {
+		mu.Lock()
+		defer mu.Unlock()
+		i := asked
+		if i > len(censuses)-1 {
+			i = len(censuses) - 1
+		}
+		asked++
+		return censuses[i]
+	}
+	var got []advertisement
+	advertise := func(_ context.Context, c bonjour.Census) advertisement {
+		a := plannedAdvertisement(c)
+		a.live = true
+		mu.Lock()
+		got = append(got, a)
+		mu.Unlock()
+		return a
+	}
+
+	s.bonjourRefresh(context.Background(), stop, census, advertise)
+	waitFor(t, 5*time.Second, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(got) >= 3
+	}, "the household never reached the network")
+	s.bonjourWait.Wait()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(got) != 3 {
+		t.Fatalf("%d advertisements, want 3: %+v", len(got), got)
+	}
+	if got[0].setup || got[0].name == "" {
+		t.Errorf("first advertisement = %+v, want the machine fallback with setup=0 "+
+			"(an unreadable census must never send someone back to the wizard)", got[0])
+	}
+	if !got[1].setup {
+		t.Errorf("second advertisement = %+v, want setup=1 on a positive read of an empty install", got[1])
+	}
+	if got[2].name != "The Seinfelds" || got[2].setup {
+		t.Errorf("third advertisement = %+v, want the household's own name with setup=0", got[2])
+	}
+}
+
+// A settled census still has to be re-tried when the registration itself failed: a
+// dns-sd that could not exec once must not leave the household undiscoverable forever.
+func TestATransientAdvertiseFailureIsRetried(t *testing.T) {
+	restore := bonjourSetupPoll
+	bonjourSetupPoll = 10 * time.Millisecond
+	t.Cleanup(func() { bonjourSetupPoll = restore })
+
+	s := &Supervisor{log: testLogger(t), runner: newTestRunner(t), children: map[string]*child{}}
+	stop := make(chan struct{})
+	t.Cleanup(func() { close(stop); s.bonjourWait.Wait() })
+
+	settled := bonjour.Census{Known: true, Count: 1, Name: "The Seinfelds"}
+	census := func(context.Context) bonjour.Census { return settled }
+	var mu sync.Mutex
+	attempts := 0
+	advertise := func(_ context.Context, c bonjour.Census) advertisement {
+		a := plannedAdvertisement(c)
+		mu.Lock()
+		attempts++
+		a.live = attempts > 1 // the first exec fails, the next one works
+		mu.Unlock()
+		return a
+	}
+
+	s.bonjourRefresh(context.Background(), stop, census, advertise)
+	waitFor(t, 5*time.Second, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return attempts >= 2
+	}, "a failed first registration was never retried")
+	s.bonjourWait.Wait()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if attempts != 2 {
+		t.Errorf("%d attempts, want 2 — polling must stop once the household is on the network", attempts)
 	}
 }
