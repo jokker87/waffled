@@ -62,9 +62,14 @@ func TestTheCrossingLineNamesItsDirection(t *testing.T) {
 
 // Data that has only ever known one version has no crossing to report, and a line saying
 // so would greet every new install with news about an update that never happened.
+//
+// The timestamp is set and the previous version is not, on purpose: PreviousVersion is
+// what the line is keyed on, and keying it on the timestamp instead would pass a test that
+// left both empty while printing "changed from  on 2026-09-08…" for a first start.
 func TestNoCrossingLineWithoutAPreviousVersion(t *testing.T) {
 	r := sample()
 	r.Bundle.Version = "0.15.0"
+	r.Bundle.VersionChangedAt = "2026-09-08T03:00:00Z"
 	out := r.Text()
 	for _, phrase := range []string{"updated from", "rolled back from", "changed from"} {
 		if strings.Contains(out, phrase) {
