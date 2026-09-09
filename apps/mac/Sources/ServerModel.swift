@@ -1,0 +1,274 @@
+import AppKit
+import Foundation
+import Observation
+
+/// The app's one piece of state: what the runtime last said, what we are in the middle of
+/// doing to it, and the two things we do without being asked.
+///
+/// Every runtime call happens off the main thread inside `RuntimeClient`; this type is
+/// `@MainActor` so the menu never reads a half-written value.
+@MainActor
+@Observable
+final class ServerModel {
+    /// One app, one server manager. The instance is shared so the delegate (which starts
+    /// the polling) and the menu (which renders it) cannot end up looking at two.
+    static let shared = ServerModel()
+
+    private(set) var status: RuntimeStatus?
+    /// An error the app is holding on to. It outlives the status document that caused it:
+    /// a `start` that refused leaves nothing running, so the next poll says `stopped`,
+    /// which on its own would look like a server nobody had tried to start.
+    private(set) var failure: String?
+    private(set) var transient: String?
+    private(set) var busy = false
+
+    let location: RuntimeLocation?
+    let loginItem = LoginItem()
+
+    private let client: RuntimeClient?
+    private var pollTask: Task<Void, Never>?
+    private var animationTask: Task<Void, Never>?
+    private var operationTask: Task<Void, Never>?
+    private var transientTask: Task<Void, Never>?
+
+    /// Set when *this* process asked for a start, which is what makes opening the browser
+    /// correct rather than intrusive.
+    private var startWasAppInitiated = false
+    private var alreadyOpenedBrowser = false
+    private var animationFrame = 0
+
+    init(environment: [String: String] = ProcessInfo.processInfo.environment,
+         resourceURL: URL? = Bundle.main.resourceURL) {
+        location = RuntimeLocator.locate(environment: environment, resourceURL: resourceURL)
+        client = location.map { RuntimeClient(location: $0, runner: SubprocessRunner()) }
+        if location == nil {
+            failure = "No Waffled runtime is bundled with this build — see apps/mac/README.md"
+        }
+    }
+
+    // MARK: what the menu bar draws
+
+    /// A held failure outranks the document: the icon has to show the fault even though
+    /// the stack it describes is, technically, merely stopped.
+    var iconState: RuntimeState {
+        if failure != nil { return .unhealthy }
+        return status?.state ?? .stopped
+    }
+
+    var icon: IconAppearance { IconAppearance.forState(iconState) }
+
+    /// The frame to draw right now — the same symbol every time unless this state
+    /// animates, in which case the frames cycle on the animation timer.
+    var currentSymbol: String {
+        let names = icon.symbolNames
+        return names[animationFrame % names.count]
+    }
+
+    var presentation: MenuPresentation {
+        MenuPresentation.make(status: status, failure: failure, transient: transient, busy: busy)
+    }
+
+    var isDevMode: Bool { location?.isDevMode ?? false }
+
+    /// Where `Show logs` reveals. `status` knows best, but the whole point of that item is
+    /// that something went wrong — possibly before any status came back — so the resolved
+    /// location and then the documented default stand in.
+    var logsDirectory: URL {
+        if let dataDir = status?.dataDir, !dataDir.isEmpty {
+            return URL(fileURLWithPath: dataDir).appendingPathComponent("logs")
+        }
+        if let dataDir = location?.dataDir {
+            return dataDir.appendingPathComponent("logs")
+        }
+        return FileManager.default
+            .homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/Waffled/logs")
+    }
+
+    // MARK: lifecycle
+
+    /// Poll once, start the server if nothing is running, then keep polling.
+    func begin() {
+        loginItem.refresh()
+        guard pollTask == nil else { return }
+        pollTask = Task { [weak self] in
+            await self?.refresh()
+            await self?.autoStartIfStopped()
+            while !Task.isCancelled {
+                let interval = self?.pollInterval ?? 2
+                try? await Task.sleep(for: .seconds(interval))
+                await self?.refresh()
+            }
+        }
+        animationTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(600))
+                self?.advanceAnimation()
+            }
+        }
+    }
+
+    func end() {
+        pollTask?.cancel()
+        animationTask?.cancel()
+        operationTask?.cancel()
+        transientTask?.cancel()
+    }
+
+    private var pollInterval: TimeInterval { Lifecycle.pollInterval(for: status?.state) }
+
+    private func advanceAnimation() {
+        guard icon.isAnimated else {
+            animationFrame = 0
+            return
+        }
+        animationFrame &+= 1
+    }
+
+    /// One poll. The loop awaits this, so a slow `status` delays the next tick rather than
+    /// queueing another process behind it.
+    private func refresh() async {
+        guard let client else { return }
+        do {
+            let fresh = try await client.status()
+            status = fresh
+            // A server that came up is the only thing that clears a start failure —
+            // clearing it on any successful poll would erase the message a moment after
+            // it appeared, since `status` keeps answering fine when `start` refuses.
+            if fresh.state == .running { failure = nil }
+            openBrowserIfThisAppStartedIt(fresh)
+        } catch let error as RuntimeClientError {
+            status = nil
+            failure = error.firstLine
+        } catch {
+            status = nil
+            failure = error.localizedDescription
+        }
+    }
+
+    private func autoStartIfStopped() async {
+        guard let state = status?.state, Lifecycle.shouldAutoStart(state) else { return }
+        startServer()
+    }
+
+    private func openBrowserIfThisAppStartedIt(_ fresh: RuntimeStatus) {
+        guard Lifecycle.shouldOpenBrowser(newState: fresh.state,
+                                          startWasAppInitiated: startWasAppInitiated,
+                                          alreadyOpened: alreadyOpenedBrowser) else { return }
+        alreadyOpenedBrowser = true
+        openWebApp(fresh)
+    }
+
+    // MARK: actions
+
+    /// Never called on a timer and never in a loop: the runtime supervises its own
+    /// children, and a second supervisor retrying behind it is the failure mode plan §7
+    /// rules out.
+    func startServer() {
+        guard let client, operationTask == nil else { return }
+        startWasAppInitiated = true
+        failure = nil
+        busy = true
+        operationTask = Task { [weak self] in
+            defer { self?.finishOperation() }
+            do {
+                try await client.start()
+            } catch let error as RuntimeClientError {
+                self?.recordFailure(error.firstLine)
+            } catch {
+                self?.recordFailure(error.localizedDescription)
+            }
+            await self?.refresh()
+        }
+    }
+
+    func openWebApp(_ status: RuntimeStatus? = nil) {
+        guard let local = (status ?? self.status)?.urls.local,
+              let url = URL(string: local) else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    func copyServerAddress() {
+        guard let address = status?.serverAddress else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(address, forType: .string)
+        note("Copied \(address)")
+    }
+
+    func backUpNow() {
+        guard let client, operationTask == nil else { return }
+        busy = true
+        note("Backing up…", clearAfter: nil)
+        operationTask = Task { [weak self] in
+            defer { self?.finishOperation() }
+            do {
+                let path = try await client.backup()
+                let name = (path as NSString).lastPathComponent
+                self?.note(name.isEmpty ? "Backed up" : "Backed up to \(name)")
+            } catch let error as RuntimeClientError {
+                self?.note("Backup failed: \(error.firstLine)")
+            } catch {
+                self?.note("Backup failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    func revealLogs() {
+        let logs = logsDirectory
+        // `selectFile: nil` reveals the directory itself, and opening the parent when it
+        // does not exist yet is friendlier than doing nothing at all.
+        let target = FileManager.default.fileExists(atPath: logs.path)
+            ? logs : logs.deletingLastPathComponent()
+        NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: target.path)
+    }
+
+    /// Quitting the menu-bar app stops the household's server, which is not what "quit"
+    /// usually means — so it is asked, plainly, before anything happens.
+    ///
+    /// An `LSUIElement` app has no window to hang a sheet on, so this is an `NSAlert`
+    /// run modally after activating; a `.confirmationDialog` inside a `.menu`-style
+    /// `MenuBarExtra` has nothing to present from and never appears.
+    func confirmAndQuit() {
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = "Quit Waffled?"
+        alert.informativeText = """
+            Your Waffled server will stop. Phones, tablets and browsers on your network \
+            will not be able to reach it until you open Waffled again.
+            """
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Quit and Stop the Server")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        Task { [weak self] in
+            // `stop` is synchronous by contract: when it returns, the stack is down.
+            try? await self?.client?.stop()
+            await MainActor.run { NSApp.terminate(nil) }
+        }
+    }
+
+    // MARK: -
+
+    private func finishOperation() {
+        operationTask = nil
+        busy = false
+    }
+
+    private func recordFailure(_ message: String) {
+        failure = message
+    }
+
+    /// A few seconds of answer in the status line. `clearAfter: nil` leaves it up until
+    /// something else replaces it — what "Backing up…" wants.
+    private func note(_ message: String, clearAfter seconds: TimeInterval? = 4) {
+        transientTask?.cancel()
+        transient = message
+        guard let seconds else { return }
+        transientTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(seconds))
+            guard !Task.isCancelled else { return }
+            await MainActor.run { self?.transient = nil }
+        }
+    }
+}
