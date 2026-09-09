@@ -52,17 +52,21 @@ var bonjourSetupPoll = 60 * time.Second
 // answered by the advertiser's pidfile: children are spawned into their own process group
 // (see process.go), so a SIGKILLed supervisor leaves dns-sd running and mDNSResponder
 // still publishing — the orphan-adoption branch in stopBonjourChild exists for exactly
-// that. SupervisorPID is kept as a diagnostic — it says which process wrote the file, and
-// is what `stop` uses to recognise a run that is no longer this one — not as a freshness
-// gate, and Setup records which of the two names was chosen for the sake of anyone
-// reading bonjour.json by hand.
+// that. Setup records which of the two names was chosen, for the sake of anyone reading
+// bonjour.json by hand.
+//
+// There is deliberately no supervisor pid here. One was written on every update and read
+// by nothing, under a comment claiming `stop` used it to recognise a run that was no
+// longer this one — a check that does not exist. Nothing here can serve as one either:
+// the process that matters is dns-sd's, which OUTLIVES the supervisor that spawned it,
+// so a stale pid would answer the ownership question exactly backwards on the one run
+// where it was asked.
 type bonjourState struct {
-	SupervisorPID int    `json:"supervisorPid"`
-	Name          string `json:"name"`
-	Port          int    `json:"port"`
-	Setup         bool   `json:"setup"`
-	Error         string `json:"error"`
-	UpdatedAt     string `json:"updatedAt"`
+	Name      string `json:"name"`
+	Port      int    `json:"port"`
+	Setup     bool   `json:"setup"`
+	Error     string `json:"error"`
+	UpdatedAt string `json:"updatedAt"`
 }
 
 func writeBonjourState(path string, st bonjourState) error {
@@ -367,7 +371,6 @@ func (s *Supervisor) recordBonjour(st bonjourState) {
 // file — the refresh poll and the restart supervisor's report — and atomicfile prevents a
 // torn file, not a lost update.
 func (s *Supervisor) writeBonjour(st bonjourState) {
-	st.SupervisorPID = os.Getpid()
 	if err := writeBonjourState(s.plan.Layout.BonjourState, st); err != nil {
 		s.log.Warnf("could not record the Bonjour advertisement: %v", err)
 	}

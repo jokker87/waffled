@@ -44,10 +44,7 @@ func TestBonjourStateRoundTrips(t *testing.T) {
 		t.Fatal("read a state file that does not exist")
 	}
 
-	want := bonjourState{
-		SupervisorPID: os.Getpid(), Name: "Kevin’s Home", Port: 8080,
-		Setup: false, Error: "",
-	}
+	want := bonjourState{Name: "Kevin’s Home", Port: 8080, Setup: false, Error: ""}
 	if err := writeBonjourState(path, want); err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -55,18 +52,27 @@ func TestBonjourStateRoundTrips(t *testing.T) {
 	if !ok {
 		t.Fatal("the state file just written does not read back")
 	}
-	if got.Name != want.Name || got.Port != want.Port || got.SupervisorPID != want.SupervisorPID {
+	if got.Name != want.Name || got.Port != want.Port {
 		t.Errorf("round trip lost something: %+v", got)
 	}
-	// The URL belongs in the TXT record, which is where a client reads it. Recording it
-	// here as well gave it a second copy to keep correct on every write and no reader at
-	// all: `status` reports urls.lan, and the block has never had a url field.
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The URL belongs in the TXT record, which is where a client reads it. Recording it
+	// here as well gave it a second copy to keep correct on every write and no reader at
+	// all: `status` reports urls.lan, and the block has never had a url field.
 	if strings.Contains(string(raw), `"url"`) {
 		t.Errorf("bonjour.json still records a url nothing reads back:\n%s", raw)
+	}
+	// Same story for the supervisor's pid, which was written on every update and read by
+	// nothing. Its comment promised an ownership check that was never implemented, and a
+	// field carrying a claim no code makes good on is worse than no field: the next
+	// person to reach for a freshness gate would find one already there and trust it.
+	// What is actually on the network is the advertiser's OWN pidfile — see the orphan
+	// test below, which is the case a supervisor pid would have been wrong about.
+	if strings.Contains(string(raw), "upervisorPid") {
+		t.Errorf("bonjour.json still records a supervisor pid nothing reads back:\n%s", raw)
 	}
 	if got.UpdatedAt == "" {
 		t.Error("UpdatedAt is empty — a stale file must be recognisable as old")
@@ -84,13 +90,12 @@ func TestBonjourStateRoundTrips(t *testing.T) {
 
 // dns-sd is spawned with Setpgid, so a SIGKILLed supervisor does NOT take it with it:
 // the advertisement stays on the network under an adopted process. What is on the
-// network is therefore the pidfile's answer, not the recorded supervisor pid's — and
-// `status` must name what a phone can actually see.
+// network is therefore the ADVERTISER's pidfile's answer — and `status` must name what a
+// phone can actually see. This is the case that makes a supervisor pid in bonjour.json
+// worse than useless: the run that wrote the file is gone, and the advertisement is not.
 func TestAnOrphanedAdvertiserIsStillReported(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "bonjour.json")
-	if err := writeBonjourState(path, bonjourState{
-		SupervisorPID: 0x7FFFFFFE, Name: "The Seinfelds", Port: 8080,
-	}); err != nil {
+	if err := writeBonjourState(path, bonjourState{Name: "The Seinfelds", Port: 8080}); err != nil {
 		t.Fatal(err)
 	}
 	got := bonjourStatus(path, true)
@@ -109,7 +114,7 @@ func TestBonjourStateWithNoAdvertiserNamesNothing(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "bonjour.json")
 	if err := writeBonjourState(path, bonjourState{
-		SupervisorPID: 0x7FFFFFFE, Name: "The Seinfelds", Port: 8080, Error: "boom",
+		Name: "The Seinfelds", Port: 8080, Error: "boom",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -127,9 +132,7 @@ func TestBonjourStateWithNoAdvertiserNamesNothing(t *testing.T) {
 
 func TestBonjourStatusReportsTheLiveAdvertisement(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "bonjour.json")
-	if err := writeBonjourState(path, bonjourState{
-		SupervisorPID: os.Getpid(), Name: "The Seinfelds", Port: 8080,
-	}); err != nil {
+	if err := writeBonjourState(path, bonjourState{Name: "The Seinfelds", Port: 8080}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -154,7 +157,7 @@ func TestBonjourStatusReportsTheLiveAdvertisement(t *testing.T) {
 func TestBonjourStatusCarriesTheFailureReason(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "bonjour.json")
 	if err := writeBonjourState(path, bonjourState{
-		SupervisorPID: os.Getpid(), Error: "dns-sd is not available on this platform",
+		Error: "dns-sd is not available on this platform",
 	}); err != nil {
 		t.Fatal(err)
 	}

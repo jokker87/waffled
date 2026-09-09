@@ -414,9 +414,10 @@ So is the `bonjour` block:
 is never on its own a reason to draw a red icon.
 
 `status` usually runs in a **different process** from the supervisor, so the advertisement
-is recorded in `bonjour.json` beside `runtime.json` — written atomically, with the
-supervisor's pid in it. The file records what was **asked for**; whether it is on the
-network is the advertiser's **pidfile's** answer, and the two are combined here. They can
+is recorded in `bonjour.json` beside `runtime.json`, written atomically. The file records
+what was **asked for**; whether it is on the network is the advertiser's **pidfile's**
+answer, and the two are combined here. (No supervisor pid is recorded: the process that
+decides the second question is dns-sd's, and it outlives the supervisor.) They can
 disagree: dns-sd runs in its own process group and outlives a SIGKILLed supervisor, so the
 name and port are reported for an orphan that is still publishing, and a file left behind
 with no advertiser running names nothing (but still carries the recorded reason, which is
