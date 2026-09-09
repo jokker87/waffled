@@ -15,6 +15,21 @@ struct FamilyView: View {
     @State private var ranDemo = false
     private let cols = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
 
+    init(path: Binding<[HubRoute]>, approvals: ApprovalsModel, hub: FamilyHubModel? = nil) {
+        _path = path
+        self.approvals = approvals
+        _hub = State(initialValue: hub ?? FamilyHubModel())
+    }
+
+    private struct LoadKey: Hashable {
+        let scope: RestDataScopeKey
+        let modules: FamilyRestModules
+        let choresRevision: Int
+        let goalsRevision: Int
+        let rewardsRevision: Int
+        let listsRevision: Int
+    }
+
     /// Per-tile approval counts — only shown to those who can action that queue.
     private var choreApprovals: Int { sync.can("chore.approve") ? approvals.chores.count : 0 }
     private var rewardApprovals: Int { sync.can("reward.approve") ? approvals.redemptions.count : 0 }
@@ -54,6 +69,8 @@ struct FamilyView: View {
                     .padding(.top, 8).padding(.bottom, 18)
 
                 SectionLabel(text: "Everything else").padding(.bottom, 11)
+                RestStateNotice(state: hub.state, retry: { Task { await loadHub() } })
+                    .padding(.bottom, hub.state.isAuthoritative ? 0 : 11)
                 // Module-gated tiles drop out when a household turns that feature off
                 // (Settings → Modules). Photos + Settings are core and never gated.
                 LazyVGrid(columns: cols, spacing: 12) {
@@ -79,15 +96,49 @@ struct FamilyView: View {
         }
         .background(WF.canvas)
         .toolbar(.hidden, for: .navigationBar)   // the screen draws its own "Family" header
-        .refreshable { await hub.load(); await approvals.load() }
-        .task { await hub.load() }
+        .refreshable {
+            await loadHub()
+            await approvals.load(
+                scope: sync.restDataScopeKey,
+                choresEnabled: sync.module(.chores),
+                rewardsEnabled: sync.rewardsOn
+            )
+        }
+        .task(id: loadKey) { await loadHub() }
         .sheet(isPresented: $showSync) { SyncStatusView() }
         .onAppear(perform: runDemoHooksIfSet)
     }
 
-    /// `WAFFLED_OPEN_HUB`'s names. Internal rather than private so the mapping can be
-    /// tested — see FamilyHubRouteTests, and the note there about why a green build
-    /// proved nothing about whether anything actually reached Weekly Planning.
+    private var enabledRestModules: FamilyRestModules {
+        .init(
+            chores: sync.module(.chores),
+            goals: sync.module(.goals),
+            rewards: sync.rewardsOn,
+            lists: sync.module(.lists)
+        )
+    }
+
+    private var loadKey: LoadKey {
+        .init(
+            scope: sync.restDataScopeKey,
+            modules: enabledRestModules,
+            choresRevision: sync.choresRev,
+            goalsRevision: sync.goalsRev,
+            rewardsRevision: sync.rewardsRev,
+            listsRevision: sync.listsRev
+        )
+    }
+
+    private func loadHub() async {
+        let scope = sync.restDataScopeKey
+        await sync.loadIdentity()
+        guard !Task.isCancelled, scope == sync.restDataScopeKey else { return }
+        await hub.load(scope: scope, modules: enabledRestModules)
+    }
+
+    /// `WAFFLED_OPEN_HUB`'s names. INTERNAL, not private, so the mapping can be tested —
+    /// see FamilyHubRouteTests. A merge that takes this file from `main` will narrow it
+    /// back to `private` and break that test; this comment is why it stays widened.
     static func route(for name: String) -> HubRoute? {
         switch name {
         case "planning": return .weeklyPlanning

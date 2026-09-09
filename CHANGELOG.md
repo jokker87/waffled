@@ -180,6 +180,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **An impossible chore date is refused instead of erroring.** Saving a chore dated to a day
   that doesn't exist (a 31st of February, say) reached the database and came back as a bare
   server error. It is now turned away with a clear message, and a real date still saves.
+- **A session whose household is gone now signs you out instead of getting stuck.** If the
+  household your device is signed in to disappears — a restored backup, a deleted
+  household, a rebuilt server — the app used to sit there looking signed in while every
+  screen failed, and the only way out was clearing your browser's site data by hand. Web
+  and iPhone/iPad now end that session and return you to the login screen (a paired
+  family display drops to its profile picker and stays paired). An ordinary "you don't
+  have permission for that" is untouched and still keeps you signed in.
+
+- **API keys can now reach chore instances, chore proofs, goal lists, pantry staples and
+  currency conversions.** Those endpoint families were refused for every key — "This endpoint
+  is not available to API keys" — no matter which scopes the key held. They now answer to the
+  `chores`, `goals`, `lists` and `rewards` scopes, so an integration or a headless client can
+  drive the whole of each resource rather than most of it. Pantry staples count as `lists`
+  (they live on the grocery board), not `pantry`.
 
 - **A failed refresh no longer makes a saved change look lost.** The web event editor
   now offers Retry when recurring-event details cannot load, and iPhone/iPad Countdowns
@@ -191,6 +205,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its last confirmed state when the server rejects a change, preserves work that can be
   retried, and explains what happened. Fast Family Night schedule changes are saved in
   order, and retrying Calendar settings clears an old connection error once it succeeds.
+
+- **Today, Family, approvals, and Photos no longer mistake a connection failure for
+  “nothing here.”** The iPhone and iPad Today and Family dashboards, plus shared Approvals
+  and Photos screens, keep their last confirmed information and show an in-place loading, offline,
+  stale-data, or error notice; empty messages such as “All caught up” now appear only
+  after a successful empty response. Offline sections also report only their own
+  saved-data time instead of borrowing one from another tile. Hidden household modules
+  are excluded from loading, and saved REST values are cleared when the active account
+  or server changes so one household’s data cannot appear in another. Both Today approvals
+  entry points stay visible after a failed fetch. Unreachable-server notices account for
+  self-hosting; expired sessions ask for sign-in instead of offering a fruitless retry.
 
 ## [0.14.3] - 2026-09-02
 
