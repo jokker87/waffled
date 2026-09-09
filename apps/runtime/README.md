@@ -85,11 +85,18 @@ the same misconfiguration.
 "Healthy once" needs a definition for the one child with nothing to poll (the Bonjour
 advertiser): it is given half a second to prove it means to stay, and a process gone
 inside that window is a **start failure** returned to the caller, not a started service.
-The advertiser is also the only child whose restarts are capped — five immediate deaths in
-a row and supervision gives up, records why in `bonjour.json` and logs it once, because a
-dns-sd mDNSResponder has refused will not start working on the fiftieth attempt. Giving up
-is safe precisely because that child is advisory. Every other service still retries
-forever: a database that keeps dying should keep trying to come back.
+For the advertiser that failure is never fatal and never silent: the reason is recorded in
+`bonjour.json`, and because the attempt put nothing on the network the setup poll simply
+tries again on its next tick, a minute later. That retry is deliberately uncapped — one
+attempt a minute is a pace, not a loop, and the usual cause (the Local Network prompt not
+answered yet) is a condition that becomes true later on its own.
+
+The cap is the *other* path. The advertiser is the only child whose restarts are capped, and
+that budget belongs to a dns-sd that got **past** the start window and then flapped: five
+immediate deaths in a row and supervision gives up, records why in `bonjour.json` and logs
+it once, because a dns-sd mDNSResponder has refused will not start working on the fiftieth
+attempt. Giving up is safe precisely because that child is advisory. Every other service
+still retries forever: a database that keeps dying should keep trying to come back.
 
 ## Data directory
 

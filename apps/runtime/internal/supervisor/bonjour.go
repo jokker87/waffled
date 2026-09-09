@@ -278,6 +278,19 @@ func (s *Supervisor) advertise(ctx context.Context, census bonjour.Census) adver
 // register is not going to start working on the fiftieth attempt — mDNSResponder has
 // refused it — and a flap nobody caps is a loop with no one watching. Giving up is safe
 // precisely because this child is advisory: the server keeps serving.
+//
+// It caps ONE of the two ways dns-sd fails, and it is worth being exact about which. This
+// budget is spent by a child that got PAST the start window: startChild armed supervision,
+// and the process then died at once, repeatedly, on its own restarts.
+//
+// A dns-sd that is already gone when the 500ms window closes on the FIRST attempt never
+// reaches supervision at all — startChild returns an error before calling supervise, so
+// this constant and the report callback are never even attached to it. That path is not
+// unwatched: advertise records the reason in bonjour.json and warns, and because the
+// attempt left live=false the setup poll re-advertises on its next tick. It is deliberately
+// uncapped, because one attempt a minute is a pace rather than a loop and the usual cause —
+// the Local Network prompt not answered yet, a mDNSResponder still coming up — is a
+// condition that becomes true later, which giving up would then never notice.
 const bonjourMaxQuickFailures = 5
 
 // supervise arms restart supervision, with the advertiser's own policy attached.
