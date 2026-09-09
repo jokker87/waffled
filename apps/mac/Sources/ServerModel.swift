@@ -23,7 +23,11 @@ final class ServerModel {
     /// A `stop` that refused. Kept apart from `failure` because the server it describes
     /// is still running, so the next successful poll must not wipe it.
     private(set) var stopFailure: String?
-    private(set) var busy = false
+
+    /// A start, stop or backup is in flight. Derived rather than stored: the two were
+    /// set in lockstep at four call sites, which is four chances for a menu stuck at
+    /// "busy" forever, or never busy at all.
+    var busy: Bool { operationTask != nil }
 
     let location: RuntimeLocation?
     let loginItem = LoginItem()
@@ -194,7 +198,6 @@ final class ServerModel {
         startWasAppInitiated = true
         failure = nil
         stopFailure = nil
-        busy = true
         operationTask = Task { [weak self] in
             defer { self?.finishOperation() }
             do {
@@ -223,7 +226,6 @@ final class ServerModel {
 
     func backUpNow() {
         guard let client, operationTask == nil else { return }
-        busy = true
         note("Backing up…", clearAfter: nil)
         operationTask = Task { [weak self] in
             defer { self?.finishOperation() }
@@ -285,7 +287,6 @@ final class ServerModel {
     /// refuses, the app stays where it is and says so. Exiting anyway would leave the
     /// household's server running with no icon left to explain it.
     private func stopThenQuit() {
-        busy = true
         stopFailure = nil
         note("Stopping…", clearAfter: nil)
         operationTask = Task { [weak self] in
@@ -314,7 +315,6 @@ final class ServerModel {
 
     private func finishOperation() {
         operationTask = nil
-        busy = false
     }
 
     private func recordFailure(_ message: String) {
