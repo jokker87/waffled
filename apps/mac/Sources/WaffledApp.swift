@@ -62,15 +62,18 @@ private struct MenuContent: View {
         Button(menu.addressLine) { model.copyServerAddress() }
             .disabled(!menu.addressEnabled)
 
-        if model.loginItem.isAvailable {
-            Toggle("Start at login", isOn: Binding(
-                get: { model.loginItem.isEnabled },
+        // Any reason goes in the label: a .help(_:) tooltip does not render on an item in
+        // a .menu-style MenuBarExtra, and an unexplained control is worse than none. Only
+        // the two statuses that a click here genuinely cannot change stop being a toggle.
+        switch model.loginItem.control {
+        case let .toggle(isOn, note):
+            Toggle(note.map { "Start at login — \($0)" } ?? "Start at login", isOn: Binding(
+                get: { isOn },
                 set: { model.loginItem.setEnabled($0) }))
-        } else {
-            // The reason goes in the label: a .help(_:) tooltip does not render on an
-            // item in a .menu-style MenuBarExtra, and a disabled toggle with no
-            // explanation is worse than no toggle.
-            Button("Start at login — \(model.loginItem.unavailableReason ?? "unavailable")") {}
+        case let .openSettings(reason):
+            Button("Start at login — \(reason)") { model.loginItem.openSystemSettings() }
+        case let .unavailable(reason):
+            Button("Start at login — \(reason)") {}
                 .disabled(true)
         }
 

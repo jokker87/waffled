@@ -6,56 +6,85 @@ import ServiceManagement
 /// shelf reboots after an update and the household expects Waffled to be there.
 ///
 /// `SMAppService.mainApp` registers the running `.app` itself — no helper target, no
-/// separate bundle id. It is asked once at launch and after each toggle rather than on
-/// every poll: the answer changes only when someone changes it, here or in System
-/// Settings, and each call crosses into launchd.
+/// separate bundle id. The status is re-read on every status poll rather than once at
+/// launch, because it is not ours alone to change: someone can switch Waffled off in
+/// System Settings → Login Items while this menu is sitting there claiming otherwise.
+///
+/// The three launchd calls are injected so the whole table below can be tested without
+/// registering anything with the real launchd.
 @MainActor
 @Observable
 final class LoginItem {
-    private(set) var isEnabled = false
-    /// Why the toggle is unavailable, if it is. Shown in the item's own label, because a
-    /// `.help(_:)` tooltip does not render on an item in a `.menu`-style `MenuBarExtra`.
-    private(set) var unavailableReason: String?
+    /// What the menu should draw. A value, so every rule is testable without a menu.
+    enum Control: Equatable {
+        /// The ordinary case: a working toggle. `note` is the last attempt's error, shown
+        /// in the label — the toggle stays usable, because one refusal from launchd is
+        /// very often transient and a control you cannot touch cannot be retried.
+        case toggle(isOn: Bool, note: String?)
+        /// Registered, but switched off by a person in System Settings. Registering again
+        /// from here does nothing; opening that pane is the only thing that helps.
+        case openSettings(reason: String)
+        /// launchd has no record of this bundle and will not take one — nothing to offer.
+        case unavailable(reason: String)
+    }
 
-    var isAvailable: Bool { unavailableReason == nil }
+    private(set) var status: SMAppService.Status
+    /// The last register/unregister error. It annotates the label until the next attempt
+    /// succeeds; a poll leaves it alone, so it does not vanish two seconds after the
+    /// click that caused it.
+    private(set) var lastAttemptError: String?
 
-    func refresh() {
-        switch SMAppService.mainApp.status {
-        case .enabled:
-            isEnabled = true
-            unavailableReason = nil
-        case .notRegistered, .notFound:
-            isEnabled = false
-            unavailableReason = nil
+    private let readStatus: () -> SMAppService.Status
+    private let register: () throws -> Void
+    private let unregister: () throws -> Void
+
+    init(status: @escaping () -> SMAppService.Status = { SMAppService.mainApp.status },
+         register: @escaping () throws -> Void = { try SMAppService.mainApp.register() },
+         unregister: @escaping () throws -> Void = { try SMAppService.mainApp.unregister() }) {
+        self.readStatus = status
+        self.register = register
+        self.unregister = unregister
+        self.status = status()
+    }
+
+    var isEnabled: Bool { status == .enabled }
+
+    var control: Control {
+        switch status {
         case .requiresApproval:
-            // Registered, but someone has switched it off in System Settings → Login
-            // Items. launchd will not run it until they switch it back, and no amount of
-            // registering from here changes that.
-            isEnabled = false
-            unavailableReason = "approve Waffled in System Settings → General → Login Items"
+            return .openSettings(reason: "approve Waffled in System Settings → Login Items")
+        case .notFound:
+            return .unavailable(reason: "launchd will not register this build")
+        case .enabled, .notRegistered:
+            return .toggle(isOn: isEnabled, note: lastAttemptError)
         @unknown default:
-            isEnabled = false
-            unavailableReason = nil
+            // A status this build has never heard of is not a reason to take the control
+            // away — the same rule the status decoder follows for an unknown `state`.
+            return .toggle(isOn: isEnabled, note: lastAttemptError)
         }
+    }
+
+    /// Cheap enough for the poll loop: one read across to launchd, no side effects.
+    func refresh() {
+        status = readStatus()
     }
 
     func setEnabled(_ enabled: Bool) {
         do {
-            if enabled {
-                try SMAppService.mainApp.register()
-            } else {
-                try SMAppService.mainApp.unregister()
-            }
-            refresh()
+            try enabled ? register() : unregister()
+            // A success is the only thing that clears the previous failure's note.
+            lastAttemptError = nil
         } catch {
-            // Expected in a development build: launchd will not adopt an app running from
-            // DerivedData, and an ad-hoc signature is not an identity it will keep across
-            // rebuilds. Say so rather than leaving a toggle that silently does nothing.
-            //
-            // Re-read the real state, but keep the reason we just captured — a plain
-            // `refresh()` here would clear the only explanation there is.
-            isEnabled = SMAppService.mainApp.status == .enabled
-            unavailableReason = error.localizedDescription
+            // Expected in a development build: launchd will not always adopt an app
+            // running from DerivedData. Say so in the label rather than leaving a toggle
+            // that silently does nothing — and leave it a toggle, so it can be tried again.
+            lastAttemptError = error.localizedDescription
         }
+        refresh()
+    }
+
+    /// The one action `openSettings` offers.
+    func openSystemSettings() {
+        SMAppService.openSystemSettingsLoginItems()
     }
 }

@@ -108,6 +108,10 @@ final class ServerModel {
                 try? await Task.sleep(for: .seconds(interval))
                 await self?.refresh()
                 self?.considerAutoStart()
+                // The login item is not ours alone to change — someone can switch Waffled
+                // off in System Settings while this menu sits here claiming otherwise —
+                // so its status is re-read on the same timer as everything else.
+                self?.loginItem.refresh()
             }
         }
         animationTask = Task { [weak self] in
