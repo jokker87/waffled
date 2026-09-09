@@ -6,8 +6,12 @@
 //
 // Two layers of gating, kept deliberately separate:
 //   1. Scope  — does the key hold `<resource>:<read|write>` for this path? Enforced
-//      centrally in the auth gate (app.ts), because lambda-api has no per-route
-//      middleware and we don't want to thread scope checks through ~135 handlers.
+//      centrally in the auth gate (app.ts) against a path-PREFIX catalog, so no scope
+//      argument had to be threaded through ~135 existing route registrations. That is a
+//      retrofit cost, not a library limit: lambda-api does support per-route middleware
+//      (`api.post(path, mw, handler)`) and path-scoped `api.use`, and declaring the scope
+//      at the route is the intended direction — see docs/product/roadmap.md, "API-key
+//      scopes declared per route", which also covers why the naive move is fail-open.
 //   2. Capability — can the owner person actually do this? Unchanged: the in-route
 //      requireCapability/requireAdmin still run against the real person, so a teen's
 //      key can never exceed the teen's rights even with a broad scope.

@@ -612,6 +612,32 @@ Legend: ✅ done · 🟡 partial / in progress · 🚧 planned · ⛔ dropped (s
   Apple-Speech dictation against the same `/api/recipes/ingest/*` endpoints, with the two
   import buttons gated on the household's provider. Still planned: **instruction-driven edits**
   ("make it vegetarian", "double it").
+- **API-key scopes declared per route, not by path prefix.** Today `API_SCOPES` maps a
+  path *prefix* to a resource and one global gate enforces it (`scopeForRequest` +
+  `enforceApiKeyScope`), which has two costs. It is **fragile**: the scope lives far from
+  the route, and a hyphenated sibling silently belongs to nobody — `/api/chore-instances`
+  is not under `/api/chores`, `/api/pantry-staples` reads like pantry but is a lists route,
+  and a bare `startsWith` would have made `/api/households/invites` readable with
+  `family:read`. And it is **coarse**: a whole prefix gets one resource, so a surface that
+  writes across modules (Weekly Planning hands out chores, features goals, adds events,
+  fills the meal plan) has *no* correct scope — one `weeklyPlanning` scope would be a
+  skeleton key past `chores:write` and the rest, which is why the prefix sits in
+  `UNSCOPED_YET` instead. Declared per route, each route asks for the downstream scope it
+  actually needs and both problems go. lambda-api supports this directly — method-based
+  middleware (`api.post(path, requireScope('chores:write'), handler)`) and path-scoped
+  `api.use`; earlier comments in `route-guards.ts` and `api-keys.ts` claimed otherwise and
+  were simply wrong.
+  **The trap to design around:** today's model is fail-*closed* by construction — a route
+  absent from the catalog is 403, which is why the 29 planning routes were never an
+  exposure. Naive per-route middleware inverts that: forget the guard and the route is
+  wide open to any key. Global middleware runs *before* route middleware and `finally()`
+  can't alter an already-generated response, so a global default-deny cannot be cleared by
+  a later route guard. The fix is therefore a **typed registrar** wrapping
+  `api.get/post/...` where a scope — or an explicit `sessionOnly` marker — is a *required*
+  argument, so omission is a compile error and fail-closed survives the move. Retires the
+  `scope catalog covers the route table` guard and both `NOT_KEY_REACHABLE` buckets in
+  `api-keys.integration.test.ts`, which exist only because the declaration is remote from
+  the route. ~135 routes, mechanical but wide.
 - **Shared album import** for Photos (Google Photos / iCloud).
 - **Server-side fuzzy person resolution** for capture (nicknames/aliases).
 - **Milestone reward payouts** — deferred by design (needs idempotency + attribution rules).

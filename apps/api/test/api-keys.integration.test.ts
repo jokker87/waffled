@@ -288,16 +288,24 @@ describe('currency conversions answer to the rewards scope', () => {
 // it can't drift from what's registered, and fails on any route that is neither
 // scope-matched nor listed below as deliberately unreachable by a key.
 //
-// Adding a route family? Either give its prefix to a resource in API_SCOPES, or add
-// it here with the reason it must stay session/device-only.
+// Adding a route family? Either give its prefix to a resource in API_SCOPES, or list it
+// below — in the bucket that tells the truth about which of these two claims it is:
 //
-// `pending` marks an entry that is NOT a deliberate exclusion — it is parked, waiting
-// on other work. It changes nothing about how the entry is checked (both tests below
-// treat it exactly like any other); it only makes the "this is now stale, delete it"
-// failure say which branch of work landed.
-type NotKeyReachable = { why: string; prefixes: string[]; pending?: string }
+//   NEVER_KEY_REACHABLE — a decision. A key must never reach this and the reason will
+//     still hold next year: login, key management, kiosk pairing, the key routes.
+//   UNSCOPED_YET — debt. Nothing says a key couldn't reach this eventually; nobody has
+//     designed the scope. `tracked` must name where that work lives, so the size of the
+//     gap is greppable instead of buried in prose.
+//
+// Both gate identically at runtime — a prefix in neither API_SCOPES nor these lists is
+// 403 by absence, so this is fail-closed either way. The split is for the reader: a
+// single list makes a boundary and a backlog item look like the same considered call.
+// The standing fix for the debt is per-route scope declaration; see
+// docs/product/roadmap.md, "API-key scopes declared per route".
+type NeverReachable = { why: string; prefixes: string[] }
+type UnscopedYet = NeverReachable & { tracked: string }
 
-const NOT_KEY_REACHABLE: NotKeyReachable[] = [
+const NEVER_KEY_REACHABLE: NeverReachable[] = [
   { why: 'public liveness probe', prefixes: ['/healthz'] },
   { why: 'echoes the token sub — tells a key nothing it does not already know', prefixes: ['/api/me'] },
   { why: 'login, OIDC, invites and self-service account are session-only', prefixes: ['/api/auth', '/auth', '/api/account', '/api/households'] },
@@ -309,22 +317,27 @@ const NOT_KEY_REACHABLE: NotKeyReachable[] = [
   { why: 'integrations surface — documented as always 403 for a key', prefixes: ['/api/countdowns', '/api/family-night', '/api/goal-calendar', '/api/calendar'] },
   { why: 'per-viewer UI layout, not household data', prefixes: ['/api/today-layout'] },
   { why: 'operator surfaces (deep health report, update channel)', prefixes: ['/api/health', '/api/updates'] },
-  // Parked, not deliberate: /api/list-items is the same boundary bug (it is a lists
-  // route that /api/lists cannot match), and PR #180 already adds its prefix to the
-  // `lists` resource. Listed here only so this guard is green without duplicating
-  // that change. No TODO needed: the moment #180 gives it a scope, the staleness test
-  // below goes red and names this entry.
-  { why: 'PENDING — fixed by PR #180, which gives this prefix to `lists`', prefixes: ['/api/list-items'], pending: 'PR #180' },
-  // Left alone on purpose, and for a sharper reason than "it is interactive": a planning
-  // session WRITES THROUGH TO OTHER MODULES — it hands out chores, features goals, adds
-  // calendar events, fills the meal plan. Giving the prefix one `weeklyPlanning` scope
-  // would therefore hand a key a route around `chores:write`, `goals:write` and the rest,
-  // so it stays session-only until someone designs a scope that composes with those.
-  { why: 'a session writes through to chores/goals/events/meals — one scope here would bypass theirs', prefixes: ['/api/weekly-planning'] },
-  // Left alone on purpose: exposing rhythms means a whole new scope resource, not
-  // another prefix, so it is being scoped as its own piece of work.
-  { why: 'GAP? rhythms would need a whole new scope resource, not another prefix', prefixes: ['/api/rhythms'] },
 ]
+
+const UNSCOPED_YET: UnscopedYet[] = [
+  // The same boundary bug as /api/chore-instances: a lists route whose path /api/lists
+  // cannot match. PR #180 already adds the prefix to the `lists` resource, so this is
+  // listed only to keep the guard green without duplicating that change — and the
+  // staleness test below names this entry the moment #180 lands.
+  { why: 'a lists route that the /api/lists prefix cannot match', prefixes: ['/api/list-items'], tracked: 'PR #180' },
+  { why: 'rhythms wants a whole new scope resource, not another prefix — nobody has designed it', prefixes: ['/api/rhythms'], tracked: 'docs/product/roadmap.md — API-key scopes declared per route' },
+  // Debt rather than a boundary, and the distinction is the point. A planning session
+  // WRITES THROUGH to other modules: it hands out chores, features goals, adds calendar
+  // events, fills the meal plan. With one scope per prefix, a `weeklyPlanning` scope
+  // would be a skeleton key past `chores:write`, `goals:write` and the rest — so there
+  // is no correct scope to give this prefix today. That bypass is an artifact of the
+  // prefix model, not of planning: declared per route, each of these routes asks for the
+  // downstream scope it actually needs and the problem disappears.
+  { why: 'no correct scope exists under one-scope-per-prefix — a session writes through to chores/goals/events/meals', prefixes: ['/api/weekly-planning'], tracked: 'docs/product/roadmap.md — API-key scopes declared per route' },
+]
+
+// Checked as one list: the buckets differ in what they claim, not in how they gate.
+const NOT_KEY_REACHABLE: (NeverReachable | UnscopedYet)[] = [...NEVER_KEY_REACHABLE, ...UNSCOPED_YET]
 
 describe('scope catalog covers the route table', () => {
   it('leaves no live route both unscoped and unlisted', async () => {
@@ -356,9 +369,9 @@ describe('scope catalog covers the route table', () => {
       entry.prefixes
         .filter((prefix) => routes.some(([method, path]) => under(prefix, path) && scopeForRequest(method, path)))
         .map((prefix) =>
-          entry.pending
-            ? `${prefix}: ${entry.pending} has landed and given this a scope — DELETE its entry (and the comment above it) from NOT_KEY_REACHABLE`
-            : `${prefix}: now covered by API_SCOPES, so it is no longer excluded from anything — DELETE its entry from NOT_KEY_REACHABLE`
+          'tracked' in entry
+            ? `${prefix}: the work tracked at "${entry.tracked}" has landed and given this a scope — DELETE its entry (and the comment above it) from UNSCOPED_YET`
+            : `${prefix}: now covered by API_SCOPES, so it is no longer excluded from anything — DELETE its entry from NEVER_KEY_REACHABLE`
         )
     )
 
@@ -366,5 +379,17 @@ describe('scope catalog covers the route table', () => {
     // an array to "expected [ Array(1) ]", which would hide the very instruction this
     // test exists to give. As a string it prints in full.
     expect(stale.join('\n')).toBe('')
+  })
+
+  // A debt entry that doesn't say where the work lives is indistinguishable from a
+  // decision — which is the failure the two-bucket split exists to prevent, so the
+  // pointer is required and has to be one a reader can actually follow.
+  it('every unscoped-yet entry names where its work is tracked', () => {
+    const followable = /#\d+|docs\/[\w./-]+/
+    const untracked = UNSCOPED_YET.filter((e) => !followable.test(e.tracked)).map(
+      (e) =>
+        `${e.prefixes.join(', ')}: tracked=${JSON.stringify(e.tracked)} — name a PR/issue (#123) or a docs/ path, or move it to NEVER_KEY_REACHABLE if it is really a decision`
+    )
+    expect(untracked.join('\n')).toBe('')
   })
 })

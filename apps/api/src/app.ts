@@ -106,7 +106,10 @@ const PUBLIC_PATHS = new Set([
 
 // Auth gate — authenticates every non-public route. An `x-api-key` header takes the
 // API-key path: it resolves to the owning person (set as req.principal + tenant) and
-// is scope-checked centrally here, since lambda-api has no per-route middleware.
+// is scope-checked centrally here against a path-prefix catalog. Central because it is
+// fail-closed by construction — a route absent from the catalog is 403, so a new route
+// family cannot accidentally be key-reachable. See api-keys.ts for why per-route
+// declaration is the intended replacement, and what makes the naive version fail-open.
 // Otherwise we verify the Bearer JWT as usual. Either failure throws AuthError → the
 // error handler below.
 api.use(async (req: Request, res: Response, next: NextFunction) => {

@@ -1,8 +1,9 @@
-// Composable per-route auth guards. lambda-api has no path-scoped middleware
-// (only the one global gate in app.ts), so instead of re-deriving the tenant in
-// every handler we wrap handlers in a guard that resolves auth, then calls the
-// handler with the resolved Tenant. Thrown AuthErrors flow to the 4-arg error
-// handler in app.ts unchanged — these wrappers add no try/catch.
+// Composable per-route auth guards. These WRAP a handler rather than chaining as
+// lambda-api middleware (which does support both `api.use(path, mw)` and
+// `api.get(path, mw, handler)`) for one reason: a wrapper can hand the handler an
+// already-resolved `Tenant` as its first argument, which middleware cannot do without
+// stashing it on `req` and re-asserting its type at every call site. Thrown AuthErrors
+// flow to the 4-arg error handler in app.ts unchanged — these wrappers add no try/catch.
 //
 // Routes that don't fit the common shape (public, device-token, dual self-or-admin,
 // or conditional carve-outs that gate a capability only when acting on others) stay
