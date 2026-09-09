@@ -257,7 +257,9 @@ final class ServerModel {
             // running)" — and this click is its answer. Nothing is asked twice.
             NSApp.terminate(nil)
         case .confirmThenStop:
-            guard askToQuit(), operationTask == nil else { return }
+            // Order matters: an operation already in flight means no alert at all, rather
+            // than an alert whose "Quit and Stop the Server" quietly does nothing.
+            guard operationTask == nil, askToQuit() else { return }
             stopThenQuit()
         }
     }
