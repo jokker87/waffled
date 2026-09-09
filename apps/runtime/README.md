@@ -211,8 +211,13 @@ It runs `/usr/bin/dns-sd -R` as **one more supervised child**, started once Cadd
 answering and stopped first on the way down. That is a deliberate choice over a Go mDNS
 library: registering through the system mDNSResponder means nothing new binds 5353 (a
 second responder beside it is the classic macOS flake), `go.mod` stays stdlib-only, and
-the registration is withdrawn automatically when the process is killed — so the
-advertisement cannot outlive the server, even if the supervisor is killed outright.
+the registration is withdrawn automatically when that process is killed.
+
+What it does **not** do is die with the supervisor. Children are spawned into their own
+process group, so a supervisor that is SIGKILLed leaves dns-sd running and mDNSResponder
+still publishing. That is why the next start adopts the orphan (stopping it before
+registering again) and why `status` trusts the advertiser's pidfile, not the pid recorded
+in `bonjour.json`, for whether anything is on the network.
 
 It is **advisory**. It is not in `Children()`, not in `Order`, not in `PortChecks`, and not
 in the `services` array `status` emits, so a Bonjour failure can never make a working
@@ -386,10 +391,12 @@ is never on its own a reason to draw a red icon.
 
 `status` usually runs in a **different process** from the supervisor, so the advertisement
 is recorded in `bonjour.json` beside `runtime.json` — written atomically, with the
-supervisor's pid in it. Every field is trusted only while that pid is alive: a supervisor
-that was SIGKILLed leaves the file behind, but mDNSResponder withdrew the registration when
-the dns-sd child died with it, so the block must report nothing rather than name a
-household that is not on the network.
+supervisor's pid in it. The file records what was **asked for**; whether it is on the
+network is the advertiser's **pidfile's** answer, and the two are combined here. They can
+disagree: dns-sd runs in its own process group and outlives a SIGKILLed supervisor, so the
+name and port are reported for an orphan that is still publishing, and a file left behind
+with no advertiser running names nothing (but still carries the recorded reason, which is
+why the unclean stop left it there).
 
 ## Backup and restore
 

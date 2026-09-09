@@ -66,20 +66,43 @@ func TestBonjourStateRoundTrips(t *testing.T) {
 	}
 }
 
-func TestBonjourStateFromADeadSupervisorIsNotReported(t *testing.T) {
+// dns-sd is spawned with Setpgid, so a SIGKILLed supervisor does NOT take it with it:
+// the advertisement stays on the network under an adopted process. What is on the
+// network is therefore the pidfile's answer, not the recorded supervisor pid's — and
+// `status` must name what a phone can actually see.
+func TestAnOrphanedAdvertiserIsStillReported(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bonjour.json")
+	if err := writeBonjourState(path, bonjourState{
+		SupervisorPID: 0x7FFFFFFE, Name: "The Seinfelds", Port: 8080,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got := bonjourStatus(path, true)
+	if !got.Advertised {
+		t.Error("an advertiser that outlived its supervisor was reported as nothing on the network")
+	}
+	if got.Name != "The Seinfelds" || got.Port != 8080 {
+		t.Errorf("got %+v, want the name and port that are actually being advertised", got)
+	}
+}
+
+// With the advertiser gone too, the file is only a record of what was asked for: nothing
+// is named on the network, but the recorded reason survives — the file exists at all only
+// because the last stop was unclean, and that reason is what explains it.
+func TestBonjourStateWithNoAdvertiserNamesNothing(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "bonjour.json")
-	// A supervisor that was SIGKILLed leaves its file behind. Nothing is advertising —
-	// mDNSResponder withdrew the registration when dns-sd died with it — so `status`
-	// must not name a household that is not on the network.
 	if err := writeBonjourState(path, bonjourState{
 		SupervisorPID: 0x7FFFFFFE, Name: "The Seinfelds", Port: 8080, Error: "boom",
 	}); err != nil {
 		t.Fatal(err)
 	}
 	got := bonjourStatus(path, false)
-	if got.Advertised || got.Name != "" || got.Port != 0 || got.Error != "" {
-		t.Errorf("a stale file was reported as live: %+v", got)
+	if got.Advertised || got.Name != "" || got.Port != 0 {
+		t.Errorf("a household was named while nothing is advertising: %+v", got)
+	}
+	if got.Error != "boom" {
+		t.Errorf("error = %q, want the recorded reason", got.Error)
 	}
 	if got.Service != bonjour.ServiceType {
 		t.Errorf("service = %q, want the constant %q even when nothing is advertising", got.Service, bonjour.ServiceType)

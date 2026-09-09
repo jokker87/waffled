@@ -49,9 +49,14 @@ var bonjourSetupPoll = 60 * time.Second
 // `status` — a different process, polled every second by the menu-bar app — can report
 // it without a database query or a `ps` of dns-sd's argv.
 //
-// SupervisorPID is the freshness check. A supervisor that was SIGKILLed leaves this file
-// behind while mDNSResponder has already withdrawn the registration (it died with the
-// dns-sd child), so every field is trusted only while that pid is alive.
+// It records what was ASKED FOR. Whether it is on the network is a separate question,
+// answered by the advertiser's pidfile: children are spawned into their own process group
+// (see process.go), so a SIGKILLed supervisor leaves dns-sd running and mDNSResponder
+// still publishing — the orphan-adoption branch in stopBonjourChild exists for exactly
+// that. SupervisorPID is kept as a diagnostic — it says which process wrote the file, and
+// is what `stop` uses to recognise a run that is no longer this one — not as a freshness
+// gate, and Setup records which of the two names was chosen for the sake of anyone
+// reading bonjour.json by hand.
 type bonjourState struct {
 	SupervisorPID int    `json:"supervisorPid"`
 	Name          string `json:"name"`
@@ -84,14 +89,17 @@ func readBonjourState(path string) (bonjourState, bool) {
 }
 
 // bonjourStatus renders the status block from the recorded state and whether the dns-sd
-// child is actually running. Both have to be true for anything to be reported: the file
-// says what was asked for, the process says whether it is still on the network.
+// child is actually running. The two answer different questions: the file says what was
+// asked for, the running process says whether it is still on the network. The process is
+// the authority on the second, including when the supervisor that started it is gone —
+// dns-sd survives a SIGKILLed supervisor and keeps advertising, and reporting "nothing
+// advertised" then would be a false reading at the moment it matters most.
 func bonjourStatus(statePath string, childRunning bool) status.Bonjour {
 	// The service type is constant and is reported even when nothing is advertising, so
 	// a client always knows what to look for.
 	b := status.Bonjour{Service: bonjour.ServiceType}
 	st, ok := readBonjourState(statePath)
-	if !ok || !processAlive(st.SupervisorPID) {
+	if !ok {
 		return b
 	}
 	b.Name = st.Name
