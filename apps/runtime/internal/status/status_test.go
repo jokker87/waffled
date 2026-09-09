@@ -40,6 +40,15 @@ func TestJSONShapeIsStable(t *testing.T) {
 			t.Errorf("status --json lost the %q field — that is a breaking change for the menu-bar app", key)
 		}
 	}
+	// The update trail. Additive — Schema stays at 1 — and the menu-bar app's "Updated
+	// to X" is built from it, so the names are as much of the contract as the rest.
+	bundle := generic["bundle"].(map[string]any)
+	for _, key := range []string{"version", "previousVersion", "updatedAt"} {
+		if _, ok := bundle[key]; !ok {
+			t.Errorf("status --json's bundle block lost the %q field", key)
+		}
+	}
+
 	svc := generic["services"].([]any)[0].(map[string]any)
 	for _, key := range []string{"name", "state", "pid", "port", "health", "restarts", "lastError", "log"} {
 		if _, ok := svc[key]; !ok {

@@ -48,13 +48,25 @@ type Versions struct {
 	Web       string `json:"web"`
 }
 
-// Bundle identifies the build the data is being served by.
+// Bundle identifies the build the data is being served by, and how it got here.
 type Bundle struct {
 	GitSha   string `json:"gitSha"`
 	BuiltAt  string `json:"builtAt"`
 	Arch     string `json:"arch"`
 	Platform string `json:"platform"`
 	Verified bool   `json:"verified"`
+	// Version is this bundle's Waffled version. It repeats versions.waffled — the two
+	// are the same fact — because everything else about the update lives in this block
+	// and a reader comparing "which version, from which version" should not have to
+	// join two objects to do it.
+	Version string `json:"version"`
+	// PreviousVersion and UpdatedAt describe the last version CROSSING this data went
+	// through: what it was served by before, and when the change happened. Both are
+	// read from runtime.json rather than computed, so they survive restarts and are the
+	// same whether the stack is up or down — they are what the menu-bar app turns into
+	// "Updated to 0.15.0". Empty on data that has only ever known one version.
+	PreviousVersion string `json:"previousVersion"`
+	UpdatedAt       string `json:"updatedAt"`
 }
 
 // URLs are the addresses to hand a person. Local works on this Mac; LAN is what a phone
@@ -209,6 +221,9 @@ func (r *Report) Text() string {
 	fmt.Fprintf(&b, "Waffled %s — %s\n", r.Versions.Waffled, r.State)
 	fmt.Fprintf(&b, "  data:   %s\n", r.DataDir)
 	fmt.Fprintf(&b, "  bundle: %s\n", r.BundleDir)
+	if r.Bundle.PreviousVersion != "" {
+		fmt.Fprintf(&b, "  updated from %s on %s\n", r.Bundle.PreviousVersion, r.Bundle.UpdatedAt)
+	}
 	if r.URLs.Local != "" {
 		fmt.Fprintf(&b, "  open:   %s\n", r.URLs.Local)
 	}

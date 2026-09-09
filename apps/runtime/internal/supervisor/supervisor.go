@@ -628,12 +628,19 @@ func (s *Supervisor) Status(ctx context.Context) *status.Report {
 		}
 		r.Bundle = status.Bundle{
 			GitSha: m.GitSha, BuiltAt: m.BuiltAt, Arch: m.Arch, Platform: m.Platform,
+			Version: m.WaffledVersion,
 			// Constant by construction, not a live signal: New() returns an error on
 			// every path where verification failed, so a *Supervisor whose bundle did
 			// not verify cannot exist to be asked. The field stays in the JSON because
 			// the menu-bar app reads it and the schema is additive.
 			Verified: true,
 		}
+	}
+	// From runtime.json, not from this process: `status` is its own command, so the only
+	// place "what was this before?" can come from is the file the start wrote it to.
+	if s.state != nil {
+		r.Bundle.PreviousVersion = s.state.PreviousBundleVersion
+		r.Bundle.UpdatedAt = s.state.BundleUpdatedAt
 	}
 	if pid, err := readPidfile(s.runner.pidPath(SupervisorPidName)); err == nil {
 		r.Supervisor = status.Supervisor{PID: pid, Running: processAlive(pid)}
