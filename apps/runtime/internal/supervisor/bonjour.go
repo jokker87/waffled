@@ -52,17 +52,21 @@ var bonjourSetupPoll = 60 * time.Second
 // answered by the advertiser's pidfile: children are spawned into their own process group
 // (see process.go), so a SIGKILLed supervisor leaves dns-sd running and mDNSResponder
 // still publishing — the orphan-adoption branch in stopBonjourChild exists for exactly
-// that. SupervisorPID is kept as a diagnostic — it says which process wrote the file, and
-// is what `stop` uses to recognise a run that is no longer this one — not as a freshness
-// gate, and Setup records which of the two names was chosen for the sake of anyone
-// reading bonjour.json by hand.
+// that. Setup records which of the two names was chosen, for the sake of anyone reading
+// bonjour.json by hand.
+//
+// There is deliberately no supervisor pid here. One was written on every update and read
+// by nothing, under a comment claiming `stop` used it to recognise a run that was no
+// longer this one — a check that does not exist. Nothing here can serve as one either:
+// the process that matters is dns-sd's, which OUTLIVES the supervisor that spawned it,
+// so a stale pid would answer the ownership question exactly backwards on the one run
+// where it was asked.
 type bonjourState struct {
-	SupervisorPID int    `json:"supervisorPid"`
-	Name          string `json:"name"`
-	Port          int    `json:"port"`
-	Setup         bool   `json:"setup"`
-	Error         string `json:"error"`
-	UpdatedAt     string `json:"updatedAt"`
+	Name      string `json:"name"`
+	Port      int    `json:"port"`
+	Setup     bool   `json:"setup"`
+	Error     string `json:"error"`
+	UpdatedAt string `json:"updatedAt"`
 }
 
 func writeBonjourState(path string, st bonjourState) error {
@@ -252,10 +256,13 @@ func (s *Supervisor) bonjourPoll(ctx context.Context, stop <-chan struct{}, cur 
 func (s *Supervisor) advertise(ctx context.Context, census bonjour.Census) advertisement {
 	a := plannedAdvertisement(census)
 	inst := bonjour.Instance{
-		Name:    a.name,
-		Port:    s.plan.Ports.Public,
-		URL:     s.advertisedURL(),
-		Version: s.waffledVersion(),
+		Name: a.name,
+		Port: s.plan.Ports.Public,
+		URL:  s.advertisedURL(),
+		// The same accessor the downgrade guard, the snapshot names and `status` use: a
+		// second copy of "what version is this" would let the TXT record and the status
+		// output disagree the first time either grew a fallback.
+		Version: s.bundleVersion(),
 		Setup:   a.setup,
 	}
 	st := bonjourState{Name: inst.Name, Port: inst.Port, Setup: inst.Setup}
@@ -278,6 +285,19 @@ func (s *Supervisor) advertise(ctx context.Context, census bonjour.Census) adver
 // register is not going to start working on the fiftieth attempt — mDNSResponder has
 // refused it — and a flap nobody caps is a loop with no one watching. Giving up is safe
 // precisely because this child is advisory: the server keeps serving.
+//
+// It caps ONE of the two ways dns-sd fails, and it is worth being exact about which. This
+// budget is spent by a child that got PAST the start window: startChild armed supervision,
+// and the process then died at once, repeatedly, on its own restarts.
+//
+// A dns-sd that is already gone when the 500ms window closes on the FIRST attempt never
+// reaches supervision at all — startChild returns an error before calling supervise, so
+// this constant and the report callback are never even attached to it. That path is not
+// unwatched: advertise records the reason in bonjour.json and warns, and because the
+// attempt left live=false the setup poll re-advertises on its next tick. It is deliberately
+// uncapped, because one attempt a minute is a pace rather than a loop and the usual cause —
+// the Local Network prompt not answered yet, a mDNSResponder still coming up — is a
+// condition that becomes true later, which giving up would then never notice.
 const bonjourMaxQuickFailures = 5
 
 // supervise arms restart supervision, with the advertiser's own policy attached.
@@ -300,14 +320,48 @@ func (s *Supervisor) reportBonjourExit(reason string, gaveUp bool) {
 	if gaveUp {
 		reason += " — not advertising any more; restart the server to try again"
 	}
+	// Read the child before taking bonjourMu. It is only needed on the recovery path
+	// below, but doing it here keeps the two locks from ever nesting — no path holds s.mu
+	// and then reaches for bonjourMu, and a map lookup on a child's exit is not a cost
+	// worth reasoning about lock order for.
+	fallback := s.advertisedByChild()
+
 	s.bonjourMu.Lock()
 	defer s.bonjourMu.Unlock()
 	st, ok := readBonjourState(s.plan.Layout.BonjourState)
 	if !ok {
-		return
+		// The file is gone or unreadable — the first writeBonjour only warned, or
+		// something removed it mid-run. Returning here dropped the single fact this
+		// callback exists to carry: `status` is a different process with nothing else to
+		// read, and bonjourRefresh stops polling once an advertisement has settled, so a
+		// child that had been given up on would report as "not advertising" with an empty
+		// reason for the rest of the run. A fresh record saying only why is worth more
+		// than silence.
+		st = fallback
+		s.bonjourMissingOnce.Do(func() {
+			s.log.Warnf("%s was missing when the advertiser failed, so the reason is being recorded in a fresh one: %s",
+				s.plan.Layout.BonjourState, reason)
+		})
 	}
 	st.Error = reason
 	s.writeBonjour(st)
+}
+
+// advertisedByChild recovers what is being advertised from the argv of the child holding
+// it. It is the fallback for a lost bonjour.json, and never the primary source: the file
+// records what was ASKED FOR, including the attempts that never got a child at all.
+func (s *Supervisor) advertisedByChild() bonjourState {
+	s.mu.Lock()
+	c := s.children[services.Bonjour]
+	s.mu.Unlock()
+	if c == nil {
+		return bonjourState{}
+	}
+	name, port, ok := bonjour.NameAndPort(c.spec.Args)
+	if !ok {
+		return bonjourState{}
+	}
+	return bonjourState{Name: name, Port: port}
 }
 
 func (s *Supervisor) recordBonjour(st bonjourState) {
@@ -320,7 +374,6 @@ func (s *Supervisor) recordBonjour(st bonjourState) {
 // file — the refresh poll and the restart supervisor's report — and atomicfile prevents a
 // torn file, not a lost update.
 func (s *Supervisor) writeBonjour(st bonjourState) {
-	st.SupervisorPID = os.Getpid()
 	if err := writeBonjourState(s.plan.Layout.BonjourState, st); err != nil {
 		s.log.Warnf("could not record the Bonjour advertisement: %v", err)
 	}
@@ -384,13 +437,6 @@ func (s *Supervisor) advertisedURL() string {
 		return "http://" + h + ":" + strconv.Itoa(s.plan.Ports.Public)
 	}
 	return ""
-}
-
-func (s *Supervisor) waffledVersion() string {
-	if s.manifest == nil {
-		return ""
-	}
-	return s.manifest.WaffledVersion
 }
 
 // householdCensus asks the database how many households this install has. A failure is

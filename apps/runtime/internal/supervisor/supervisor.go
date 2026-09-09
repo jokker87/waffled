@@ -96,6 +96,21 @@ type Supervisor struct {
 	// bonjourMu serialises the read-modify-write of bonjour.json, which the refresh poll
 	// and the advertiser's restart supervisor both touch.
 	bonjourMu sync.Mutex
+	// bonjourMissingOnce keeps "bonjour.json has gone missing" to a single log line. It
+	// is one condition, not one per exit, and a flapping advertiser would otherwise
+	// report it on every death right up to the cap.
+	bonjourMissingOnce sync.Once
+
+	// startedVersion is the Waffled version runtime.json recorded when this Supervisor
+	// was constructed — the build that last had this data open, before we touched it.
+	//
+	// It is kept in memory because New() must not write the running version over it:
+	// that value is the "from" half of a pre-migrate snapshot's name and of the
+	// downgrade guard's message, and both are asked while the new bundle is already
+	// running. The file is only caught up once a start has gone green (see
+	// recordBundleVersion), so a start that never finished leaves the record of what
+	// wrote the data intact. Empty on data written before the field existed.
+	startedVersion string
 
 	// waitHealthy gates a service on its health URL. It is a field, always set to
 	// waitHTTP in production, purely so the rollback test can make the api's gate fail
@@ -176,12 +191,13 @@ func New(opts Options) (*Supervisor, error) {
 	}
 
 	s := &Supervisor{
-		log:         log,
-		manifest:    m,
-		state:       st,
-		children:    map[string]*child{},
-		runner:      &runner{logsDir: layout.Logs, pidsDir: layout.Pids, log: log},
-		waitHealthy: waitHTTP,
+		log:            log,
+		manifest:       m,
+		state:          st,
+		startedVersion: st.BundleVersion,
+		children:       map[string]*child{},
+		runner:         &runner{logsDir: layout.Logs, pidsDir: layout.Pids, log: log},
+		waitHealthy:    waitHTTP,
 	}
 	s.plan = services.Plan{
 		Bundle:   bundleDir,
@@ -312,6 +328,15 @@ func (s *Supervisor) Start(ctx context.Context) error {
 		return s.fail(err)
 	}
 
+	// Before anything is changed: may this build open this data at all? A bundle OLDER
+	// than the schema is the one direction nothing can undo, and re-installing the
+	// previous version is the first thing anyone does when an update goes wrong. Here,
+	// with Postgres up and migrate not yet run, is the only moment the question can be
+	// asked while the answer still costs nothing (see checkNotDowngraded).
+	if err := s.checkNotDowngraded(ctx); err != nil {
+		return s.fail(err)
+	}
+
 	// Plan §5: "Rollback means restore, not reverse migrations." Migrations only run
 	// forward, so the way back from a schema change that breaks the api is a dump taken
 	// immediately before it. Nothing happens here unless migrations are genuinely
@@ -371,6 +396,10 @@ func (s *Supervisor) Start(ctx context.Context) error {
 	s.lastError = ""
 	s.mu.Unlock()
 
+	// Only now: the data has been migrated and served by this build, so this build is
+	// what a future start should call the version that wrote it.
+	s.recordBundleVersion()
+
 	// Last, and only once the server actually answers: an advertisement is a promise
 	// that something is there to reach. It cannot fail the start (see bonjour.go).
 	s.startBonjour(ctx)
@@ -380,6 +409,43 @@ func (s *Supervisor) Start(ctx context.Context) error {
 		s.log.Infof("other devices on your network: %s", lan)
 	}
 	return nil
+}
+
+// bundleVersion is the version of the build we are running, or "" when the manifest does
+// not name one. One reader, so the fallback to "unknown" is left to whoever formats it.
+func (s *Supervisor) bundleVersion() string {
+	if s.manifest == nil {
+		return ""
+	}
+	return s.manifest.WaffledVersion
+}
+
+// recordBundleVersion catches runtime.json up with the build that just went green, and
+// writes down the crossing if there was one.
+//
+// Deliberately at the END of a successful start, and deliberately best-effort. A start
+// that failed leaves the previous version recorded, because that IS still the last build
+// this data was served by — and a runtime.json we could not rewrite must not turn a
+// working server into a failed start over bookkeeping.
+func (s *Supervisor) recordBundleVersion() {
+	version := s.bundleVersion()
+	if version == "" || s.state == nil {
+		return
+	}
+	if previous := s.state.BundleVersion; previous != version {
+		if previous != "" {
+			// Only a real crossing is announced. A first start has nothing to compare
+			// against, and calling that an update would have the menu bar greet every
+			// new install with "Updated to 0.15.0".
+			s.state.PreviousBundleVersion = previous
+			s.state.BundleVersionChangedAt = time.Now().UTC().Format(time.RFC3339)
+			s.log.Infof("this data directory was last served by %s; it is now on %s", previous, version)
+		}
+		s.state.BundleVersion = version
+		if err := rtstate.Save(s.plan.Layout.RuntimeJSON, s.state); err != nil {
+			s.log.Warnf("could not record the running version in %s: %v", s.plan.Layout.RuntimeJSON, err)
+		}
+	}
 }
 
 func (s *Supervisor) fail(err error) error {
@@ -566,12 +632,19 @@ func (s *Supervisor) Status(ctx context.Context) *status.Report {
 		}
 		r.Bundle = status.Bundle{
 			GitSha: m.GitSha, BuiltAt: m.BuiltAt, Arch: m.Arch, Platform: m.Platform,
+			Version: m.WaffledVersion,
 			// Constant by construction, not a live signal: New() returns an error on
 			// every path where verification failed, so a *Supervisor whose bundle did
 			// not verify cannot exist to be asked. The field stays in the JSON because
 			// the menu-bar app reads it and the schema is additive.
 			Verified: true,
 		}
+	}
+	// From runtime.json, not from this process: `status` is its own command, so the only
+	// place "what was this before?" can come from is the file the start wrote it to.
+	if s.state != nil {
+		r.Bundle.PreviousVersion = s.state.PreviousBundleVersion
+		r.Bundle.VersionChangedAt = s.state.BundleVersionChangedAt
 	}
 	if pid, err := readPidfile(s.runner.pidPath(SupervisorPidName)); err == nil {
 		r.Supervisor = status.Supervisor{PID: pid, Running: processAlive(pid)}

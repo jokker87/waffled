@@ -133,6 +133,35 @@ func (i Instance) Args(tool string) []string {
 	return append(args, i.TXT()...)
 }
 
+// NameAndPort reads an instance back out of the argv Args built. It exists for one
+// caller: the supervisor recording WHY the advertiser died at a moment when the file that
+// held the name and port is missing, leaving the dying child's own command line as the
+// last place either survives.
+//
+// It lives here, immediately below its inverse, because it is the only positional
+// knowledge of that command line outside Args itself — kept together, the two are edited
+// together, and a round-trip test holds them to it. It reports ok=false for anything that
+// is not one of our own registrations rather than guessing: an argv it cannot read leaves
+// the supervisor writing an anonymous failure, which is honest, where a misread one would
+// put a service type or a flag where a household name belongs.
+func NameAndPort(args []string) (string, int, bool) {
+	// tool -R <name> <type> . <port>
+	const (
+		verb = 1
+		name = 2
+		typ  = 3
+		port = 5
+	)
+	if len(args) <= port || args[verb] != "-R" || args[typ] != ServiceType {
+		return "", 0, false
+	}
+	p, err := strconv.Atoi(args[port])
+	if err != nil {
+		return "", 0, false
+	}
+	return args[name], p, true
+}
+
 // Host is the multicast name other devices resolve this Mac by. Note what it is NOT:
 // there is no `waffled.local` — devices see this machine's own hostname, which is why
 // discovery exists at all (plan §3).

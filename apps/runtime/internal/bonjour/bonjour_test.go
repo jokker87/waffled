@@ -166,6 +166,36 @@ func TestArgsAreNilWithoutATool(t *testing.T) {
 	}
 }
 
+// NameAndPort is Args read backwards, and it lives beside Args so the two are edited
+// together: the supervisor uses it to say what was being advertised when the record of
+// it has been lost, and a positional reader that silently drifted from the writer would
+// put a service type where a household name belongs.
+func TestNameAndPortReadsBackWhatArgsWrote(t *testing.T) {
+	inst := Instance{Name: "Kevin’s Home", Port: 8080, URL: "http://192.168.1.5:8080", Version: "0.14.3"}
+	name, port, ok := NameAndPort(inst.Args("/usr/bin/dns-sd"))
+	if !ok {
+		t.Fatal("the argv this package just built did not read back")
+	}
+	if name != inst.Name || port != inst.Port {
+		t.Errorf("read back %q port %d, want %q port %d", name, port, inst.Name, inst.Port)
+	}
+
+	// Anything that is not one of our own registrations is "cannot say" rather than a
+	// guess: a wrong name in bonjour.json is worse than an anonymous failure.
+	for _, args := range [][]string{
+		nil,
+		{"/usr/bin/dns-sd"},
+		{"/usr/bin/dns-sd", "-B", ServiceType, "."},                       // a browse, not a registration
+		{"/usr/bin/dns-sd", "-R", "Home", ServiceType, "."},               // truncated before the port
+		{"/usr/bin/dns-sd", "-R", "Home", ServiceType, ".", "not-a-port"}, // unparseable port
+		{"/usr/bin/dns-sd", "-R", "Home", "_other._tcp", ".", "8080"},     // somebody else's service
+	} {
+		if name, port, ok := NameAndPort(args); ok {
+			t.Errorf("NameAndPort(%q) = %q, %d, true — want it to decline", args, name, port)
+		}
+	}
+}
+
 func TestHostAlwaysNamesTheMulticastDomain(t *testing.T) {
 	cases := map[string]string{
 		"Kevins-MacBook-Pro.local":  "Kevins-MacBook-Pro.local",

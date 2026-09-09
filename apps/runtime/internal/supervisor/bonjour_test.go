@@ -44,10 +44,7 @@ func TestBonjourStateRoundTrips(t *testing.T) {
 		t.Fatal("read a state file that does not exist")
 	}
 
-	want := bonjourState{
-		SupervisorPID: os.Getpid(), Name: "Kevin’s Home", Port: 8080,
-		Setup: false, Error: "",
-	}
+	want := bonjourState{Name: "Kevin’s Home", Port: 8080, Setup: false, Error: ""}
 	if err := writeBonjourState(path, want); err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -55,18 +52,27 @@ func TestBonjourStateRoundTrips(t *testing.T) {
 	if !ok {
 		t.Fatal("the state file just written does not read back")
 	}
-	if got.Name != want.Name || got.Port != want.Port || got.SupervisorPID != want.SupervisorPID {
+	if got.Name != want.Name || got.Port != want.Port {
 		t.Errorf("round trip lost something: %+v", got)
 	}
-	// The URL belongs in the TXT record, which is where a client reads it. Recording it
-	// here as well gave it a second copy to keep correct on every write and no reader at
-	// all: `status` reports urls.lan, and the block has never had a url field.
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The URL belongs in the TXT record, which is where a client reads it. Recording it
+	// here as well gave it a second copy to keep correct on every write and no reader at
+	// all: `status` reports urls.lan, and the block has never had a url field.
 	if strings.Contains(string(raw), `"url"`) {
 		t.Errorf("bonjour.json still records a url nothing reads back:\n%s", raw)
+	}
+	// Same story for the supervisor's pid, which was written on every update and read by
+	// nothing. Its comment promised an ownership check that was never implemented, and a
+	// field carrying a claim no code makes good on is worse than no field: the next
+	// person to reach for a freshness gate would find one already there and trust it.
+	// What is actually on the network is the advertiser's OWN pidfile — see the orphan
+	// test below, which is the case a supervisor pid would have been wrong about.
+	if strings.Contains(string(raw), "upervisorPid") {
+		t.Errorf("bonjour.json still records a supervisor pid nothing reads back:\n%s", raw)
 	}
 	if got.UpdatedAt == "" {
 		t.Error("UpdatedAt is empty — a stale file must be recognisable as old")
@@ -84,13 +90,12 @@ func TestBonjourStateRoundTrips(t *testing.T) {
 
 // dns-sd is spawned with Setpgid, so a SIGKILLed supervisor does NOT take it with it:
 // the advertisement stays on the network under an adopted process. What is on the
-// network is therefore the pidfile's answer, not the recorded supervisor pid's — and
-// `status` must name what a phone can actually see.
+// network is therefore the ADVERTISER's pidfile's answer — and `status` must name what a
+// phone can actually see. This is the case that makes a supervisor pid in bonjour.json
+// worse than useless: the run that wrote the file is gone, and the advertisement is not.
 func TestAnOrphanedAdvertiserIsStillReported(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "bonjour.json")
-	if err := writeBonjourState(path, bonjourState{
-		SupervisorPID: 0x7FFFFFFE, Name: "The Seinfelds", Port: 8080,
-	}); err != nil {
+	if err := writeBonjourState(path, bonjourState{Name: "The Seinfelds", Port: 8080}); err != nil {
 		t.Fatal(err)
 	}
 	got := bonjourStatus(path, true)
@@ -109,7 +114,7 @@ func TestBonjourStateWithNoAdvertiserNamesNothing(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "bonjour.json")
 	if err := writeBonjourState(path, bonjourState{
-		SupervisorPID: 0x7FFFFFFE, Name: "The Seinfelds", Port: 8080, Error: "boom",
+		Name: "The Seinfelds", Port: 8080, Error: "boom",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -127,9 +132,7 @@ func TestBonjourStateWithNoAdvertiserNamesNothing(t *testing.T) {
 
 func TestBonjourStatusReportsTheLiveAdvertisement(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "bonjour.json")
-	if err := writeBonjourState(path, bonjourState{
-		SupervisorPID: os.Getpid(), Name: "The Seinfelds", Port: 8080,
-	}); err != nil {
+	if err := writeBonjourState(path, bonjourState{Name: "The Seinfelds", Port: 8080}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -154,7 +157,7 @@ func TestBonjourStatusReportsTheLiveAdvertisement(t *testing.T) {
 func TestBonjourStatusCarriesTheFailureReason(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "bonjour.json")
 	if err := writeBonjourState(path, bonjourState{
-		SupervisorPID: os.Getpid(), Error: "dns-sd is not available on this platform",
+		Error: "dns-sd is not available on this platform",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -333,5 +336,64 @@ func TestASettledInstallNeverForksForTheComputerName(t *testing.T) {
 	}
 	if asked != 1 {
 		t.Errorf("the fallback asked %d times, want once", asked)
+	}
+}
+
+// An exit reason that arrives while bonjour.json is missing used to be dropped on the
+// floor: reportBonjourExit read the file, found nothing and returned without writing or
+// logging. The file can genuinely be absent — the very first writeBonjour only WARNS on
+// failure, and a removed or half-written file reads the same way — and status runs in a
+// different process with nothing else to read, so the advertiser would report as "not
+// advertising" with an empty reason for the rest of the run. That is precisely the state
+// this callback exists to make visible.
+func TestAnExitReasonSurvivesAMissingStateFile(t *testing.T) {
+	s := &Supervisor{
+		log: testLogger(t), runner: newTestRunner(t), children: map[string]*child{},
+		plan: services.Plan{Layout: datadir.At(t.TempDir())},
+	}
+	if _, ok := readBonjourState(s.plan.Layout.BonjourState); ok {
+		t.Fatal("a state file exists before anything wrote one")
+	}
+
+	s.reportBonjourExit("dns-sd exited with status 1", true)
+
+	st, ok := readBonjourState(s.plan.Layout.BonjourState)
+	if !ok {
+		t.Fatal("no bonjour.json was written, so the exit reason is unreadable to status")
+	}
+	if !strings.Contains(st.Error, "status 1") {
+		t.Errorf("error = %q, want the reason supervision reported", st.Error)
+	}
+	// Giving up is the half a person has to act on: nothing retries without them.
+	if !strings.Contains(st.Error, "restart the server") {
+		t.Errorf("error = %q, want the advice that goes with giving up", st.Error)
+	}
+}
+
+// A reconstructed record should still name what was being advertised. Once bonjour.json
+// is gone, the dying child's own argv is the only place that survives, and a record that
+// names the instance is the difference between "something failed" and a line status can
+// actually print.
+func TestAReconstructedStateNamesWhatWasBeingAdvertised(t *testing.T) {
+	s := &Supervisor{
+		log: testLogger(t), runner: newTestRunner(t), children: map[string]*child{},
+		plan: services.Plan{Layout: datadir.At(t.TempDir())},
+	}
+	inst := bonjour.Instance{Name: "The Seinfelds", Port: 8080, URL: "http://192.168.1.5:8080", Version: "0.15.0"}
+	s.children[services.Bonjour] = &child{spec: services.Spec{
+		Name: services.Bonjour, Path: "dns-sd", Args: inst.Args("dns-sd"),
+	}}
+
+	s.reportBonjourExit("dns-sd exited with status 1", false)
+
+	st, ok := readBonjourState(s.plan.Layout.BonjourState)
+	if !ok {
+		t.Fatal("no bonjour.json was written")
+	}
+	if st.Name != inst.Name || st.Port != inst.Port {
+		t.Errorf("recovered %q port %d, want %q port %d", st.Name, st.Port, inst.Name, inst.Port)
+	}
+	if !strings.Contains(st.Error, "status 1") {
+		t.Errorf("error = %q, want the reason supervision reported", st.Error)
 	}
 }
