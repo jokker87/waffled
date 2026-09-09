@@ -76,8 +76,7 @@ enum RuntimeClientError: Error, Equatable {
     var firstLine: String {
         switch self {
         case let .commandFailed(_, exitCode, message):
-            let line = message.split(separator: "\n").first.map(String.init) ?? ""
-            return line.isEmpty ? "the runtime exited with status \(exitCode)" : line
+            return message.firstLine ?? "the runtime exited with status \(exitCode)"
         case let .cannotRunRuntime(path, reason):
             return "cannot run \(path): \(reason)"
         case let .unreadableStatus(detail):

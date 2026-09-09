@@ -110,10 +110,10 @@ struct MenuPresentation: Equatable {
         case (true, _) where stopFailure != nil:
             // The most recent thing that happened, and what the quit item is now about.
             baseLine = "Could not stop Waffled: "
-                + (Self.firstLine(stopFailure) ?? "the runtime refused")
+                + (stopFailure?.firstLine ?? "the runtime refused")
             tint = .fault
         case (true, _):
-            baseLine = Self.firstLine(failure) ?? "Waffled could not start"
+            baseLine = failure?.firstLine ?? "Waffled could not start"
             tint = .fault
         case (_, .running):
             baseLine = "Waffled is running"
@@ -126,7 +126,7 @@ struct MenuPresentation: Equatable {
             tint = .idle
         case (_, .unhealthy):
             // The runtime's own sentence beats any wording invented here.
-            baseLine = Self.firstLine(status?.lastError) ?? "Waffled needs attention"
+            baseLine = status?.lastError.firstLine ?? "Waffled needs attention"
             tint = .fault
         case (_, nil):
             baseLine = "Checking…"
@@ -148,13 +148,6 @@ struct MenuPresentation: Equatable {
             checkForUpdatesEnabled: false,
             quitTitle: stopFailure == nil
                 ? "Quit Waffled" : "Quit anyway (server keeps running)")
-    }
-
-    private static func firstLine(_ text: String?) -> String? {
-        guard let text else { return nil }
-        let line = text.split(separator: "\n").first.map(String.init)?
-            .trimmingCharacters(in: .whitespaces) ?? ""
-        return line.isEmpty ? nil : line
     }
 }
 
