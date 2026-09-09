@@ -429,14 +429,19 @@ func TestAChildThatKeepsDyingAtOnceIsGivenUpOn(t *testing.T) {
 		return gaveUp
 	}, "a child dying on every spawn was restarted without limit")
 
-	// The original spawn plus exactly the allowed retries, and nothing after that.
+	// maxQuickFailures is a budget of DEATHS, not of retries: the constant reads "how
+	// many immediate deaths in a row the advertiser gets before supervision stops
+	// restarting it", so three deaths is three spawns — the original and two restarts,
+	// with the third death being the one that gives up. Counting a fourth spawn here
+	// would mean the cap promised in the constant's name lets one more through than it
+	// says, which is exactly the off-by-one this asserts against.
 	runs := func() int {
 		body, _ := os.ReadFile(marker)
 		return strings.Count(string(body), "run")
 	}
 	settled := runs()
-	if settled != 4 {
-		t.Errorf("%d spawns, want 4 (the original and 3 retries)", settled)
+	if settled != 3 {
+		t.Errorf("%d spawns, want 3 (the original and 2 restarts — the 3rd death gives up)", settled)
 	}
 	time.Sleep(300 * time.Millisecond)
 	if again := runs(); again != settled {

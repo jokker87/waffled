@@ -191,7 +191,12 @@ func (c *child) superviseRestarts() {
 			quick, limit := c.quickFails, c.maxQuickFailures
 			c.mu.Unlock()
 
-			exhausted := limit > 0 && quick > limit
+			// >=, not >: the limit is a budget of DEATHS, which is what its name and its
+			// doc promise ("how many immediate deaths in a row … before supervision stops
+			// restarting it"). Comparing with > spent the budget and then allowed one more
+			// spawn on top, so a cap of five produced six starts and a log line that said
+			// "died on each of its last 6 starts" beside a constant that said five.
+			exhausted := limit > 0 && quick >= limit
 			c.note(reason, exhausted)
 			if exhausted {
 				c.runner.log.Errorf("%s has died on each of its last %d starts (%s); giving up",
