@@ -159,12 +159,9 @@ final class ServerModel {
             // it appeared, since `status` keeps answering fine when `start` refuses.
             if fresh.state == .running { failure = nil }
             openBrowserIfThisAppStartedIt(fresh)
-        } catch let error as RuntimeClientError {
-            status = nil
-            failure = error.firstLine
         } catch {
             status = nil
-            failure = error.localizedDescription
+            failure = Self.describe(error)
         }
     }
 
@@ -202,10 +199,8 @@ final class ServerModel {
             defer { self?.finishOperation() }
             do {
                 try await client.start()
-            } catch let error as RuntimeClientError {
-                self?.recordFailure(error.firstLine)
             } catch {
-                self?.recordFailure(error.localizedDescription)
+                self?.recordFailure(Self.describe(error))
             }
             await self?.refresh()
         }
@@ -233,10 +228,8 @@ final class ServerModel {
                 let path = try await client.backup()
                 let name = (path as NSString).lastPathComponent
                 self?.note(name.isEmpty ? "Backed up" : "Backed up to \(name)")
-            } catch let error as RuntimeClientError {
-                self?.note("Backup failed: \(error.firstLine)")
             } catch {
-                self?.note("Backup failed: \(error.localizedDescription)")
+                self?.note("Backup failed: \(Self.describe(error))")
             }
         }
     }
@@ -295,10 +288,8 @@ final class ServerModel {
             do {
                 // `stop` is synchronous by contract: when it returns, the stack is down.
                 try await self?.client?.stop()
-            } catch let error as RuntimeClientError {
-                stopError = error.firstLine
             } catch {
-                stopError = error.localizedDescription
+                stopError = Self.describe(error)
             }
 
             switch Lifecycle.outcomeAfterStop(error: stopError) {
@@ -315,6 +306,13 @@ final class ServerModel {
 
     private func finishOperation() {
         operationTask = nil
+    }
+
+    /// One line for the menu, whatever went wrong. The runtime's own sentence when it
+    /// gave us one, Foundation's otherwise — the choice was made identically in four
+    /// places, which is four places for the wording to drift apart.
+    private static func describe(_ error: Error) -> String {
+        (error as? RuntimeClientError)?.firstLine ?? error.localizedDescription
     }
 
     private func recordFailure(_ message: String) {
