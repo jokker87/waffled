@@ -1,7 +1,6 @@
 package backup
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -34,21 +33,16 @@ type Sidecar struct {
 
 // WriteSidecar records a dump's metadata beside it.
 func WriteSidecar(dumpPath string, s Sidecar) error {
-	raw, err := json.MarshalIndent(s, "", "  ")
-	if err != nil {
+	if err := atomicfile.WriteJSON(dumpPath+SidecarExt, s, 0o600); err != nil {
 		return fmt.Errorf("encode the backup metadata: %w", err)
 	}
-	return atomicfile.WriteFile(dumpPath+SidecarExt, append(raw, '\n'), 0o600)
+	return nil
 }
 
 // ReadSidecar reads a dump's metadata. Absence is a normal answer, not an error.
 func ReadSidecar(dumpPath string) (Sidecar, bool) {
-	raw, err := os.ReadFile(dumpPath + SidecarExt)
-	if err != nil {
-		return Sidecar{}, false
-	}
 	var s Sidecar
-	if err := json.Unmarshal(raw, &s); err != nil {
+	if err := atomicfile.ReadJSON(dumpPath+SidecarExt, &s); err != nil {
 		return Sidecar{}, false
 	}
 	return s, true
@@ -66,14 +60,11 @@ type failure struct {
 
 // RecordFailure notes that a backup failed, for `status` and `doctor` to surface.
 func RecordFailure(dir string, at time.Time, msg string) error {
-	raw, err := json.MarshalIndent(failure{At: at.UTC().Format(time.RFC3339), Error: msg}, "", "  ")
-	if err != nil {
-		return err
-	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	return atomicfile.WriteFile(filepath.Join(dir, failureFile), append(raw, '\n'), 0o600)
+	f := failure{At: at.UTC().Format(time.RFC3339), Error: msg}
+	return atomicfile.WriteJSON(filepath.Join(dir, failureFile), f, 0o600)
 }
 
 // ClearFailure forgets the last failure. A successful run calls it: leaving a week-old
@@ -117,11 +108,9 @@ func Describe(dir string, scheduleInstalled bool) status.Backups {
 			out.LastMigration = s.Migration
 		}
 	}
-	if raw, err := os.ReadFile(filepath.Join(dir, failureFile)); err == nil {
-		var f failure
-		if json.Unmarshal(raw, &f) == nil {
-			out.LastError, out.LastErrorAt = f.Error, f.At
-		}
+	var f failure
+	if atomicfile.ReadJSON(filepath.Join(dir, failureFile), &f) == nil {
+		out.LastError, out.LastErrorAt = f.Error, f.At
 	}
 	return out
 }
