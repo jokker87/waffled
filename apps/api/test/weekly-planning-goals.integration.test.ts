@@ -1,14 +1,12 @@
 // Weekly Planning · step 6 — Goals. "What's each group's focus this week?"
 //
-// The step is a READ over goal_lists + goals plus one write: picking a group's focus
-// sets the goal's existing `is_featured` flag, and only one goal per list carries it.
-// Nothing new is invented — no "focus" table, no parallel flag. What the SESSION
-// records is which groups have settled (and that "nothing this week" was a real
-// answer), which lives in `planning_session_steps.data` because it has no other home.
+// A READ over goal_lists + goals plus one write: picking a group's focus sets the goal's
+// existing `is_featured` flag, one per list. No "focus" table, no parallel flag. The
+// SESSION records which groups have settled (and that "nothing this week" was a real
+// answer).
 //
-// The other half of this file is privacy: a private goal list belongs to its members.
-// It must not appear in the read for anyone else, and naming it in a write must 404 —
-// hiding it from the list while still accepting a write on it is not privacy.
+// The other half of this file is privacy: a private goal list belongs to its members. It
+// must not appear in the read for anyone else, and naming it in a write must 404.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from './helpers/pg'
 import jwt from 'jsonwebtoken'
@@ -26,8 +24,7 @@ function mint(sub: string): string {
 }
 
 // lambda-api reads the query off `queryStringParameters`, NOT off the path — a `?x=y`
-// left in `path` is silently invisible to the handler. Split it here, as the shell's
-// weekly-planning.integration.test.ts does.
+// left in `path` is silently invisible to the handler.
 function call(method: string, path: string, token?: string, body?: unknown) {
   const headers: Record<string, string> = {}
   if (token) headers.authorization = `Bearer ${token}`
@@ -55,15 +52,13 @@ let coupleList: string  // private
 let lottieList: string
 let paceList: string
 let sessionId: string
-// Family-list goals
 let gWater: string
 let gWalk: string
 // A goal the family pinned BEFORE the session — the session must never un-pin it.
 let gPinned: string
-// A goal in another list, used to prove a focus write is scoped to its own list.
+// A goal in another list, to prove a focus write is scoped to its own list.
 let gDate: string
 let gReading: string
-// Pace fixtures, each with a hand-placed log history.
 let gNever: string
 let gStalled: string
 let gGone: string
@@ -98,8 +93,7 @@ const group = async (token: string, listId: string): Promise<Group> => {
 const setFocus = (token: string, listId: string, goalId: string | null) =>
   call('PUT', '/api/weekly-planning/goals/focus', token, { sessionId, listId, goalId })
 
-// A SET, not an ordered list: which goals carry the flag is what matters, and the
-// family's own pre-session pin is in there too.
+// A SET, not an ordered list: which goals carry the flag is what matters.
 const featuredIn = async (listId: string): Promise<Set<string>> => {
   const { query } = await import('../src/platform/db')
   const { rows } = await query<{ id: string }>(
@@ -155,8 +149,8 @@ beforeAll(async () => {
   })).list.id
 
   const goal = async (body: Record<string, unknown>) => json(await call('POST', '/api/goals', kevin, body)).goal.id
-  // A habit (shown on this period's count) and a checklist (shown on steps) so the
-  // read carries what the shared display helper needs for BOTH axes.
+  // A habit (this period's count) and a checklist (steps) so the read carries what the
+  // shared display helper needs for BOTH axes.
   gWater = await goal({
     title: 'Water the garden', goalListId: familyList, goalType: 'habit', habitPeriod: 'week',
     habitTargetPerPeriod: 3, trackingMode: 'each_tracks', participantIds: [kevinId, kellyId, lottieId],
@@ -173,8 +167,8 @@ beforeAll(async () => {
     title: 'Finish the dragon book', goalListId: lottieList, goalType: 'checklist',
     trackingMode: 'each_tracks', participantIds: [lottieId], steps: [{ label: 'Part one' }, { label: 'Part two' }],
   })
-  // Pinned by hand on the goals screen BEFORE any session existed. `is_featured` is
-  // that "Pinned" tier, and the planning step must not silently undo it.
+  // Pinned by hand BEFORE any session existed. `is_featured` is that "Pinned" tier, and
+  // the planning step must not silently undo it.
   gPinned = await goal({
     title: 'Learn to whistle', goalListId: familyList, goalType: 'count', unit: 'tries',
     targetValue: 50, trackingMode: 'shared_total', isFeatured: true, participantIds: [kevinId],
@@ -200,8 +194,8 @@ beforeAll(async () => {
 
   // Logs are inserted with explicit timestamps: "stalled since Aug 14" and "2 of 5 last
   // week" cannot be produced by the logging endpoint, which always writes `now()`.
-  // `atSql` is evaluated against the household row, so the habit windows are anchored
-  // to the same `date_trunc(period, now at household tz)` the service reads.
+  // `atSql` is evaluated against the household row, so the habit windows share the
+  // service's anchor.
   const logAt = (goalId: string, amount: number, atSql: string) =>
     query(
       `insert into goal_logs (household_id, goal_id, amount, logged_at)
@@ -212,18 +206,13 @@ beforeAll(async () => {
   await logAt(gGone, 4, `now() - interval '25 days'`)
   await logAt(gWeek, 5, `now() - interval '3 days'`)
   await logAt(gWeek, 3, `now() - interval '1 day'`)
-  // Two months of history, touched about once a month, touched recently.
   await logAt(gCadence, 2, `now() - interval '70 days'`)
   await logAt(gCadence, 1, `now() - interval '2 days'`)
   // Two distinct days in the PREVIOUS household week, plus one in the current week so
   // the goal doesn't read as stalled. Anchored to a week START, not a day count, so it
-  // lands in the right week whatever weekday the suite runs on.
-  //
-  // That anchor is the HOUSEHOLD's week (`week_start`, default sunday) — it used to be
-  // `date_trunc('week', …)`, which is Monday-only, and so this fixture encoded the very
-  // bug the step had: its expected "2 of 5 last week" was derived from Monday
-  // truncation and stayed green when the code did the same wrong thing. A fixture that
-  // shares the code's mistake cannot catch it.
+  // lands in the right week whatever weekday the suite runs on — and to the HOUSEHOLD's
+  // week (`week_start`, default sunday), never `date_trunc('week', …)`, which is
+  // Monday-only. A fixture that shares the code's mistake cannot catch it.
   const weekStartSql = `((now() at time zone h.timezone)::date`
     + ` - ((extract(dow from (now() at time zone h.timezone))::int`
     + `     - case when h.week_start = 'monday' then 1 else 0 end + 7) % 7))`
@@ -259,13 +248,12 @@ describe('weekly planning · goals · the gate', () => {
 describe('weekly planning · goals · the read', () => {
   it('is one group per goal list, with each list’s goals and the numbers the display axis needs', async () => {
     const all = await groups(kevin)
-    // Tabs ARE the goal lists — no invented grouping.
     expect(all.map((g) => g.name)).toEqual(['Family', 'Mom & Dad', 'Lottie', 'Pace'])
 
     const family = all.find((g) => g.listId === familyList)!
     expect(family.goals.map((g) => g.title).sort()).toEqual(['Learn to whistle', 'Walk after dinner', 'Water the garden'])
-    // A habit is shown on THIS period's count, a checklist on its steps — so both
-    // fields have to arrive, not just the lifetime total.
+    // A habit is shown on THIS period's count, a checklist on its steps — so both fields
+    // have to arrive, not just the lifetime total.
     const water = family.goals.find((g) => g.id === gWater)!
     expect(water.goalType).toBe('habit')
     expect(water.periodDone).toBe(0)
@@ -276,14 +264,13 @@ describe('weekly planning · goals · the read', () => {
 
   it('has nothing settled before the session decides anything', async () => {
     for (const g of await groups(kevin)) expect(g.settled).toBe(false)
-    // …and a pre-existing pin does NOT count as an answer: no ★, no session record.
     expect((await group(kevin, coupleList)).focusGoalId).toBe(null)
     expect((await group(kevin, paceList)).focusGoalId).toBe(null)
   })
 
   // What closes the "＋ New goal for this week" round trip. The editor creates the goal
-  // already featured (?featured=1), so on the way back the step must show it as the
-  // group's focus rather than making the family pick it a second time.
+  // already featured (?featured=1), so the step must show it as the group's focus rather
+  // than making the family pick it a second time.
   it('shows a list’s single already-featured goal as its focus, without claiming the group settled', async () => {
     const family = await group(kevin, familyList)
     expect(family.focusGoalId).toBe(gPinned)
@@ -292,7 +279,6 @@ describe('weekly planning · goals · the read', () => {
 
   it('adopts nothing when a list has two pins — the family chose those, not the session', async () => {
     const { query } = await import('../src/platform/db')
-    // A second hand-made pin makes it ambiguous.
     await query(`update goals set is_featured = true where id = $1`, [gWater])
     const family = await group(kevin, familyList)
     expect(family.focusGoalId).toBe(null)
@@ -306,11 +292,10 @@ describe('weekly planning · goals · the read', () => {
   })
 
   it('carries what the group card’s header has to say about the group', async () => {
-    // "shared · everyone tracks it" needs to know the group IS everyone.
     expect((await group(kevin, familyList)).isEveryone).toBe(true)
     expect((await group(kevin, coupleList)).isEveryone).toBe(false)
     // "individual · age 9" needs the member's age; a member with no birthday reads null
-    // and the sub line simply omits it.
+    // and the sub line omits it.
     const lottie = await group(kevin, lottieList)
     expect(lottie.members).toHaveLength(1)
     expect(lottie.members[0].age).toBe(9)
@@ -319,8 +304,7 @@ describe('weekly planning · goals · the read', () => {
 })
 
 // The second half of a goal row's subtitle — how the goal is actually GOING, in a
-// sentence, with one of three tones. Every one of these is derived from real logged
-// activity; none of it is a phrase we made up for a goal we know nothing about.
+// sentence, with one of three tones. Every one is derived from real logged activity.
 describe('weekly planning · goals · pace', () => {
   const paceOf = async (goalId: string) => {
     const g = (await group(kevin, paceList)).goals.find((x) => x.id === goalId)
@@ -334,7 +318,6 @@ describe('weekly planning · goals · pace', () => {
   it('names the day a goal stalled', async () => {
     const p = await paceOf(gStalled)
     expect(p!.tone).toBe('behind')
-    // "stalled since Aug 14" — the date, not the size of the gap.
     expect(p!.text).toMatch(/^stalled since [A-Z][a-z]{2} \d{1,2}$/)
   })
 
@@ -346,22 +329,16 @@ describe('weekly planning · goals · pace', () => {
     expect(await paceOf(gWeek)).toEqual({ text: '8 hours last week', tone: 'ok' })
   })
 
-  // WHICH WEEK "LAST WEEK" IS — the household's, not Postgres's.
+  // WHICH WEEK "LAST WEEK" IS — the household's, not Postgres's. `prev_period_days` must
+  // derive the week from `households.week_start` (default **sunday**), never bare
+  // `date_trunc('week', …)`, which is MONDAY-only.
   //
-  // `prev_period_days` used bare `date_trunc('week', …)`, which is MONDAY-only, while the
-  // goals module's own `PERIOD_START_SQL` derives the week from `households.week_start`
-  // (default **sunday**) precisely because Monday truncation got this wrong before: "log
-  // on Sunday and again on Monday and a 5× a week habit read 2, having reset nothing."
-  //
-  // The habit fixture above cannot catch it: it anchors its own logs with
-  // `date_trunc('week', …)`, the same wrong expression, so it reads correctly under either
-  // rule. This one pins the log to a REAL calendar Sunday and then flips the household's
-  // setting, which is the invariant that was broken — under the bug the answer does not
-  // move when the setting does.
-  //
-  // (On a Sunday run the two rules put this fixture's log in the same relative period, so
-  // the first assertion stops discriminating that one day in seven. It is never wrong,
-  // just less sharp — pinning `now()` is not available to us in SQL.)
+  // The habit fixture above cannot catch that: it anchors its own logs with the same
+  // expression, so it reads correctly under either rule. This one pins the log to a REAL
+  // calendar Sunday and then flips the household's setting — under the bug the answer
+  // does not move when the setting does. (On a Sunday run both rules agree, so the first
+  // assertion is never wrong, just less sharp; pinning `now()` is not available to us in
+  // SQL.)
   it('reads “last week” off the household’s week_start, not Postgres’s Monday', async () => {
     const { query } = await import('../src/platform/db')
     const gRule = json(await call('POST', '/api/goals', kevin, {
@@ -394,7 +371,6 @@ describe('weekly planning · goals · pace', () => {
   })
 
   it('measures a habit against the cadence it set itself, on last period’s count', async () => {
-    // Two of the five days it asked for — behind, and said as the design says it.
     expect(await paceOf(gHabit)).toEqual({ text: '2 of 5 last week', tone: 'behind' })
   })
 
@@ -425,15 +401,14 @@ describe('weekly planning · goals · picking a focus', () => {
     expect((await group(kevin, familyList)).goals.find((g) => g.id === gWater)!.isFeatured).toBe(false)
   })
 
-  // The reason the previous focus is un-featured by ID and not by a blanket clear:
-  // `is_featured` is the goals screen's "Pinned" tier, which is not one-per-list there.
-  // Wiping the list would silently un-pin goals a family pinned on purpose.
+  // The previous focus is un-featured by ID, not by a blanket clear: `is_featured` is
+  // the goals screen's "Pinned" tier, which is not one-per-list there, so wiping the
+  // list would un-pin goals a family pinned on purpose.
   it('never un-pins a goal the session didn’t pin — a pre-existing pin survives', async () => {
     expect((await group(kevin, familyList)).goals.find((g) => g.id === gPinned)!.isFeatured).toBe(true)
     await setFocus(kevin, familyList, gWater)
     await setFocus(kevin, familyList, gWalk)
     await setFocus(kevin, familyList, null)
-    // Three answers later, including "nothing this week", the hand-made pin is intact.
     expect(await featuredIn(familyList)).toEqual(new Set([gPinned]))
     expect((await group(kevin, familyList)).goals.find((g) => g.id === gPinned)!.isFeatured).toBe(true)
   })
@@ -441,7 +416,6 @@ describe('weekly planning · goals · picking a focus', () => {
   it('leaves the other lists alone — the un-feature is scoped by goal list', async () => {
     await setFocus(kevin, lottieList, gReading)
     await setFocus(kevin, familyList, gWater)
-    // Lottie's pick survived the Family write.
     expect(await featuredIn(lottieList)).toEqual(new Set([gReading]))
     expect(await featuredIn(familyList)).toEqual(new Set([gPinned, gWater]))
   })
@@ -452,7 +426,6 @@ describe('weekly planning · goals · picking a focus', () => {
     const family = await group(kevin, familyList)
     expect(family.settled).toBe(true)     // ★ on the tab
     expect(family.focusGoalId).toBe(null) // …and it decided on nothing
-    // Answering again after "nothing" still works.
     await setFocus(kevin, familyList, gWalk)
     expect((await group(kevin, familyList)).focusGoalId).toBe(gWalk)
   })
@@ -460,7 +433,6 @@ describe('weekly planning · goals · picking a focus', () => {
   it('refuses a goal that is not in the list being answered', async () => {
     const res = await setFocus(kevin, familyList, gReading)
     expect(res.statusCode).toBe(404)
-    // …and it changed nothing.
     expect(await featuredIn(familyList)).toEqual(new Set([gPinned, gWalk]))
   })
 
@@ -477,7 +449,6 @@ describe('weekly planning · goals · picking a focus', () => {
     const view = json(await call('GET', '/api/weekly-planning', kevin))
     const step = view.steps.find((s: { key: string }) => s.key === 'goals')
     expect(step.data.focus).toEqual({ [familyList]: gWater, [coupleList]: null, [lottieList]: gReading })
-    // A mid-step write records the decision WITHOUT claiming the step is answered.
     expect(step.status).toBe('pending')
   })
 })
@@ -487,7 +458,6 @@ describe('weekly planning · goals · privacy', () => {
     const mine = await groups(lottie)
     expect(mine.map((g) => g.name)).toEqual(['Family', 'Lottie', 'Pace'])
     expect(mine.some((g) => g.listId === coupleList)).toBe(false)
-    // …and neither its goals leak in some other group.
     expect(mine.flatMap((g) => g.goals).some((g) => g.id === gDate)).toBe(false)
   })
 

@@ -1,30 +1,15 @@
 import SwiftUI
 
-/// Weekly Planning · step 2 "Calendar" — "Here's your week. Anything missing?"
+/// Weekly Planning · step 2 "Calendar" — "Here's your week. Anything missing?" Web parity
+/// with `planning/steps/CalendarStep.tsx`; the rows are `SyncManager.eventsByDay`, painted
+/// by the same `eventPalette` every calendar surface uses. Seven DAY ROWS, not columns;
+/// the body is content-sized and the SHELL owns the scroll view.
 ///
-/// The real week with add-in-place on a tapped day; web parity with
-/// `planning/steps/CalendarStep.tsx`. There is no planning-only event store.
-///
-/// SEVEN DAY ROWS IN ONE CARD, not seven columns — a column per day is unreadable on a
-/// phone. Each row is a weekday over a large serif date, that day's events as inline
-/// chips, and a `＋`; an empty day says "Nothing on the calendar" and takes a tint, so an
-/// open evening reads as an opportunity rather than a hole. The rows are
-/// `SyncManager.eventsByDay` (the PowerSync mirror), painted by the same `eventPalette`
-/// every other calendar surface uses.
-///
-/// Four rules this file must not break:
-///  1. THE SERVER OWNS THE WEEK. `props.weekStart` plus 0…6 as string arithmetic. Nothing
-///     here asks the device what week it is.
-///  2. BUSY WEEKS STAY ONE SCREEN. Over four events, show four and a "+N more" pill that
-///     opens that day IN PLACE — never a scrolling row, never a navigation away.
-///  3. ADDING IS THE APP'S OWN `EventEditSheet`, on the day whose `＋` was tapped. It
-///     already asks date, time, duration, repeats, location and who it's for, and writes
-///     through the local-first path. A second event form here is exactly the drift the
-///     reuse rule exists to prevent.
-///  4. NO INVENTED PRESENCE. No face row: the session is single-driver and this app does
-///     not track who is in the room.
-///
-/// The body is content-sized; the SHELL owns the scroll view.
+/// Four rules this file must not break: THE SERVER OWNS THE WEEK (`props.weekStart` plus
+/// 0…6 as string arithmetic, never the device's idea of the week); BUSY WEEKS STAY ONE
+/// SCREEN (over four events, four plus a "+N more" pill that opens the day IN PLACE);
+/// ADDING IS THE APP'S OWN `EventEditSheet`; and NO INVENTED PRESENCE — no face row, the
+/// session is single-driver.
 struct CalendarStepView: View {
     let props: PlanningStepProps
 
@@ -53,9 +38,9 @@ struct CalendarStepView: View {
             notes
         }
         .onAppear {
-            // A step WITH a composer lends the shell's "sent here" box its own verb —
-            // which is what answers BOTH halves of that box: a parked note tagged for this
-            // step, and a loose end step 1 routed here. Neither is drawn by this body; see
+            // A step WITH a composer lends the shell's "sent here" box its own verb, which
+            // answers BOTH halves of that box: a parked note tagged for this step, and a
+            // loose end step 1 routed here. Neither is drawn by this body; see
             // `PlanningHandoffBanner`.
             props.lendVerb(PlanningHandoffVerb(label: "Make an event") { text, done in
                 openComposer(dayKey: headerDay, prefillTitle: text, done: done)
@@ -96,12 +81,10 @@ struct CalendarStepView: View {
 
     /// Which day the header's button opens on: today when today is INSIDE the week being
     /// planned, and the week's first day otherwise — a session run on a Sunday is usually
-    /// planning the week ahead, and "today" would be outside it.
-    ///
-    /// Computed rather than read off the rendered days, so the verb lent to the shell's
-    /// banner on `onAppear` can't hold a week the session has since stepped away from.
-    /// `YYYY-MM-DD` sorts lexicographically, which is the whole reason the week stays a
-    /// string here.
+    /// planning the week ahead. Computed rather than read off the rendered days, so the
+    /// verb lent to the shell's banner on `onAppear` can't hold a week the session has
+    /// stepped away from. `YYYY-MM-DD` sorts lexicographically, which is why the week
+    /// stays a string here.
     private var headerDay: String {
         let today = Agenda.todayKey(tz)
         let last = PlanningWeekDays.addDays(props.weekStart, 6)
@@ -186,9 +169,9 @@ struct CalendarStepView: View {
     ///
     /// Hand-rolled rather than `EventCard` — that is a full-width 48pt row with a shadow,
     /// and seven of those stacked four deep is a different screen. The PAINT is not
-    /// hand-rolled: `eventPalette.chip(for:)` is the same fill/ink pair the month cells and
-    /// the week grid use, so the household's solid-vs-tinted style and the unassigned grey
-    /// both fall out of it rather than being a branch here.
+    /// hand-rolled: `eventPalette.chip(for:)` is the same fill/ink pair the month cells
+    /// use, so the household's solid-vs-tinted style falls out of it rather than being a
+    /// branch here.
     private func chip(_ event: SyncedEvent) -> some View {
         let paint = sync.eventPalette.chip(for: event)
         return HStack(spacing: 6) {
@@ -219,17 +202,10 @@ struct CalendarStepView: View {
 
     // MARK: - What step 1 sent here
     //
-    // NOT DRAWN BY THIS BODY, on purpose, and it used to be. A loose end routed to this
-    // step had its own trailing section under the week ("SENT HERE FROM LOOSE ENDS"),
-    // while a parked note tagged for this step came down in the shell's box at the TOP —
-    // two mechanisms for "somebody sent this here", landing at opposite ends of one
-    // screen. It was reported exactly that way: "wouldn't these be in the top 'parked
-    // things' box? why are they hidden at the bottom?"
-    //
-    // Both now live in `PlanningHandoffBanner`, above this body, and the verb lent on
-    // `onAppear` is what opens this step's composer for either of them. For a parked note
-    // routed HERE that is also the end of a double-show: routing a note sets its
-    // `step_key`, so the same note arrived through both doors and was drawn twice.
+    // NOT DRAWN BY THIS BODY, on purpose. Both a routed loose end and a parked note tagged
+    // for this step live in `PlanningHandoffBanner`, above this body, and the verb lent on
+    // `onAppear` is what opens this step's composer for either. Drawing them here as well
+    // double-shows a routed note, whose `step_key` makes it arrive through both doors.
 
     private var notes: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -246,8 +222,7 @@ struct CalendarStepView: View {
 
     /// The app's own event sheet — NOT a second event form. It carries the day it was
     /// opened on and, when a note or a routed loose end opened it, the words somebody
-    /// already wrote: retyping their own words back at them is what makes an affordance
-    /// feel pointless.
+    /// already wrote.
     ///
     /// `onSaved` is ASSIGNED rather than passed: it is a property on `EventEditSheet` with
     /// no matching parameter on that type's explicit initializer, and this file may not
@@ -280,8 +255,7 @@ struct CalendarStepView: View {
 
     /// A CANCELLED COMPOSER MUST REPORT `false`. Settling a parked note — or taking a
     /// routed loose end off the box — on a cancel would throw away the only record that
-    /// the thing still needs doing, on the strength of somebody having opened a box and
-    /// closed it again.
+    /// the thing still needs doing.
     private func composerDismissed() {
         let p = pending
         pending = nil
@@ -299,7 +273,7 @@ private struct PlanningCalendarComposer: Identifiable {
 
 /// What must survive the sheet's item being cleared on dismissal.
 private struct PendingCalendarComposer {
-    /// The "sent here" box's completion, if the box opened this composer — for a parked
-    /// note or for a routed loose end. `nil` when the step's own `＋` did.
+    /// The "sent here" box's completion, if the box opened this composer. `nil` when the
+    /// step's own `＋` did.
     let done: ((Bool) -> Void)?
 }

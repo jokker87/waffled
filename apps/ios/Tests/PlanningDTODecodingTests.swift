@@ -4,16 +4,14 @@ import Testing
 
 // Weekly Planning's wire types, decoded from payload bytes shaped like the server's.
 //
-// `WaffledAPI.decoder` is a plain `JSONDecoder` — no key strategy, no date strategy — so
-// every property name here has to be camelCase 1:1 with the server and every timestamp
-// has to stay a `String`. These tests are the only place that is checked: a rename on
-// either side is invisible to the compiler and shows up as a silently `nil` field or a
-// screen that will not load.
+// `WaffledAPI.decoder` is a plain `JSONDecoder` — no key strategy, no date strategy —
+// so every property name here has to be camelCase 1:1 with the server and every
+// timestamp has to stay a `String`. A rename on either side is invisible to the
+// compiler and shows up as a silently nil field or a screen that will not load; this is
+// the only place it is checked.
 //
-// The load-bearing cases are the ABSENT keys. `parked` is missing from a payload served
-// by a build that predates it, and `requiresModule` is absent on five of the ten steps —
-// both must decode, and the banner reads `parked ?? []` so a missing field costs the
-// banner rather than the session screen.
+// The load-bearing cases are the ABSENT keys: `parked` is missing from a payload served
+// by an older build, and `requiresModule` is absent on five of the ten steps.
 
 private func decode<T: Decodable>(_ type: T.Type, _ json: String) throws -> T {
     try WaffledAPI.decoder.decode(type, from: Data(json.utf8))
@@ -99,7 +97,6 @@ private func decode<T: Decodable>(_ type: T.Type, _ json: String) throws -> T {
         #expect(meals.requiresModule == "meals")
         #expect(!meals.available)
 
-        // What the shell actually renders off the payload.
         #expect(PlanningFormat.availableSteps(view.steps).map(\.key) == ["looseEnds", "calendar"])
         #expect(PlanningFormat.resolveCurrent(view)?.key == "calendar")
         #expect(PlanningFormat.settledFraction(view.steps) == 0.5)

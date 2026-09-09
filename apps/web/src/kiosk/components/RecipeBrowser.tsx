@@ -4,8 +4,7 @@ import { MealCard } from './MealCard'
 import { mealBuilderApi, type Meal, type Recipe } from '../../lib/api'
 
 // The full editor, opened in a modal over the picker. Lazy so picking a recipe
-// doesn't pay for the editor's weight (it's one of the heavier screens) until you
-// actually decide to write one.
+// doesn't pay for the editor's weight until you decide to write one.
 const RecipeEditorBody = lazy(() =>
   import('../RecipeEditor').then((m) => ({ default: m.RecipeEditorBody }))
 )
@@ -16,8 +15,7 @@ const MealBuilderBody = lazy(() =>
   import('../MealBuilder').then((m) => ({ default: m.MealBuilderBody }))
 )
 
-// Shared meal-type vocabulary + the category→gradient mapping, used by the meal
-// planner grid and the recipe browser.
+// Shared meal-type vocabulary + the category→gradient mapping.
 export const MEALS = ['breakfast', 'lunch', 'dinner', 'snack'] as const
 export type MealType = (typeof MEALS)[number]
 export const MEAL_LABEL: Record<string, string> = {
@@ -39,8 +37,8 @@ export function gradClass(r: { category: string | null }): string {
 
 // Saved meals for the picker, searched server-side (`q` matches the plate name OR
 // any dish title). Only fetched when the caller can actually put a plate somewhere —
-// `enabled` is false for the plan-my-week/month draft overlays, which hold an
-// unsaved plan and have nowhere to schedule a meal to.
+// `enabled` is false for the plan-my-week/month draft overlays, which have nowhere
+// to schedule to.
 function useBrowserMeals(enabled: boolean, q: string): Meal[] {
   const [meals, setMeals] = useState<Meal[]>([])
   useEffect(() => {
@@ -65,23 +63,20 @@ function useBrowserMeals(enabled: boolean, q: string): Meal[] {
   return meals
 }
 
-// The reusable recipe browser body: meal-type filters + a card grid + a View
-// preview (RecipeModal). Used full-screen inside MealPicker and inside the
-// plan-my-week manual-swap overlay. Without onView, View opens the modal preview.
+// The reusable recipe browser body: meal-type filters + a card grid + a View preview
+// (RecipeModal). Used full-screen inside MealPicker and inside the plan-my-week
+// manual-swap overlay. Without onView, View opens the modal preview.
 //
 // A saved meal can be picked anywhere a recipe can (decision 11), so the grid also
 // lists plates — but only when `onPickMeal` is supplied. The target date lives in
-// the caller's `onPick` closure and is never passed down here, so scheduling a plate
-// has to happen where the date is; a caller that can't do that simply doesn't
-// advertise meals.
+// the caller's `onPick` closure and is never passed down here, so a caller that
+// can't schedule a plate simply doesn't advertise meals.
 //
-// `onFreeText` is a RENDER CONTRACT, not a passive hook: supply it and the grid grows
-// one more card, shown whenever the search box has something in it, offering to use
-// what was typed verbatim — and `onFreeText(query)` is what a select on it calls. It
-// exists for the caller that must be able to plan a one-off dish that is neither in
-// the library nor one of the three placeholder nights ("Grandma's lasagne",
-// "breakfast for dinner"), without standing a second text field next to this one.
-// Callers that don't pass it are unchanged: no card, and the search box is a filter.
+// `onFreeText` is a RENDER CONTRACT, not a passive hook: supply it and the grid
+// grows one more card, shown whenever the search box has something in it, offering
+// to use what was typed verbatim. It exists for the caller that must be able to plan
+// a one-off dish that is in neither the library nor the placeholder nights. Callers
+// that don't pass it are unchanged.
 export function RecipeBrowser({
   recipes,
   loading,
@@ -113,24 +108,22 @@ export function RecipeBrowser({
   const [preview, setPreview] = useState<Recipe | null>(null)
   // Writing a recipe from inside the picker. The slot being filled lives in the
   // caller's onPick closure, so the new recipe is handed straight back through it —
-  // the picker never navigates, and a draft plan behind it survives untouched.
+  // the picker never navigates.
   const [creating, setCreating] = useState(false)
-  // Building a PLATE from inside the picker. Same idea as `creating`, and the same
-  // reason it isn't a trip to the Meal Builder screen: the slot lives in the
-  // caller's closure, and navigating away would abandon it (and, in Weekly
-  // Planning, the session behind it).
+  // Building a PLATE from inside the picker. Same reason it isn't a trip to the Meal
+  // Builder screen: the slot lives in the caller's closure, and navigating away
+  // would abandon it (and, in Weekly Planning, the session behind it).
   const [building, setBuilding] = useState(false)
   // The id of the plate this modal brought into existence, if it got that far. The
-  // builder creates lazily — on the first dish, not on opening — so a plate only
-  // exists once somebody has actually put something on it, and `onIdChange` is
-  // exactly the moment that happens. Held so cancelling can take it back out.
+  // builder creates lazily — on the first dish, not on opening — and `onIdChange` is
+  // that moment. Held so cancelling can take it back out.
   const abandonedPlate = useRef<string | null>(null)
   const closeBuilder = () => {
     const id = abandonedPlate.current
     abandonedPlate.current = null
     setBuilding(false)
-    // Cancel means cancel — the same contract "＋ New recipe" already keeps. Without
-    // this, every half-built plate stays in the library as a saved, empty "New meal".
+    // Cancel means cancel — the same contract "＋ New recipe" keeps. Without this,
+    // every half-built plate stays in the library as a saved, empty "New meal".
     // Best-effort: a failed cleanup must not block closing the modal.
     if (id) void mealBuilderApi.remove(id).catch(() => {})
   }
@@ -297,7 +290,7 @@ export function RecipeBrowser({
                   abandonedPlate.current = id
                 }}
                 onUse={(meal) => {
-                  // Chosen, so it is no longer abandoned — it's theirs to keep.
+                  // Chosen, so it is no longer abandoned.
                   abandonedPlate.current = null
                   setBuilding(false)
                   onPickMeal(meal)
@@ -317,8 +310,9 @@ export function RecipeBrowser({
             <Suspense fallback={<div className="muted" style={{ padding: 30 }}>Loading…</div>}>
               <RecipeEditorBody
                 mode="create"
-                // Saving fills the slot with what was just written — that's the whole
-                // point of creating from here, so there's no second "now select it".
+                // Saving fills the slot with what was just written — that's the
+                // whole point of creating from here, so there's no second "now
+                // select it".
                 onSaved={(saved) => { setCreating(false); onPick(saved) }}
                 onCancel={() => setCreating(false)}
               />

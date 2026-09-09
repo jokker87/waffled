@@ -4,23 +4,14 @@ import mod from './RecapStep'
 import type { PlanningStep } from '../../../lib/api'
 import type { StepBodyProps } from '../registry'
 
-// Step 10 · Recap. The last screen of the session, and the one with the most ways to be
-// quietly wrong — because almost everything on it is a claim ABOUT something else.
+// Step 10 · Recap. Almost everything on this screen is a claim ABOUT something else, so
+// four things are held in place:
 //
-// Four things this file holds in place:
-//
-//  1. EVERY LINE IS A POINTER. The body renders what the server resolved and links each
-//     group at the step that owns it; it computes no tallies of its own, so the header
-//     and the cards cannot drift apart. Nothing is stored back except the receipt's
-//     integers — a title kept on the session record would be a copy that goes stale.
-//  2. THE SHELL OWNS THE SAVED SCREEN. `WeeklyPlanning.tsx` already renders the finished
-//     record and both doors out of it. A second one here would be two screens claiming
-//     to be the receipt, so the body must not grow one.
-//  3. A BUSY WEEK STAYS ONE SCREEN. Seven columns beside two cards: a day with six
-//     things on it reports the remainder instead of growing (the Horizon overflow bug,
-//     which no unit test caught the first time).
-//  4. THE TWO HONESTIES SURVIVE. The last call on notes nobody tagged, and "left alone
-//     on purpose" — skipped steps and deliberate non-answers rendered as outcomes.
+//  1. EVERY LINE IS A POINTER — the body computes no tallies of its own, and stores back
+//     nothing but the receipt's integers;
+//  2. THE SHELL OWNS THE SAVED SCREEN, so the body must not grow a second one;
+//  3. a busy day reports the remainder instead of growing past its column;
+//  4. the last call on untagged notes, and "left alone on purpose", both survive.
 const WEEK_START = '2026-09-06' // a Sunday; the week runs Sun Sep 6 → Sat Sep 12
 
 const Body = mod.Body
@@ -36,8 +27,8 @@ const step: PlanningStep = {
   status: 'pending',
   data: {},
   decidedAt: null,
-  // The shell renders the parked-note handoff, not the step — see Handoff in
-  // WeeklyPlanning.tsx. A step test mounts `Body` alone, so there is never one here.
+  // The shell renders the parked-note handoff, not the step; a step test mounts `Body`
+  // alone, so there is never one here.
   parked: [],
 }
 
@@ -59,7 +50,6 @@ const VIEW = {
     day(2, { events: [{ id: 'd', title: 'Dance', when: 'Tuesday 4:00 PM', personName: 'Lottie', personId: 'p4', personColor: '#7C3AED', participantIds: ['p4'] }] }),
     day(3),
     day(4),
-    // A genuinely busy Friday: four shown, two held back.
     day(5, {
       events: [0, 1, 2, 3].map((n) => ({ id: `x${n}`, title: `Thing ${n}`, when: 'Friday 9:00 AM', personName: 'Kevin' })),
       more: 2,
@@ -91,9 +81,8 @@ const VIEW = {
 
 const EMPTY = { ...VIEW, groups: [], lastCall: [], leftAlone: [], counts: { decisions: 0, deferred: 0, parked: 0 } }
 
-// A stateful-enough double: the recap is served as given and every write is recorded, so
-// "Drop it" is asserted through the request it actually makes rather than through a
-// canned view replayed back.
+// Every write is recorded, so "Drop it" is asserted through the request it actually makes
+// rather than a canned view replayed back.
 function mockApi(view: unknown = VIEW) {
   const calls: { url: string; method: string; body: unknown }[] = []
   globalThis.fetch = vi.fn(async (url: string, init?: RequestInit) => {
@@ -127,25 +116,18 @@ describe('recap · the week, one last time', () => {
     const sun = await dayCell('2026-09-06')
     expect(within(sun).getByText(/Lentil soup/)).toBeTruthy()
     expect(within(sun).getByText(/Family night/)).toBeTruthy()
-    // Seven, and no more: the strip is the week, not a scrolling agenda.
     expect(screen.getAllByTestId(/^wpr-day-/)).toHaveLength(7)
   })
 
-  // "we should re-use our calendar date type look from earlier where we have the events
-  // by color." The strip drew every event as plain grey text, so the week read back in a
-  // palette the family has never seen anywhere else in the app.
-  //
-  // The colour is resolved by the SAME `useEventColor()` the month and week views use —
-  // family colour when the event covers the household, the owner's colour otherwise,
-  // grey when nobody owns it. Duplicating that rule server-side would drift from the
-  // calendar, which is the one thing the strip must agree with.
+  // Colour is resolved by the SAME `useEventColor()` the month and week views use.
+  // Duplicating that rule server-side would drift from the calendar, which is the one
+  // thing the strip must agree with.
   it('paints each event in the colour the calendar would give it', async () => {
     mockApi()
     renderStep()
     const tue = await dayCell('2026-09-08')
     const chip = within(tue).getByText('Dance')
     expect(chip.className).toContain('ev-tint')
-    // `evVars` is what every other event chip in the app is painted through.
     expect(chip.getAttribute('style') ?? '').toMatch(/--ev/)
   })
 
@@ -155,7 +137,6 @@ describe('recap · the week, one last time', () => {
     renderStep()
     const fri = await dayCell('2026-09-11')
     expect(within(fri).getByText('+2 more')).toBeTruthy()
-    // Only what the server handed over — the body never invents the hidden ones.
     expect(within(fri).queryByText(/Thing 4/)).toBeNull()
   })
 })
@@ -168,8 +149,7 @@ describe('recap · what tonight changed', () => {
     expect(within(cal).getByText('Calendar')).toBeTruthy()
     expect(within(cal).getByText(/2 events added/)).toBeTruthy()
     expect(within(cal).getByText(/Date night Saturday 8:00 PM/)).toBeTruthy()
-    // The header's number is the server's, never re-added on the client — a client that
-    // did its own sum could disagree with the rows it is standing over.
+    // The header's number is the server's, never re-added on the client.
     expect(screen.getByText(/8 decisions/)).toBeTruthy()
   })
 
@@ -195,16 +175,14 @@ describe('recap · what tonight changed', () => {
     await waitFor(() =>
       expect(setDecisionData.mock.calls.at(-1)![0]).toEqual({ counts: { decisions: 8, deferred: 3, parked: 4 } })
     )
-    // Nothing else: no titles, no ids, no module content. A name frozen on the session
-    // record is a copy, and it starts going stale the moment somebody edits it.
+    // Nothing else: a name frozen on the session record is a copy that goes stale.
     for (const [arg] of setDecisionData.mock.calls) {
       expect(arg === null || Object.keys(arg as object)).toBeTruthy()
       if (arg) expect(Object.keys(arg as object)).toEqual(['counts'])
     }
   })
 
-  // The shell already renders the finished record and both doors out of it. Two screens
-  // claiming to be the receipt is the finding this test pins.
+  // Two screens claiming to be the receipt is the finding this test pins.
   it('does not build a second saved screen — that is the shell’s', async () => {
     mockApi({ ...VIEW, savedAt: '2026-08-30T19:12:00.000Z' })
     renderStep()
@@ -264,7 +242,6 @@ describe('recap · a session that decided nothing', () => {
     renderStep()
     expect(await screen.findByText(/Nothing was decided/i)).toBeTruthy()
     expect(screen.queryByTestId('wpr-group-calendar')).toBeNull()
-    // The week is still worth reading back, so the strip stays.
     expect(screen.getAllByTestId(/^wpr-day-/)).toHaveLength(7)
   })
 })

@@ -2,11 +2,8 @@ import Foundation
 import Testing
 @testable import Waffled
 
-// Weekly Planning — the session shell's model, driven against a fake feed.
-//
-// Same shape as `FamilyNightModelTests`: a mutable feed class with failure flags and a
-// call log, wired to the model's injected closures. What it locks is the behaviour that
-// went wrong on the web first — the loading contract, a crumb that must not follow you
+// Weekly Planning — the session shell's model, driven against a fake feed (same shape as
+// `FamilyNightModelTests`). It locks the loading contract, a crumb that must not follow you
 // onto the next step, and "Leave for now" actually leaving.
 
 private enum PlanningCallFailure: Error { case rejected }
@@ -61,8 +58,6 @@ private func session(
         completedAt: completedAt)
 }
 
-/// Three runnable steps plus one whose module is off — enough to prove the counter skips
-/// the unavailable one and that "the last step" completes instead of patching.
 private func defaultSteps() -> [WaffledAPI.PlanningStep] {
     [
         step("looseEnds", number: 1, act: "Intake"),
@@ -96,7 +91,6 @@ private final class PlanningFeed {
     var discards: [String] = []
     var resolves: [(kind: String, id: String, action: String, sessionId: String?)] = []
     var configSaves: [(dayOfWeek: Int?, time: String?, showOnToday: Bool?, steps: [String: Bool]?, lists: [String: Bool]?)] = []
-    /// The lists step 1 could ask about, as the config read serves them.
     var listCandidates: [WaffledAPI.PlanningListCandidate] = [
         .init(id: "l1", name: "Repairs", emoji: "🔧", relevant: true),
         .init(id: "l2", name: "Someday", emoji: "💭", relevant: true),
@@ -233,7 +227,6 @@ private func scratchDefaults() -> UserDefaults {
         let model = makeModel(feed, defaults: scratchDefaults())
         await model.load()
 
-        // Catalog numbers are 1,2,3,4; meals (3) is unavailable, so recap is "3 of 3".
         #expect(model.stepNumbers["looseEnds"] == 1)
         #expect(model.stepNumbers["calendar"] == 2)
         #expect(model.stepNumbers["meals"] == nil)
@@ -246,7 +239,6 @@ private func scratchDefaults() -> UserDefaults {
         let model = makeModel(feed, defaults: scratchDefaults())
         await model.load()
 
-        // "Run the household" holds only the unavailable Meals step, so it never appears.
         #expect(model.actGroups.map(\.act) == ["Intake", "Frame the week", "Close"])
     }
 
@@ -281,7 +273,6 @@ private func scratchDefaults() -> UserDefaults {
         #expect(decision.status == "done")
         #expect(decision.data == ["autofilled": .int(3)])
 
-        // …then the driver moves on. `status` is omitted so the server leaves it alone.
         let patch = try #require(feed.patches.first)
         #expect(patch.currentStep == "calendar")
         #expect(patch.status == nil)
@@ -341,14 +332,6 @@ private func scratchDefaults() -> UserDefaults {
     }
 
     // MARK: the record yields to a step you ask for by name
-    //
-    // The record screen shows the recap's read-back now, and the recap's rows are
-    // POINTERS — each names the step whose module owns that decision. Following one has to
-    // land you there. `showsRecord` used to be `session.isCompleted` alone, which made
-    // every one of those rows a button that did nothing.
-    //
-    // Written after the rule was changed rather than before it, which is the wrong way
-    // round — recorded honestly rather than dressed up as TDD.
 
     @Test func askingForAStepByNameLeavesTheRecord() async {
         let feed = PlanningFeed(session: session(status: "completed",
@@ -357,7 +340,6 @@ private func scratchDefaults() -> UserDefaults {
         await model.load()
         #expect(model.showsRecord)
 
-        // What a recap pointer does — local only, no PATCH of the session's own pointer.
         model.show("calendar")
 
         #expect(model.showsRecord == false)
@@ -366,10 +348,8 @@ private func scratchDefaults() -> UserDefaults {
     }
 
     @Test func aPointerAtAStepThatCannotRunKeepsYouOnTheRecord() async {
-        // `meals` is in the catalog but unavailable in this fixture (module off). Asking
-        // for it must NOT leave the record: `resolveCurrent` would fall back to the first
-        // runnable step, so yielding here would dump you on step 1 — indistinguishable
-        // from the app losing your place.
+        // Asking for an unavailable step must NOT leave the record: `resolveCurrent` would fall
+        // back to the first runnable step, which is indistinguishable from losing your place.
         let feed = PlanningFeed(session: session(status: "completed",
                                                  completedAt: "2026-09-04T21:50:00.000Z"))
         let model = makeModel(feed, defaults: scratchDefaults())
@@ -390,9 +370,7 @@ private func scratchDefaults() -> UserDefaults {
 
         model.leave()
 
-        // `leave()` clears `askedStep`, so the record is reachable again from inside — and
-        // `isPaused` must NOT win here: it requires an ACTIVE session, and this one is
-        // finished. A completed session is a receipt, not something you stepped out of.
+        // `isPaused` must NOT win here: it requires an ACTIVE session, and this one is finished.
         #expect(model.showsRecord)
         #expect(model.isPaused == false)
     }
@@ -488,8 +466,6 @@ private func scratchDefaults() -> UserDefaults {
         await first.load()
         first.leave()
 
-        // Tapping back into the feature builds a new model over the same device store —
-        // which is the whole reason the intent is persisted rather than held in memory.
         let second = makeModel(feed, defaults: defaults)
         await second.load()
 
@@ -509,7 +485,6 @@ private func scratchDefaults() -> UserDefaults {
 
         #expect(!model.isPaused)
         #expect(model.current?.key == "calendar")
-        // …and the intent itself survives, so leaving the feature lands back on it.
         #expect(model.pausedSessionId == "session-1")
     }
 
@@ -631,17 +606,13 @@ private func scratchDefaults() -> UserDefaults {
 
         let save = try #require(feed.configSaves.first)
         #expect(save.steps == ["calendar": false])
-        // Everything else omitted — the server merges, and a full map would clobber
-        // opt-outs this client never saw.
+        // Everything else omitted — the server merges, and a full map would clobber opt-outs
+        // this client never saw.
         #expect(save.dayOfWeek == nil)
         #expect(save.time == nil)
         #expect(save.showOnToday == nil)
     }
 
-    // "I'd rather choose what lists are relevant versus not." Same sparse-map discipline
-    // as the steps above, and for the same reason: the server merges, so a whole map
-    // built from this device's snapshot would rule lists back in that somebody else had
-    // just ruled out.
     @Test func rulingOneListOutSendsOnlyThatList() async throws {
         let feed = PlanningFeed(session: session())
         let model = makeModel(feed, defaults: scratchDefaults())
@@ -657,9 +628,8 @@ private func scratchDefaults() -> UserDefaults {
         #expect(save.showOnToday == nil)
     }
 
-    // The settings panel needs each list's NAME, and which lists are even askable is the
-    // server's rule (the `custom` allowlist) — so they arrive with the config rather than
-    // being re-derived here off the lists module.
+    // Which lists are even askable is the server's rule (the `custom` allowlist), so names
+    // arrive with the config rather than being re-derived off the lists module.
     @Test func theConfigReadCarriesTheListsItCouldAskAbout() async throws {
         let feed = PlanningFeed(session: session())
         let model = makeModel(feed, defaults: scratchDefaults())
@@ -669,15 +639,13 @@ private func scratchDefaults() -> UserDefaults {
         #expect(model.listCandidates.map(\.name) == ["Repairs", "Someday"])
     }
 
-    // Absent from the map means RELEVANT — the whole reason the setting can ship without
-    // changing what any existing household sees.
+    // Absent from the map means RELEVANT — the reason the setting can ship without changing
+    // what any existing household sees.
     @Test func aListNobodyHasRuledOnIsStillAskedAbout() {
         let ruled = WaffledAPI.WeeklyPlanningConfig(
             dayOfWeek: 0, time: "17:00", steps: [:], showOnToday: true, lists: ["l2": false])
         #expect(ruled.asksAbout("l2") == false)
         #expect(ruled.asksAbout("l1"))
-        // And a config from a server that has never heard of the setting asks about
-        // everything, rather than falling silent.
         let silent = WaffledAPI.WeeklyPlanningConfig(
             dayOfWeek: 0, time: "17:00", steps: [:], showOnToday: true, lists: nil)
         #expect(silent.asksAbout("l1"))

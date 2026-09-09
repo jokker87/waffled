@@ -3,12 +3,8 @@ import SwiftUI
 // Chrome shared by the planning steps' pickers.
 //
 // `wfChip(selected:tint:)` in `DesignSystem/FieldStyles.swift` is the canonical selectable
-// treatment and is used verbatim wherever a chip is a chip (the goal-group tabs, the kids'
-// look-forward-to chips). It clips to a `Capsule`, though, and a focus option here is a
-// three-line row — a title, a pace line and a progress bar — which a capsule crops.
-//
-// So this is the SAME treatment on a rounded rectangle, in one place rather than re-spelled
-// in both steps: tinted fill + colored border when selected, card fill + hairline when not.
+// treatment, but it clips to a `Capsule` and a focus option here is a three-line row. So
+// this is the SAME treatment on a rounded rectangle, in one place rather than in both steps.
 
 extension View {
     /// Selectable-ROW treatment: `wfChip`'s look, squared off for multi-line options.
@@ -26,15 +22,11 @@ extension View {
     }
 }
 
-/// The tone of a goal's pace sentence, in WF tokens.
+/// The tone of a goal's pace sentence, in WF tokens. `flat` is deliberately NOT a warning
+/// colour: "roughly 1 book a month" is a fact about a slow goal, not a complaint.
 ///
-/// Three tones, three meanings — and `flat` is deliberately NOT a warning colour: "roughly
-/// 1 book a month" is a fact about a slow goal, not a complaint about it.
-///
-/// The classification is split out from the colour so it can be asserted without comparing
-/// two `Color`s: the tone arrives as a STRING (a server newer than this build may name a
-/// fourth one), and what matters is that anything unrecognised reads neutral rather than
-/// alarming.
+/// Classification is split from the colour so it can be asserted without comparing two
+/// `Color`s — the tone arrives as a STRING, and anything unrecognised must read neutral.
 enum PlanningPaceTone {
     enum Kind: Hashable {
         case ok

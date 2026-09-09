@@ -4,21 +4,12 @@ import mod, { pairingSentence } from './ConnectionStep'
 import type { PlanningStep } from '../../../lib/api'
 import type { StepBodyProps } from '../registry'
 
-// Step 5 · Connection. Three things this file is here to hold in place, because each is
-// a way the step could look right and be wrong:
-//
-//  1. THE ROWS ARE A PROMPT, NOT THE LIST. The server ranks every pair in the house;
-//     the step draws three and "Make a pairing" takes any two people — or three — and
-//     asks the server for THEIR gaps. If the composer ever becomes a corner affordance
-//     rather than a first-class one, these tests should be what notices.
-//  2. TIME THAT ALREADY EXISTS GETS CREDIT. The row whose week already has the two of
-//     them must be able to say "you're already doing this on Saturday" instead of only
-//     offering to manufacture a new commitment.
-//  3. ADDING IS THE APP'S OWN EVENT MODAL. Picking a slot opens `EventModal` with those
-//     exact participants and that time — it does not open a who/what/when form of this
-//     step's own. The assertions go through the modal's real DOM ("New event", its
-//     Title field, its Add button) and the real POST body, so a hand-rolled composer
-//     would fail them.
+// Step 5 · Connection. Three ways the step could look right and be wrong:
+//  1. THE ROWS ARE A PROMPT, NOT THE LIST — the server ranks every pair, the step draws three,
+//     and "Make a pairing" asks for any two (or three) people's gaps.
+//  2. TIME THAT ALREADY EXISTS GETS CREDIT, rather than only offering a new commitment.
+//  3. ADDING IS THE APP'S OWN EVENT MODAL — assertions go through `EventModal`'s real DOM and
+//     the real POST body, so a composer of this step's own would fail them.
 
 const WEEK_START = '2026-09-06' // a Sunday; the week runs Sun Sep 6 -> Sat Sep 12
 
@@ -36,12 +27,12 @@ const step: PlanningStep = {
   data: {},
   decidedAt: null,
   // The shell renders the parked-note handoff, not the step — see Handoff in
-  // WeeklyPlanning.tsx. A step test mounts `Body` alone, so there is never one here.
+  // WeeklyPlanning.tsx.
   parked: [],
 }
 
-// The household's REAL people, from /api/persons. Nothing in this step may render a
-// hardcoded family: who the pairing is between is the entire content of a row.
+// The household's REAL people, from /api/persons. Nothing here may render a hardcoded
+// family: who the pairing is between is the entire content of a row.
 const PERSONS = [
   { id: 'p1', name: 'Kevin', memberType: 'adult', isAdmin: true, avatarEmoji: '🐻', colorHex: '#2F7FED' },
   { id: 'p2', name: 'Kelly', memberType: 'adult', isAdmin: false, avatarEmoji: '🦊', colorHex: '#25A368' },
@@ -62,9 +53,8 @@ const evt = (over: Record<string, unknown> = {}) => ({
   ...over,
 })
 
-// A gap's instant, built by LOCAL parse — the modal renders it back through the
-// device's zone, so a UTC literal here would assert a different clock time on a machine
-// outside America/Chicago.
+// A gap's instant, built by LOCAL parse — the modal renders it back through the device's
+// zone, so a UTC literal would assert a different clock time outside America/Chicago.
 const atLocal = (d: string, t: string) => new Date(`${d}T${t}`).toISOString()
 
 const slot = (over: Record<string, unknown> = {}) => ({
@@ -110,8 +100,6 @@ const BOARD = {
       slots: [slot({ date: '2026-09-10', kind: 'open', startsAt: null, afterTitle: null, label: 'Thu · free all day' })],
     },
     {
-      // A fourth pair the server ranked but the step does not draw — the rows are a
-      // prompt, not the list.
       personIds: ['p3', 'p4'],
       who: 'Wally and Lottie',
       lastTogetherOn: null,
@@ -124,8 +112,8 @@ const BOARD = {
 }
 
 // A stateful-enough double: the board is served as given, `/slots` answers for whoever
-// was asked about, and a POSTed event is recorded so "it lands as an ordinary event
-// with those participants" is what's under test rather than a canned view replayed back.
+// was asked about, and a POSTed event is recorded, so the real write is what's under
+// test.
 function mockApi(board: unknown = BOARD) {
   const posts: Record<string, unknown>[] = []
   const slotCalls: string[] = []
@@ -165,8 +153,8 @@ function mockApi(board: unknown = BOARD) {
       posts.push(body)
       return { ok: true, json: async () => ({ event: { ...body, id: `new-${posts.length}`, participants: [] } }) }
     }
-    // The shared event modal also reads the goals it could count toward and the Google
-    // calendars it could write to. Empty is the answer — but SHAPED, not `{}`.
+    // The shared event modal also reads its goals and Google calendars. Empty is the
+    // answer — but SHAPED, not `{}`.
     if (u.startsWith('/api/goals')) return { ok: true, json: async () => ({ goals: [] }) }
     if (u.startsWith('/api/calendar/google/status')) return { ok: true, json: async () => ({ calendars: [] }) }
     return { ok: true, json: async () => ({}) }
@@ -187,8 +175,7 @@ function renderStep(over: Partial<StepBodyProps> = {}) {
 
 const row = async (ids: string) => (await screen.findByTestId(`wpn-pair-${ids}`)) as HTMLElement
 
-// The shared event modal, once it's up. It is the app's own `.modal-card` — this step
-// renders `EventModal`, it does not carry a second event form of its own.
+// The shared event modal, once it's up. It is the app's own `.modal-card`.
 async function eventModal(): Promise<HTMLElement> {
   const heading = await screen.findByText('New event')
   return heading.closest('.modal-card') as HTMLElement
@@ -211,7 +198,6 @@ describe('Weekly planning · step 5 · Connection', () => {
     // The rows are a PROMPT, not the list: the server ranked four, the step draws three.
     expect(screen.queryByText('Wally and Lottie')).not.toBeInTheDocument()
 
-    // Real people from /api/persons — never a hardcoded design-era family.
     const kk = await row('p1-p2')
     expect(within(kk).getByRole('img', { name: 'Kevin and Kelly' })).toHaveTextContent('🐻')
     expect(within(kk).getByRole('img', { name: 'Kevin and Kelly' })).toHaveTextContent('🦊')
@@ -243,11 +229,9 @@ describe('Weekly planning · step 5 · Connection', () => {
 
     expect(await within(kw).findByText(/Nothing new — Saturday’s Yard work already is it, and you said so out loud/)).toBeInTheDocument()
     // A crumb is a hint for the recap, never storage — so counts, never module data.
-    // `links` is the one thing beside them, and it is not a breach of that: it records
-    // WHICH event answers a pairing, which is a pointer, not a copy of the event. The
-    // rule exists so the recap and the calendar can't disagree about an event's title
-    // or hour; an id can't drift from itself. Without it, picking a time is forgotten
-    // the moment you leave the step.
+    // `links` is not a breach of that: it records WHICH event answers a pairing, which
+    // is a pointer, not a copy. Without it, picking a time is forgotten the moment you
+    // leave the step.
     expect(setDecisionData).toHaveBeenLastCalledWith({ added: 0, alreadyCounted: 1, links: { 'p1-p3': 'e1' } })
   })
 
@@ -258,7 +242,6 @@ describe('Weekly planning · step 5 · Connection', () => {
     fireEvent.click(within(kk).getByRole('button', { name: /Tue after 8:30 PM/ }))
 
     const modal = await eventModal()
-    // The date and time came from the gap, and both of them are already on it.
     expect(within(modal).getByLabelText('Date')).toHaveValue('2026-09-08')
     expect(within(modal).getByLabelText('Time')).toHaveValue('20:30')
     await nameItAndSave(modal, 'Date night')
@@ -266,20 +249,15 @@ describe('Weekly planning · step 5 · Connection', () => {
     await waitFor(() => expect(posts).toHaveLength(1))
     expect(posts[0].title).toBe('Date night')
     expect(posts[0].participantIds).toEqual(['p1', 'p2'])
-    // The rows and the shell's counter should both agree with what just happened.
     await waitFor(() => expect(refresh).toHaveBeenCalled())
   })
 
   it('keeps asking until the board has caught up with the event just saved', async () => {
     // THE WRITE IS LOCAL-FIRST and this board is a SERVER read. `EventModal` saves
     // through PowerSync (`createEventLocal`) and uploads afterwards, so at the instant
-    // `onSaved` fires the server has not been told yet. Asking once, immediately, asked
-    // too early — and the failure was invisible in the worst way: the event WAS on the
-    // calendar (which renders the local mirror) while the pairing underneath it still
-    // read "Nothing on the calendar with just the two of you".
-    //
-    // Reported twice. The first round blamed the ranking, which was a real but
-    // different bug; this is the one that was actually costing the row.
+    // `onSaved` fires the server has not been told yet — asking once, immediately, asks
+    // too early, and the event is on the calendar (the local mirror) while the pairing
+    // still reads "Nothing on the calendar with just the two of you".
     let reads = 0
     const caughtUp = {
       ...BOARD,
@@ -289,7 +267,6 @@ describe('Weekly planning · step 5 · Connection', () => {
           : p
       ),
     }
-    // The first read after the save still predates the upload; the next one has it.
     const { posts } = mockApi(() => (++reads > 2 ? caughtUp : BOARD))
 
     renderStep()
@@ -298,15 +275,11 @@ describe('Weekly planning · step 5 · Connection', () => {
     await nameItAndSave(await eventModal(), 'Date night')
     await waitFor(() => expect(posts).toHaveLength(1))
 
-    // The row tells the truth without anybody leaving the step and coming back — and it
-    // says which event, by NAME. "I dont see the event I just made (at least not by its
-    // title)": a day and an hour identify nothing on a row that can carry three credited
-    // evenings.
-    //
-    // It is also already LINKED. "If I make an event there I expect it to be linked on
-    // the connection page" — you opened this pairing's own ＋ and put time in the week
-    // for exactly these two; being made to then tell the step that counts is asking you
-    // to say the same thing twice.
+    // The row tells the truth without anybody leaving the step, and says which event BY
+    // NAME: a day and an hour identify nothing on a row that can carry three credited
+    // evenings. It is also already LINKED — you opened this pairing's own ＋ for exactly
+    // these two, so being made to tell the step afterwards is saying the same thing
+    // twice.
     const chip = await within(await row('p1-p2')).findByRole(
       'button',
       { name: /Date night.*is your time together/i },
@@ -316,37 +289,31 @@ describe('Weekly planning · step 5 · Connection', () => {
   }, 15000)
 
   it('links a time that already has both of them on it', async () => {
-    // "I also cant link an existing time." The step credited a pairing automatically
-    // when an event's people were EXACTLY those two, and let you acknowledge that one
-    // event — but an evening where the two of them are both there ALONGSIDE somebody
-    // else was only ever a sentence ("you're both there, and it still isn't that").
-    // There was no way to point at it and say that IS our time.
+    // Automatic credit only fires when an event's people are EXACTLY those two, so an
+    // evening where they are both there ALONGSIDE somebody else could never be pointed
+    // at.
     //
-    // The candidates are exactly the events with both people on them, which is the two
-    // lists the board already sends. Nothing is written to the calendar: picking one
-    // does not edit anybody's event, it records that this pairing is answered by it.
+    // The candidates are exactly the events with both people on them — the two lists the
+    // board already sends. Nothing is written to the calendar: picking one records that
+    // this pairing is answered by it.
     mockApi()
     renderStep()
 
-    // Kelly and Lottie: nothing with just the two of them, two Dances with both of them.
     const kl = await row('p2-p4')
     fireEvent.click(within(kl).getByRole('button', { name: /Link a time/i }))
 
     const picker = await screen.findByTestId('wpn-link-p2-p4')
-    // Both candidates, each nameable by when it is — two Dances need telling apart.
     expect(within(picker).getByRole('button', { name: /Dance.*Tuesday/i })).toBeInTheDocument()
     expect(within(picker).getByRole('button', { name: /Dance.*Thursday/i })).toBeInTheDocument()
 
     fireEvent.click(within(picker).getByRole('button', { name: /Dance.*Thursday/i }))
 
-    // The row now reads as answered, by that event.
     await waitFor(() => expect(within(kl).getByText(/Thursday/)).toBeInTheDocument())
   })
 
   it('remembers a linked time, rather than losing it on the next visit', async () => {
-    // A LINK is the answer to this pairing, not just a sentence that changes — and a step that
-    // forgets its answer the moment you walk away is the complaint this module has already
-    // collected twice.
+    // A LINK is the answer to this pairing, not just a sentence that changes; a step
+    // that forgets its answer the moment you walk away is the failure this guards.
     const { steps } = mockApi()
     renderStep()
     const kl = await row('p2-p4')
@@ -359,8 +326,8 @@ describe('Weekly planning · step 5 · Connection', () => {
     expect(last).toMatchObject({ sessionId: 's1' })
     expect(last.links).toMatchObject({ 'p2-p4': 'd2' })
     // Through the step's MID-STEP route, not `decideStep` — linking a time is not
-    // answering the step, and `decideStep` stamps `decided_at = now()` on every write,
-    // which would move when a settled step was settled.
+    // answering the step, and `decideStep` stamps `decided_at = now()`, moving when a
+    // settled step was settled.
     expect(last).not.toHaveProperty('status')
   })
 
@@ -371,7 +338,6 @@ describe('Weekly planning · step 5 · Connection', () => {
     fireEvent.click(within(kk).getByRole('button', { name: /Sat · free all day/ }))
     const modal = await eventModal()
     expect(within(modal).getByLabelText('Date')).toHaveValue('2026-09-12')
-    // No invented evening: the modal's default stands, whatever it is.
     expect(within(modal).getByLabelText('Time')).toHaveValue('17:00')
   })
 
@@ -390,15 +356,14 @@ describe('Weekly planning · step 5 · Connection', () => {
     fireEvent.click(await screen.findByRole('button', { name: /Make a pairing/i }))
 
     const maker = screen.getByTestId('wpn-make')
-    // Every person in the house is offered, by name.
     for (const p of PERSONS) {
       expect(within(maker).getByRole('button', { name: new RegExp(`${p.name}`, 'i') })).toBeInTheDocument()
     }
     fireEvent.click(within(maker).getByRole('button', { name: /Kevin/i }))
     fireEvent.click(within(maker).getByRole('button', { name: /Lottie/i }))
 
-    // Two people chosen ⇒ ask the server for the gaps THIS pairing has, in the week the
-    // server gave us. Never a gap computed on the device.
+    // Two people chosen ⇒ ask the server for THIS pairing's gaps, in the week the server
+    // gave us. Never a gap computed on the device.
     await waitFor(() => expect(slotCalls.some((u) => u.includes('people=p1,p4') && u.includes(`weekStart=${WEEK_START}`))).toBe(true))
     expect(await within(maker).findByRole('button', { name: /Fri after breakfast/ })).toBeInTheDocument()
 
@@ -435,7 +400,7 @@ describe('Weekly planning · step 5 · Connection', () => {
 
   it('reads right for a household with exactly one pairing', async () => {
     // A couple with no kids has ONE pair. The footnote must not claim three rows, and
-    // "Make a pairing" is still the offer — it is the only way to reach anybody else.
+    // "Make a pairing" is still the only way to reach anybody else.
     mockApi({ weekStart: WEEK_START, pairings: [BOARD.pairings[0]] })
     renderStep()
     expect(await screen.findByText('Kevin and Kelly')).toBeInTheDocument()
@@ -479,19 +444,13 @@ describe('pairingSentence', () => {
 })
 
 describe('Connection · a pairing with time on it is never hidden', () => {
-  // "I added a custom time and it pre-filled the people … but then when I saved nothing
-  // showed up on the connection page. Actually, I went and checked the calendar tab, the
-  // events did save but they didn't populate on the connection tab."
-  //
-  // The event saved and the client DOES re-read the board. What hid it was `slice(0, 3)`:
-  // the rows are ranked by how long it has been since it was just those two, and that
-  // ranking reads only history BEFORE the planned week — so giving a pairing time inside
-  // the week does not move it up, and a pairing ranked 4th stays invisible no matter what
-  // you just did for it.
+  // A pairing given time INSIDE the planned week used to stay invisible: `slice(0, 3)`
+  // cuts by a ranking that reads only history BEFORE the planned week, so nothing you
+  // just did for a 4th-ranked pairing moves it up.
   //
   // Three rows is still the right PROMPT. But a pairing with time already on the week is
-  // not a prompt, it is a fact about the week, and the step's own design leads with
-  // "time that already exists gets credit".
+  // not a prompt, it is a fact about the week — see the step's "time that already exists
+  // gets credit".
   it('draws a pairing that already has time this week even below the prompt cap', async () => {
     const withCredit = {
       ...BOARD,
@@ -503,7 +462,6 @@ describe('Connection · a pairing with time on it is never hidden', () => {
     mockApi(withCredit)
     renderStep()
     expect(await row('p3-p4')).toBeTruthy()
-    // And it says why it is there — by naming the event, not by reciting a clock time.
     expect((await row('p3-p4')).textContent).toMatch(/Just us/)
   })
 
@@ -517,9 +475,8 @@ describe('Connection · a pairing with time on it is never hidden', () => {
   })
 
   it('never drops a pairing with credit, even past the cap', async () => {
-    // The rule: three is a cap on what the step SUGGESTS. A pairing with time already on
-    // the week is not a suggestion, so all four are drawn here and no suggestion is —
-    // there is nothing left to prompt about.
+    // The rule: three caps what the step SUGGESTS. A pairing with time already on the
+    // week is not a suggestion, so all four are drawn here and no suggestion is.
     const allWithCredit = {
       ...BOARD,
       pairings: BOARD.pairings.map((p, i) => ({

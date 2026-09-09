@@ -2,38 +2,27 @@ import SwiftUI
 
 /// Weekly Planning · step 4 "Family night" — "Accept the rotation, or change it?"
 ///
-/// Three rows and a theme line; web parity with `planning/steps/FamilyNightStep.tsx`. The
-/// fast path is reading them and moving on: the rotation has already worked out whose turn
-/// each part is, so the affirmative is an acknowledgement and writes nothing at all.
+/// Web parity with `planning/steps/FamilyNightStep.tsx`. The fast path is reading the rows and
+/// moving on, so the affirmative writes nothing.
 ///
-/// Everything that IS a decision goes through the familyNight module's own OCCURRENCE
-/// endpoint, because that is where a gathering lives:
-///   · tap a face → an assignment pinned for THIS WEEK only. It materializes the
-///     occurrence, and occurrence counts are what the rotation counts — which is how a pin
-///     shifts next week's turn without anybody editing the standing agenda.
+/// Everything that IS a decision goes through the familyNight module's own OCCURRENCE endpoint:
+///   · tap a face → an assignment pinned for THIS WEEK only. It materializes the occurrence, and
+///     occurrence counts are what the rotation counts, so a pin shifts next week's turn.
 ///   · the theme → free text on the same occurrence ('' clears it).
-///   · Skip this week → status 'skipped' on it. That calls off the GATHERING, never the
-///     recurring calendar event behind it.
+///   · Skip this week → status 'skipped', which calls off the GATHERING, never the recurring event.
 ///
-/// "Skip this week" lives in the BODY, not the shell's footer: `planningStepFooterExtra`
-/// routes a footer control only for Meals, and the skip bar's Undo is already here, so the
-/// action and its consequence sit together.
-///
-/// No `ScrollView`, no `WF.tabBarClearance`, no horizontal padding of its own: the shell
-/// owns all three and already insets every step by 16.
+/// "Skip this week" lives in the BODY, not the shell's footer, so the action and its Undo sit
+/// together. No `ScrollView`, no `WF.tabBarClearance`, no padding: the shell owns all three.
 struct FamilyNightStepView: View {
     let props: PlanningStepProps
 
     @State private var model = PlanningFamilyNightModel()
-    /// Whether the "Link an event" list is open. Closed again after a pick, so a second
-    /// tap on a stale list can't relink to something the reader has stopped looking at.
+    /// Closed again after a pick, so a second tap on a stale list can't relink.
     @State private var picking = false
-    /// ONE focus token for the whole step, so a single keyboard "Done" can dismiss
-    /// whichever line is being typed into. `"theme"` or a part id.
+    /// ONE focus token for the whole step, so one keyboard "Done" dismisses whichever line is live.
     @FocusState private var focusedField: String?
 
-    /// Nothing may be touched while a write is in flight — the shell's or ours — and a
-    /// called-off week freezes everything except Undo.
+    /// Nothing may be touched while a write is in flight; a called-off week freezes all but Undo.
     private var disabled: Bool { props.busy || model.busy }
 
     var body: some View {
@@ -55,21 +44,17 @@ struct FamilyNightStepView: View {
             }
         }
         .task(id: props.weekStart) {
-            // Drop focus first. The rows keep their identity across a week change (part
-            // ids don't move), so a draft held mid-sentence would survive the swap and
-            // the next focus loss would write it to the NEW week's date.
+            // Drop focus first: the rows keep their identity across a week change, so a draft held
+            // mid-sentence would be written to the NEW week's date.
             focusedField = nil
             picking = false
             await model.load(weekStart: props.weekStart)
         }
-        // The crumb, kept in step with every read and write, so the affirmative writes
-        // back what is already true instead of erasing it.
+        // The crumb, kept in step with every read and write, so the affirmative writes back what
+        // is already true instead of erasing it.
         .onChange(of: model.rev) { props.setDecisionData(model.crumb) }
-        // NO `.wfKeyboardDoneToolbar` HERE, deliberately — see the note in
-        // PlanningShellView.sessionScreen. That accessory bar measured ~79pt on an
-        // iPhone 17 Pro for a single button, stacked directly on top of the session's
-        // fixed footer: "why is there so much extra space?" The shell dismisses the
-        // keyboard on scroll instead, and this field's keyboard has a return key.
+        // NO `.wfKeyboardDoneToolbar` HERE, deliberately — see PlanningShellView.sessionScreen.
+        // That accessory bar stacks ~79pt on top of the session's fixed footer.
     }
 
     // MARK: - The gathering
@@ -98,8 +83,7 @@ struct FamilyNightStepView: View {
                     placeholder: #"optional — "pizza and the new Lego set""#,
                     limit: 120,
                     disabled: disabled || board.isSkipped,
-                    // '' clears; leaving the key out would mean "keep whatever is there",
-                    // which is how a cleared box quietly keeps its old text.
+                    // '' clears; leaving the key out would mean "keep whatever is there".
                     onCommit: { text in save(PlanningFamilyNightBody.setTheme(date: board.date, theme: text)) })
 
                 ForEach(model.rows) { row in
@@ -142,9 +126,8 @@ struct FamilyNightStepView: View {
                 }
             }
 
-            // WHAT the part is, as opposed to whose turn it is. Sent WITHOUT a
-            // `personId` key, so naming the treat leaves whoever has it alone and the
-            // rotation's suggestion stands — see PlanningFamilyNightBody.setDetail.
+            // WHAT the part is, not whose turn it is. Sent WITHOUT a `personId` key, so naming
+            // the treat leaves whoever has it alone.
             PlanningCommitLine(
                 label: "What",
                 field: part.partId,
@@ -161,9 +144,7 @@ struct FamilyNightStepView: View {
         .padding(.vertical, 4)
     }
 
-    /// Tapping the suggested person is a REAL action — it turns the rotation's guess
-    /// into a decision — so the accessible name is always the action, never the emoji
-    /// ("🦄" is not a name).
+    /// Tapping the suggested person is a REAL action, so the accessible name is the action.
     private func face(_ member: WaffledAPI.PlanningFamilyNightMember,
                       part: WaffledAPI.PlanningFamilyNightPart,
                       board: WaffledAPI.PlanningFamilyNightBoard) -> some View {
@@ -178,24 +159,18 @@ struct FamilyNightStepView: View {
         .buttonStyle(.plain)
         .disabled(disabled || board.isSkipped)
         .accessibilityLabel("Pin \(part.label) to \(member.name)")
-        // Only a PIN is a selected state. The rotation's suggestion is drawn as current
-        // but nobody chose it, and the row's own line says so.
+        // Only a PIN is a selected state; the rotation's suggestion is drawn as current.
         .accessibilityAddTraits(part.pinned && isCurrent ? [.isSelected] : [])
     }
 
     // MARK: - This week on the calendar
 
-    /// TWO different things live here, and the step has to keep them apart:
-    ///  · `onCalendar` is the STANDING recurring series set once in Settings by an admin.
-    ///  · `eventId` is the event THIS gathering points at — the one a planning session
-    ///    can decide, for the same reason a pinned person lives on the occurrence.
+    /// TWO different things live here: `onCalendar` is the STANDING recurring series set once in
+    /// Settings; `eventId` is the event THIS gathering points at, which a session can decide.
     ///
-    /// Neither button opens an event form. "Add to calendar" is ONE server call that
-    /// creates the event for this date and links it atomically; a create-then-adopt round
-    /// trip from here could not be made safe, because the app writes events LOCALLY first
-    /// and the id would not exist server-side yet. "Link an event" adopts something the
-    /// week already has — the half a recurring series could never express: "this week
-    /// it's the movie night that's already on Friday".
+    /// Neither button opens an event form. "Add to calendar" is ONE server call that creates and
+    /// links atomically — a create-then-adopt round trip could not be made safe, because the app
+    /// writes events LOCALLY first and the id would not exist server-side yet.
     @ViewBuilder
     private func calendarLine(_ board: WaffledAPI.PlanningFamilyNightBoard) -> some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -209,8 +184,7 @@ struct FamilyNightStepView: View {
                             .font(.system(size: 12, weight: .semibold)).foregroundStyle(WF.ink3)
                     }
                     Spacer(minLength: 6)
-                    // Unlinks ONLY. Deleting the event is the calendar's job, and "this
-                    // isn't family night after all" must never delete Friday.
+                    // Unlinks ONLY: "this isn't family night after all" must never delete Friday.
                     ghostButton("Unlink", disabled: disabled || board.isSkipped) {
                         save(PlanningFamilyNightBody.linkEvent(date: board.date, eventId: nil))
                     }
@@ -287,9 +261,7 @@ struct FamilyNightStepView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Skipped this week")
                         .font(.system(size: 14, weight: .bold)).foregroundStyle(WF.ink)
-                    // The rotation advancing on a skipped week is the INTENDED rule, so
-                    // the copy says it out loud — a rotation that shifts silently is the
-                    // part that would actually confuse somebody.
+                    // The rotation advancing on a skipped week is INTENDED, so the copy says so.
                     Text("The gathering is marked skipped\(board.onCalendar ? ", and the recurring calendar event is left alone" : ""). Everyone's turn still moves on, so next week is the next person up.")
                         .font(.system(size: 12, weight: .semibold)).foregroundStyle(WF.ink3)
                         .fixedSize(horizontal: false, vertical: true)
@@ -302,19 +274,16 @@ struct FamilyNightStepView: View {
         }
     }
 
-    /// Deliberately NOT "worked out from who did what last time": the module's rotation
-    /// is a COUNT of gatherings taken against the family's order, and it never reads who
-    /// was actually assigned. Promising more than that would be a sentence the software
-    /// can't keep.
+    /// The module's rotation is a COUNT of gatherings against the family's order — deliberately
+    /// NOT "who did what last time", which it never reads.
     private var rotationNote: some View {
         Text("These are rotation suggestions — each part taken in turn, in your family's order. Leave them and they stand; tap a face and it's pinned for this week only, which is what shifts next week's turn.")
             .font(.system(size: 12.5)).foregroundStyle(WF.ink3)
             .fixedSize(horizontal: false, vertical: true)
     }
 
-    /// Skipping the STEP decides nothing; skipping the WEEK calls the gathering off.
-    /// Once the week is off, the way back is Undo on the skip bar — where the consequence
-    /// is written down — so this control disappears rather than becoming a second undo.
+    /// Skipping the STEP decides nothing; skipping the WEEK calls the gathering off. Once it is
+    /// off, the way back is Undo on the skip bar, so this control disappears.
     @ViewBuilder
     private var skipThisWeek: some View {
         if let board = model.board {
@@ -339,8 +308,6 @@ struct FamilyNightStepView: View {
         .disabled(disabled)
     }
 
-    /// One path for every write: post, re-read, and only then tell the shell — so the
-    /// counter and the agenda sheet agree with what just happened.
     private func save(_ body: [String: JSONValue]) {
         Task {
             if await model.write(body, weekStart: props.weekStart) { props.refresh() }
@@ -348,27 +315,20 @@ struct FamilyNightStepView: View {
     }
 }
 
-/// A free-text line saved on FOCUS LOSS (and on Return) rather than per keystroke — it
-/// is a sentence somebody types, not a toggle. Shared by the theme and by every part's
-/// detail, which behave identically: same clearing rule ('' clears, an absent key would
-/// mean "leave it"), same re-sync, same design-system field chrome.
-///
-/// Focus loss is the load-bearing half. The web commits on blur; `.onSubmit` alone would
-/// only cover Return, so typing a theme and then tapping a face — the single most likely
-/// thing to happen on this screen — would silently throw the theme away.
+/// A free-text line saved on FOCUS LOSS (and on Return) rather than per keystroke. Shared by the
+/// theme and every part's detail: same clearing rule ('' clears, an absent key means "leave it").
+/// Focus loss is load-bearing — `.onSubmit` alone covers only Return, so typing a theme and then
+/// tapping a face would silently throw it away.
 private struct PlanningCommitLine: View {
     let label: String
-    /// This line's token in the step's single `@FocusState`. Optional purely so it is
-    /// the SAME type as the focus binding's value — callers always pass a real token.
+    /// Optional purely so it is the SAME type as the focus binding's value.
     let field: String?
     let focus: FocusState<String?>.Binding
     let value: String
     let placeholder: String
     let limit: Int
     let disabled: Bool
-    /// The accessible name, when the visible label is too terse to stand alone. Three
-    /// rows each showing "What" need three distinct names, and the visible word cannot
-    /// repeat the part's own label — "Activity … Activity" reads as a mistake on screen.
+    /// The accessible name, when the visible label is too terse: three rows each show "What".
     var accessibilityLabel: String?
     let onCommit: (String) -> Void
 
@@ -389,9 +349,7 @@ private struct PlanningCommitLine: View {
                 .onSubmit { focus.wrappedValue = nil }
         }
         .onAppear { draft = value }
-        // Re-sync when the board comes back with a different value (another device, or
-        // the week changed under us). Guarded on focus so a draft in progress is never
-        // clobbered by a read that landed mid-sentence.
+        // Guarded on focus so a draft in progress is never clobbered by a read landing mid-sentence.
         .onChange(of: value) { _, fresh in
             if focus.wrappedValue != field { draft = fresh }
         }

@@ -20,31 +20,24 @@ import '../../../styles/planning-goals.css'
 
 // Step 6 · Goals — "What's each group's focus this week?"
 //
-// The tabs ARE the `goal_lists` that already exist: 🏡 the family one, 💛 the couple's
-// private one with its lock, one per person. Borrowing the group picker means only ONE
-// group is on screen at a time — six cards of everybody's goals is the thing this step
-// exists to avoid — and a ★ on a tab says that group has settled, so the room can see
-// what's left without reading all of them.
+// The tabs ARE the `goal_lists` that already exist, so only ONE group is on screen at a
+// time and a ★ says that group has settled.
 //
 // Picking a goal sets the goals module's own `is_featured` flag; there is no second
-// "focus" concept. Picking NOTHING is a real answer and settles the group just the
-// same — the server records that on the session (see lib/api/planning/goals.ts), and
-// this body mirrors it back through `setDecisionData` so pressing the primary (which
-// REPLACES the step's data) writes back what is already there.
+// "focus" concept. Picking NOTHING is a real answer and settles the group just the same
+// — the server records that on the session, and this body mirrors it back through
+// `setDecisionData` because pressing the primary REPLACES the step's data.
 //
-// "＋ New goal for this week" opens the app's own goal editor as a MODAL over the week,
-// not a route. Navigating to /goals/new abandoned the session — nothing brought the
-// family back, so a fifteen-second answer ejected them from the whole thing. Embedded,
-// the group they were looking at is fixed (not re-offered, so it can't be answered for
-// the wrong group by accident) and the goal is created already pinned, which is what
-// makes it come back as this week's focus without a second trip.
+// "＋ New goal for this week" opens the app's own goal editor as a MODAL, never a route:
+// navigating to /goals/new abandons the session. The group is fixed to the tab (so it
+// cannot be answered for the wrong group) and the goal is created already pinned.
 
 const TYPE_LABEL: Record<string, string> = { count: 'Count', total: 'Total', habit: 'Habit', checklist: 'Checklist' }
 
 const firstName = (name: string) => name.split(' ')[0]
 
-// The axis label under the number, matching the rule the shared helper implements: a
-// habit is this period's count, a checklist is steps, everything else the running total.
+// Matches the shared helper's rule: a habit is this period's count, a checklist is steps,
+// everything else the running total.
 function axisLabel(g: PlanningGoalGoal): string {
   if (g.goalType === 'habit') return g.habitPeriod === 'day' ? 'today' : `this ${g.habitPeriod ?? 'week'}`
   if (g.goalType === 'checklist') return 'steps done'
@@ -55,9 +48,8 @@ function goalColor(g: PlanningGoalGoal): string {
   return (g.category && CATEGORIES[g.category]?.color) || 'var(--primary)'
 }
 
-// What the group card's header says the group IS. Every clause is a fact the server
-// sent — `isEveryone` and a member's `age` — never a guess: a member with no birthday
-// on file simply drops the age rather than inventing one.
+// Every clause is a fact the server sent, never a guess: a member with no birthday drops
+// the age rather than inventing one.
 function groupSub(g: PlanningGoalGroup): string {
   const n = g.members.length
   if (g.isPrivate) {
@@ -74,10 +66,8 @@ function groupSub(g: PlanningGoalGroup): string {
   return `shared · ${n} people`
 }
 
-// One choosable goal. Progress ALWAYS comes from the shared helpers — never an inline
-// read of `totalProgress`, which would show a habit's lifetime count where the goals
-// screen shows this week's. The subtitle is `kind · pace`: what the goal is, then how
-// it's actually going, in the server's words and one of its three tones.
+// Progress ALWAYS comes from the shared helpers, never an inline `totalProgress` (which
+// shows a habit's lifetime count). The subtitle is `kind · pace`, in the server's words.
 function GoalOption({ goal, checked, disabled, onPick }: {
   goal: PlanningGoalGoal
   checked: boolean
@@ -129,11 +119,9 @@ function Body({ sessionId, setDecisionData, refresh, busy }: StepBodyProps) {
   const [loading, setLoading] = useState(true)
   const [failed, setFailed] = useState(false)
   const [tabId, setTabId] = useState<string | null>(null)
-  // The list a write is in flight for. Only one answer is ever in flight — a second
-  // click while the first is landing would race two reads of the same session crumb.
   const [saving, setSaving] = useState<string | null>(null)
-  // The group the new-goal modal is open for, or null. Holding the LIST ID (not the
-  // group object) keeps it right across a refetch that replaces every group.
+  // Holding the LIST ID, not the group object, keeps this right across a refetch that
+  // replaces every group.
   const [newForId, setNewForId] = useState<string | null>(null)
 
   useEffect(() => {
@@ -145,15 +133,11 @@ function Body({ sessionId, setDecisionData, refresh, busy }: StepBodyProps) {
     return () => { alive = false }
   }, [sessionId])
 
-  // Mirror what the session already knows onto the step's crumb after EVERY fresh
-  // answer — not only after a click. The shell resets the crumb on step change and
-  // replaces the step's stored data when the primary is pressed, so a body that only
-  // set it in its click handler would erase its own record after a remount (which is
-  // exactly what leaving for the goal editor and coming back does).
+  // Mirror the session's own answers onto the crumb after EVERY read, not only after a
+  // click: the shell resets the crumb on step change and replaces the step's data when
+  // the primary is pressed, so a click-handler-only body erases its record on a remount.
   useEffect(() => { if (view) setDecisionData(planningGoalsDecision(view)) }, [view, setDecisionData])
 
-  // Open on the first group that hasn't settled — "what's left" is the useful place to
-  // land when you come back to the step.
   useEffect(() => {
     if (!view || tabId) return
     setTabId((view.groups.find((g) => !g.settled) ?? view.groups[0])?.listId ?? null)
@@ -171,8 +155,6 @@ function Body({ sessionId, setDecisionData, refresh, busy }: StepBodyProps) {
     setSaving(listId)
     try {
       setView(await planningGoalsApi.setFocus(sessionId, listId, goalId))
-      // The flag lives in the goals module, so tell the shell to re-read: the agenda
-      // sheet and the counter should agree with what just happened.
       refresh()
     } catch {
       /* leave the last good answer on screen rather than a half-applied one */
@@ -181,17 +163,14 @@ function Body({ sessionId, setDecisionData, refresh, busy }: StepBodyProps) {
     }
   }
 
-  // Whose goals this viewer may actually add to — the goals module's own rule:
-  // goal.manage holders for any group, everyone else only a group that is just them.
-  // Offering the editor for a group the server would refuse is show-then-403; the button
-  // says why instead.
+  // The goals module's own rule: `goal.manage` holders for any group, everyone else only
+  // a group that is just them. Offering the editor otherwise is show-then-403.
   const canTarget = (g: PlanningGoalGroup) =>
     canManageGoals || (g.members.length === 1 && g.members[0].personId === person?.id)
 
-  // The new goal was created already pinned, so re-reading the step is all it takes for
-  // it to arrive as the group's focus (the server adopts a lone pin — see
-  // steps/goals.ts). Deliberately NOT a `setFocus` call: creating a goal is not the
-  // family confirming it for the week, so the tab stays unstarred until they say so.
+  // The new goal is created already pinned, so a re-read brings it back as the group's
+  // focus (the server adopts a lone pin). Deliberately NOT a `setFocus` call: creating a
+  // goal is not the family confirming it for the week.
   async function goalCreated() {
     setNewForId(null)
     try {
@@ -199,12 +178,11 @@ function Body({ sessionId, setDecisionData, refresh, busy }: StepBodyProps) {
     } catch {
       /* keep the last good answer on screen; the goal itself was saved */
     }
-    // The flag lives in the goals module — the agenda sheet and the counter should agree.
     refresh()
   }
 
-  // Esc closes the editor, the way every other modal in the app behaves. Clicking the
-  // scrim deliberately does NOT: this one holds a half-typed goal.
+  // Esc closes the editor; clicking the scrim deliberately does NOT — it holds a
+  // half-typed goal.
   useEffect(() => {
     if (!newForId) return
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setNewForId(null) }

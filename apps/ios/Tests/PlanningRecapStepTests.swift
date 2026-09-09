@@ -2,30 +2,13 @@ import Foundation
 import Testing
 @testable import Waffled
 
-// Weekly Planning · step 10 (Recap).
-//
-// THREE THINGS HERE ARE WORTH MORE THAN THE REST:
-//
-//  1. THE VIEW SURVIVES A RAGGED PAYLOAD. This is the LAST screen of the session, and in
-//     Swift a missing non-optional array does not cost a tint the way it does on the web —
-//     it throws, and takes the whole recap with it. `participantIds` and `events` are the
-//     two the web already got bitten by, so a payload missing either must still decode.
-//  2. NOTHING IS RECOMPUTED. Every headline, sentence and tally is the server's; the crumb
-//     is INTEGERS ONLY. A client that summed the groups would be a second reading of the
-//     week, free to drift from the server's and from the web's.
-//  3. "KEEP IT PARKED" WRITES NOTHING. It is the quiet answer, and the note still being
-//     open next Sunday is the feature — so the resolver must not be called at all.
+// Weekly Planning · step 10 (Recap). Three things here matter most: the view must survive a
+// ragged payload (in Swift a missing non-optional array throws and takes the whole recap with
+// it), nothing is recomputed (the crumb is INTEGERS ONLY), and "Keep it parked" writes nothing.
 
 private enum RecapFailure: Error { case rejected }
 
 // MARK: - The recap, VERBATIM off the wire
-//
-// Shaped field-for-field on `getRecap`'s own interfaces and on what
-// `apps/api/test/weekly-planning-recap.integration.test.ts` drives: the week of Sunday
-// 2026-09-06 in an America/Chicago household, Monday carrying "Crockpot chili" with no
-// cook, Tuesday carrying Lottie's "Dance" (owner id + owner colour + participants — the
-// colour INPUTS, never a resolved colour), a Friday capped at four events with two held
-// back, four decision groups, one untagged note on last call and three left-alone rows.
 
 private let recapJSON = Data("""
 {
@@ -88,9 +71,6 @@ private func decodedRecap() throws -> WaffledAPI.PlanningRecapView {
     try WaffledAPI.decoder.decode(WaffledAPI.PlanningRecapView.self, from: recapJSON)
 }
 
-// The same week, already saved. `savedAt` is the ONLY difference — which is the point:
-// the tense of the recap's copy is the payload's business, not a flag a screen passes in,
-// so a saved week cannot read one way on iOS and another on the web.
 private let savedRecapJSON = Data(
     String(decoding: recapJSON, as: UTF8.self)
         .replacingOccurrences(of: "\"savedAt\": null", with: "\"savedAt\": \"2026-09-06T17:40:00.000Z\"")
@@ -144,7 +124,6 @@ private func model(_ feed: RecapFeed) -> PlanningRecapModel {
     @Test func decodesTheWholeReceipt() throws {
         let r = try decodedRecap()
         #expect(r.weekStart == "2026-09-06")
-        // Null while the week is still being decided — the shell owns the saved screen.
         #expect(r.savedAt == nil)
         #expect(r.days.map(\.date) == [
             "2026-09-06", "2026-09-07", "2026-09-08", "2026-09-09",
@@ -165,14 +144,9 @@ private func model(_ feed: RecapFeed) -> PlanningRecapModel {
 
     @Test func carriesTheColourInputsAndNotAColour() throws {
         let dance = try #require(try decodedRecap().days[2].events.first)
-        // The whole point of the wire shape: the client resolves the colour so the strip
-        // agrees with the calendar it describes. So the owner, the owner's colour and the
-        // participants travel — and no resolved colour does.
         #expect(dance.personId == "p-lottie")
         #expect(dance.personColor == "#7A5AF8")
         #expect(dance.participantIds.isEmpty)
-        // Present, and null when the person has no colour of their own — a real answer the
-        // client turns into the unassigned grey, not a missing field.
         let dentist = try #require(try decodedRecap().days[5].events.first { $0.title == "Dentist" })
         #expect(dentist.personId == "p-kevin")
         #expect(dentist.personColor == nil)
@@ -180,17 +154,11 @@ private func model(_ feed: RecapFeed) -> PlanningRecapModel {
 
     @Test func capsABusyDayAndReportsTheRemainder() throws {
         let friday = try decodedRecap().days[5]
-        // The server caps at four and says how many it is holding back, so a busy day
-        // reports its remainder rather than growing past its neighbours.
         #expect(friday.events.count == 4)
         #expect(friday.more == 2)
     }
 
     @Test func aMissingParticipantIdsCostsATintAndNotTheSession() throws {
-        // THE EXACT CRASH THE WEB HAD, in the form Swift would take it: a missing
-        // non-optional array throws, and the throw is not scoped to the event — it fails
-        // the whole `PlanningRecapView`, so one ragged event would delete the final screen
-        // of the session.
         let r = try WaffledAPI.decoder.decode(
             WaffledAPI.PlanningRecapView.self,
             from: Data("""
@@ -221,7 +189,6 @@ private func model(_ feed: RecapFeed) -> PlanningRecapModel {
         #expect(r.days[0].events.isEmpty)
         #expect(r.days[0].more == 0)
         #expect(r.days[0].meal == "Chili")
-        // …and every other card degrades to absent rather than to a failed decode.
         #expect(r.groups.isEmpty)
         #expect(r.lastCall.isEmpty)
         #expect(r.leftAlone.isEmpty)
@@ -230,9 +197,8 @@ private func model(_ feed: RecapFeed) -> PlanningRecapModel {
     }
 
     @Test func anUnknownBadgeRendersAsItselfRatherThanFailing() throws {
-        // The catalog is server-owned: a newer server may name a fourth outcome, and it
-        // must render as itself instead of blanking the card. That is why `badge` is a
-        // String and not an enum.
+        // The catalog is server-owned: a newer server may name a fourth outcome and must render
+        // as itself, which is why `badge` is a String and not an enum.
         let row = try WaffledAPI.decoder.decode(
             WaffledAPI.PlanningRecapLeftAlone.self,
             from: Data("""
@@ -249,8 +215,8 @@ private func model(_ feed: RecapFeed) -> PlanningRecapModel {
 
     @Test func theCrumbIsIntegersOnly() throws {
         let crumb = try #require(PlanningRecapCrumb.decision(try decodedRecap()))
-        // The keys match `planningRecapDecision` on the web exactly — both platforms write
-        // the same record, and the recap reads back whatever either wrote.
+        // The keys match `planningRecapDecision` on the web exactly — both platforms write the
+        // same record.
         #expect(crumb == [
             "counts": .object([
                 "decisions": .int(7),
@@ -258,15 +224,12 @@ private func model(_ feed: RecapFeed) -> PlanningRecapModel {
                 "parked": .int(2),
             ]),
         ])
-        // …and nothing else. A title frozen here would start going stale the moment
-        // somebody edited the thing it names.
         #expect(crumb.keys.count == 1)
     }
 
     @Test func nothingReadMeansNoCrumbAtAll() {
-        // Not zeroes: the affirmative REPLACES the step's data, so a crumb handed up after
-        // a failed fetch would write "0 decisions" over a week that really did decide
-        // things.
+        // Not zeroes: the affirmative REPLACES the step's data, so a crumb handed up after a
+        // failed fetch would write "0 decisions" over a week that really did decide things.
         #expect(PlanningRecapCrumb.decision(nil) == nil)
     }
 }
@@ -278,7 +241,6 @@ private func model(_ feed: RecapFeed) -> PlanningRecapModel {
     @Test func theDinnerLineNamesTheCookOnlyWhenThereIsOne() {
         #expect(PlanningRecapText.mealLine(meal: "Lentil soup", cook: "Lottie") == "Lentil soup · Lottie")
         #expect(PlanningRecapText.mealLine(meal: "Lentil soup", cook: nil) == "Lentil soup")
-        // A cook with no meal is nothing at all — never a bare name on the strip.
         #expect(PlanningRecapText.mealLine(meal: nil, cook: "Lottie") == nil)
         #expect(PlanningRecapText.mealLine(meal: "", cook: "Lottie") == nil)
     }
@@ -327,15 +289,12 @@ private func model(_ feed: RecapFeed) -> PlanningRecapModel {
         await model.load(sessionId: "s-1", weekStart: "2026-09-06")
 
         let dance = try #require(model.days[2].events.first)
-        // The row carries a `SyncedEvent` so the strip can go through the app's OWN
-        // `EventPalette` — the same resolver the month and week views use. Precomputed
-        // once per read rather than three allocations per frame.
+        // The row carries a `SyncedEvent` so the strip goes through the app's OWN
+        // `EventPalette`, precomputed once per read rather than three allocations per frame.
         #expect(dance.synced.personId == "p-lottie")
         #expect(dance.synced.colorHex == "#7A5AF8")
         #expect(dance.when == "Tuesday 6:00 PM")
 
-        // And the rule it feeds: an event whose people cover the household paints in the
-        // FAMILY colour, anybody else's in the owner's, an unowned one in neither.
         let palette = EventPalette(
             memberIds: ["p-kevin", "p-wally", "p-lottie"], familyHex: "#F97316", style: .tinted)
         let dateNight = try #require(model.days[5].events.first { $0.title == "Date night" })
@@ -356,8 +315,6 @@ private func model(_ feed: RecapFeed) -> PlanningRecapModel {
         #expect(model.loaded)
         #expect(model.days.count == 7)
         #expect(model.counts.decisions == 7)
-        // The previous read is still on screen, so the crumb still mirrors it rather than
-        // going nil and wiping the record.
         #expect(model.crumb != nil)
     }
 
@@ -383,12 +340,10 @@ private func model(_ feed: RecapFeed) -> PlanningRecapModel {
 
         model.keepParked("n-camps")
 
-        // THE QUIET ANSWER. The note stays open and turns up in next Sunday's step 1,
-        // which is the whole point of a last call rather than an inbox — so nothing may
-        // be written, not even a "seen" flag.
+        // THE QUIET ANSWER: the note stays open and turns up in next Sunday's step 1, so
+        // nothing may be written, not even a "seen" flag.
         #expect(feed.drops.isEmpty)
         #expect(model.openLastCall.isEmpty)
-        // …and the server's parked tally is untouched, because nothing changed.
         #expect(model.counts.parked == 2)
     }
 
@@ -399,13 +354,10 @@ private func model(_ feed: RecapFeed) -> PlanningRecapModel {
 
         await model.drop("n-camps", sessionId: "s-1")
 
-        // One writer for `planning_parked_items`, and it is step 1's — this step grows no
-        // second way to answer a note.
         #expect(feed.drops.count == 1)
         #expect(feed.drops[0].id == "n-camps")
         #expect(feed.drops[0].sessionId == "s-1")
         #expect(model.openLastCall.isEmpty)
-        // A read-only step: dropping a note must not re-read the recap.
         #expect(feed.fetchCount == 1)
     }
 
@@ -417,8 +369,6 @@ private func model(_ feed: RecapFeed) -> PlanningRecapModel {
 
         await model.drop("n-camps", sessionId: "s-1")
 
-        // Hiding a row whose write never landed would tell the family the note is handled
-        // when it is still sitting there.
         #expect(model.openLastCall.map(\.id) == ["n-camps"])
         #expect(model.errorMessage != nil)
         #expect(model.working == nil)
@@ -438,8 +388,6 @@ private func model(_ feed: RecapFeed) -> PlanningRecapModel {
         await model.load(sessionId: "s-1", weekStart: "2026-09-06")
 
         #expect(model.nothingDecided)
-        // Saving still records the week that was read back, so the crumb is real zeroes
-        // rather than nil — the read DID land.
         #expect(model.crumb == [
             "counts": .object(["decisions": .int(0), "deferred": .int(0), "parked": .int(0)]),
         ])
@@ -451,20 +399,15 @@ private func model(_ feed: RecapFeed) -> PlanningRecapModel {
 
         await model.load(sessionId: nil, weekStart: "2026-09-06")
 
-        // Without a session there is nothing decided, but the week strip still reads —
-        // which is what makes the step renderable before a session exists. The week goes
-        // through the shell's own gate rather than being computed here.
         #expect(feed.fetchArgs == [RecapFeed.Ask(sessionId: nil, weekStart: "2026-09-06")])
         #expect(model.days.count == 7)
     }
 }
 
 // MARK: - The tense
-//
-// The recap is rendered on two surfaces: step 10, inside a session about to be saved, and
-// the finished-week record, which may be read on Thursday. "What tonight changed" is
-// wrong on the second, and so is every sentence that promises what SAVING will do. The
-// week itself says which it is — `savedAt` — so the two clients cannot drift.
+// The recap is rendered on two surfaces: step 10, inside a session about to be saved, and the
+// finished-week record, which may be read on Thursday — so no sentence may promise what SAVING
+// will do. The week itself says which it is (`savedAt`), so the two clients cannot drift.
 @Suite struct PlanningRecapTenseTests {
 
     @Test func aWeekAboutToBeSavedReadsForward() {
@@ -475,13 +418,11 @@ private func model(_ feed: RecapFeed) -> PlanningRecapModel {
 
     @Test func aWeekAlreadySavedReadsBack() {
         #expect(PlanningRecapText.changedTitle(saved: true) == "What the session changed")
-        // Nothing in the saved copy may promise a future write: the write already happened.
         #expect(!PlanningRecapText.footNote(saved: true).contains("Saving"))
         #expect(PlanningRecapText.footNote(saved: true).contains("was saved"))
         #expect(PlanningRecapText.nothingDecidedDetail(saved: true).contains("was saved as it stood"))
     }
 
-    // Both sides of the rule, through the model, off the payload — not off a flag.
     @MainActor @Test func theWeekItselfDecidesTheTense() async throws {
         let feed = try RecapFeed()
         let live = model(feed)

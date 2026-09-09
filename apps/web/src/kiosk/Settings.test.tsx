@@ -66,7 +66,6 @@ describe('Settings screen', () => {
     expect(screen.getByText('Wally')).toBeInTheDocument()
     expect(screen.getByText(/Kid · age \d+ · managed by parents/)).toBeInTheDocument()
 
-    // household settings
     expect(screen.getByText('Household name')).toBeInTheDocument()
     expect(screen.getByText('Week starts on')).toBeInTheDocument()
   })
@@ -111,10 +110,8 @@ describe('Settings screen', () => {
     fireEvent.change(select, { target: { value: 'tinted' } })
     await waitFor(() => expect(patches).toContainEqual({ eventStyle: 'tinted' }))
 
-    // The family color is the same swatch picker, saved to the same endpoint —
-    // but dragging around the OS color picker fires an `input` per step, and
-    // each one used to be its own PATCH + refetch racing the others (with the
-    // controlled value snapping back mid-drag). Only the committed color saves.
+    // Only the COMMITTED colour saves: dragging the OS picker fires an `input` per step, and
+    // a PATCH per step races the others while the controlled value snaps back mid-drag.
     expect(screen.getByText('Family color')).toBeInTheDocument()
     const custom = screen.getByLabelText('Pick a custom color')
     const colorPatches = () => patches.filter((p) => 'familyColorHex' in p)
@@ -157,16 +154,13 @@ describe('Settings screen', () => {
     await screen.findByText('Kevin')
     fireEvent.click(screen.getByText('Display & Kiosk'))
 
-    // The new photo-playback controls render under the Screensaver subheading.
     expect(await screen.findByText('Photo source')).toBeInTheDocument()
     expect(screen.getByText('Transition speed')).toBeInTheDocument()
     expect(screen.getByText('Shuffle photos')).toBeInTheDocument()
 
-    // Favorites-only source → PUT carries photoSource: 'favorites'.
     fireEvent.click(screen.getByText('Favorites only'))
     await waitFor(() => expect(puts.some((p) => p.photoSource === 'favorites')).toBe(true))
 
-    // Transition speed select → PUT carries the new photoInterval.
     const speed = screen.getByDisplayValue('10 seconds') as HTMLSelectElement
     fireEvent.change(speed, { target: { value: '30' } })
     await waitFor(() => expect(puts.some((p) => p.photoInterval === 30)).toBe(true))
@@ -195,10 +189,8 @@ describe('Settings screen', () => {
     renderSettings()
     await screen.findByText('Kevin')
 
-    // The grid renders dynamically from CAPABILITIES — the new goal.manage column
-    // shows as a "Manage goals" header.
+    // The grid renders dynamically from CAPABILITIES.
     expect(await screen.findByText('Manage goals')).toBeInTheDocument()
-    // Toggling Teen's Manage goals checkbox PUTs the matrix with it flipped on.
     fireEvent.click(screen.getByRole('checkbox', { name: 'Teen: Manage goals' }))
     await waitFor(() => expect(puts.some((m) => m.teen['goal.manage'] === true)).toBe(true))
   })
@@ -224,19 +216,16 @@ describe('Settings screen', () => {
     await screen.findByText('Kevin')
     fireEvent.click(screen.getByText('Calendars'))
 
-    // Sleeps pill flips → PUT { sleeps: true }.
     fireEvent.click(await screen.findByText(/Count in .sleeps. instead of .days./))
     await waitFor(() => expect(puts.some((p) => p.sleeps === true)).toBe(true))
 
-    // Birthday-horizon select → PUT { birthdayHorizonDays: <choice> }.
     const horizon = screen.getByLabelText('Show birthdays within') as HTMLSelectElement
     fireEvent.change(horizon, { target: { value: '92' } })
     await waitFor(() => expect(puts.some((p) => p.birthdayHorizonDays === 92)).toBe(true))
   })
 
-  // "I'd rather choose what lists are relevant versus not." The switches are per LIST,
-  // and which lists are even offered is the server's call — this panel renders what it is
-  // given rather than reaching into the lists module and re-deriving the allowlist.
+  // Which lists are even offered is the server's call — this panel renders what it is given
+  // rather than re-deriving the allowlist from the lists module.
   it('lets an admin choose which lists the planning session asks about', async () => {
     const puts: Array<Record<string, unknown>> = []
     const config = { dayOfWeek: 0, time: '17:00', steps: {}, showOnToday: true, lists: {} as Record<string, boolean> }
@@ -274,8 +263,7 @@ describe('Settings screen', () => {
     await screen.findByText('Kevin')
     fireEvent.click(screen.getByText('Modules'))
 
-    // A switch per list the step could ask about, named — with the list's own emoji, so
-    // the row reads like the list does everywhere else.
+    // A switch per list, with the list's own emoji so the row reads like the list does elsewhere.
     expect(await screen.findByText(/🔧 Repairs/)).toBeTruthy()
     expect(screen.getByText(/💭 Someday/)).toBeTruthy()
 
@@ -316,14 +304,12 @@ describe('Settings screen', () => {
     expect(screen.getByText(/Build abc123/)).toBeInTheDocument()
     expect(screen.getByText(/DEGRADED/)).toBeInTheDocument()
 
-    // Live Sync is about THIS browser, not the server — with no engine running
-    // it must say so plainly rather than looking like a server component.
+    // Live Sync is about THIS browser, not the server, and must say so plainly.
     expect(screen.getByText('Live Sync (this browser)')).toBeInTheDocument()
     expect(screen.getByText(/state: off/)).toBeInTheDocument()
   })
 
-  // Boot takes seconds and a boot crash was silent — both used to read as "off",
-  // which is what made people think sync had been switched off.
+  // Boot takes seconds and a boot crash is silent — neither may read as "off".
   it('distinguishes starting and failed from off on the Live Sync card', async () => {
     globalThis.fetch = vi.fn(async (url: string) => {
       const u = String(url)
@@ -338,8 +324,7 @@ describe('Settings screen', () => {
     await screen.findByText('Kevin')
     fireEvent.click(screen.getByText('System Health'))
 
-    // The server report failed to load — the browser's own sync state is exactly
-    // what you want to read at that moment, so the card still renders.
+    // The server report failed to load; the browser's own sync state is what you want then.
     expect(await screen.findByText('Live Sync (this browser)')).toBeInTheDocument()
 
     const base = { hasSynced: null, lastSyncedAt: null, restartCount: 0, lastRestartAt: null }
@@ -349,15 +334,13 @@ describe('Settings screen', () => {
     act(() => publishSyncHealth({ status: 'failed', ...base, lastError: 'OPFS unavailable' }))
     expect(screen.getByText(/state: failed/)).toBeInTheDocument()
     expect(screen.getByText(/OPFS unavailable/)).toBeInTheDocument()
-    // A boot crash the watchdog can't fix by rebuilding is usually a corrupt local
-    // copy — and the watchdog deliberately never wipes on the failed path, so the
-    // manual rung has to be reachable here too, not only from 'stalled'.
+    // A boot crash the watchdog can't fix by rebuilding is usually a corrupt local copy, and
+    // the watchdog never wipes on the failed path — so the manual rung must be reachable here.
     expect(screen.getByText(/Reset local copy/)).toBeInTheDocument()
 
     act(() => publishSyncHealth({ status: 'stalled', hasSynced: true, lastSyncedAt: 1, restartCount: 3, lastRestartAt: 2 }))
     expect(screen.getByText(/state: stalled/)).toBeInTheDocument()
     expect(screen.getByText(/watchdog restarts: 3/)).toBeInTheDocument()
-    // The replica-wiping rung is only offered once the engine is genuinely wedged.
     expect(screen.getByText(/Reset local copy/)).toBeInTheDocument()
   })
 
@@ -381,7 +364,6 @@ describe('Settings screen', () => {
   })
 
   it('hides admin-only tabs from non-admins (Appearance + About + Sign out)', async () => {
-    // Same data, but the signed-in person is not an admin.
     globalThis.fetch = vi.fn(async (url: string) => {
       if (String(url).includes('/api/household/settings')) return { ok: true, json: async () => ({ household, members }) }
       if (String(url).includes('/api/household')) return { ok: true, json: async () => ({ provisioned: true, household, person: members[1] }) } // Wally, not admin
@@ -432,24 +414,19 @@ describe('Settings screen', () => {
     await screen.findByText('Kevin')
     fireEvent.click(screen.getByText('Meals')) // nav item
 
-    // The merged card + thaw subsection render with Title-Cased headers.
     expect(await screen.findByText('Meal Times & Reminders')).toBeInTheDocument()
     expect(screen.getByText('Thaw Reminder')).toBeInTheDocument()
     expect(screen.getByText('For Which Meals')).toBeInTheDocument()
 
-    // Off by default → the Dinner meal-type chip is disabled.
     expect(screen.getByRole('button', { name: /Dinner/ })).toBeDisabled()
 
-    // Flip the "Remind me to thaw" toggle on.
     const toggle = within(screen.getByText('Remind me to thaw').closest('.set-row2')!).getByRole('checkbox')
     expect(toggle).not.toBeChecked()
     fireEvent.click(toggle)
 
-    // The chips (and time) become enabled once the reminder is on.
     await waitFor(() => expect(screen.getByRole('button', { name: /Dinner/ })).not.toBeDisabled())
     expect(toggle).toBeChecked()
 
-    // Debounced auto-save persists prepReminder: true.
     await waitFor(() => expect(putBodies.some((b) => b.prepReminder === true)).toBe(true), { timeout: 2000 })
   })
 
@@ -482,7 +459,6 @@ describe('Settings screen', () => {
     await screen.findByText('Kevin')
     fireEvent.click(screen.getByText('Calendars'))
 
-    // Both providers are offered side by side.
     expect(await screen.findByText('Connect Google Calendar')).toBeInTheDocument()
     fireEvent.click(screen.getByText('Connect Outlook Calendar'))
     await waitFor(() => expect(connects.length).toBe(1))
@@ -527,12 +503,10 @@ describe('Settings screen', () => {
     await screen.findByText('Kevin')
     fireEvent.click(screen.getByText('Calendars'))
 
-    // Feeds render even though neither OAuth provider is configured — that
-    // independence is the point of the feature.
+    // Feeds render even though neither OAuth provider is configured — that independence is the point.
     expect(await screen.findByText('School')).toBeInTheDocument()
     expect(screen.getByText(/No calendar provider is configured/)).toBeInTheDocument()
 
-    // Add is disabled until the URL looks like a feed, then POSTs it.
     const addBtn = screen.getByText('Add feed')
     expect(addBtn).toBeDisabled()
     fireEvent.change(screen.getByLabelText('Feed URL'), { target: { value: 'webcal://team.example/games.ics' } })

@@ -20,23 +20,13 @@ function ymd(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-// Full-screen "Plan my week": guardrails on the left, the drafted week on the
-// right. Drafts via the household's chosen LLM; reshuffle/swap re-draft (keeping
-// locked nights); "Add week" applies every card via the normal plan endpoint.
+// Full-screen "Plan my week": guardrails on the left, the drafted week on the right.
 //
-// THREE OPTIONAL PROPS EXIST ONLY SO A CALLER CAN NARROW IT, and every default is
-// exactly what the Meals screen already had. They are what let Weekly Planning's
-// Meals step reuse this whole screen instead of growing a second, worse planner:
-//
-//   `mealTypes`  — which meals may be planned (default: all three). One entry hides
-//                  the segment entirely, because a choice of one isn't a choice.
-//   `initialDays`— the dates selected on open (default: Mon–Fri of `days`). The
-//                  planning step passes its EMPTY nights, so "fill only the empties"
-//                  is what the day chips themselves say.
-//   `onApply`    — takes over the write. Given one, this screen stops calling
-//                  /api/meals/plan + rebuildGrocery and hands the approved cards to
-//                  the caller, which is the only way a caller can own what was
-//                  written (the planning step needs the receipt its undo checks).
+// THE THREE OPTIONAL PROPS EXIST ONLY SO A CALLER CAN NARROW IT, which is what lets Weekly
+// Planning's Meals step reuse this screen instead of growing a second, worse planner. Every default
+// is what the Meals screen already had: `mealTypes` (one entry hides the segment), `initialDays`
+// (the planning step passes its EMPTY nights), and `onApply`, which takes over the write — given
+// it, this screen stops calling /api/meals/plan + rebuildGrocery.
 export function PlanWeek({ startStr, days, onClose, onApplied, initialUseUp, mealTypes, initialDays, onApply }: {
   startStr: string
   days: Date[]
@@ -64,15 +54,13 @@ export function PlanWeek({ startStr, days, onClose, onApplied, initialUseUp, mea
   const [useUp, setUseUp] = useState<string[]>(initialUseUp ?? [])
   const [useUpInput, setUseUpInput] = useState('')
   const [keepInMind, setKeepInMind] = useState('')
-  // "Try New Recipe" steering: a novelty toggle + a list of specific dishes to try.
   const [trySomethingNew, setTrySomethingNew] = useState(false)
   const [wantToTry, setWantToTry] = useState<string[]>([])
   const [wantToTryInput, setWantToTryInput] = useState('')
 
   const [cards, setCards] = useState<PlanCard[]>([])
   const [locked, setLocked] = useState<Set<string>>(new Set())
-  // Dishes the user has shuffled away from — accumulated so they don't come back
-  // on later reshuffles (until the week is applied / the planner closes).
+  // Dishes the user has shuffled away from, so they don't come back on later reshuffles.
   const rejected = useRef<Set<string>>(new Set())
   const { recipes } = useRecipes()
   const [viewRecipeId, setViewRecipeId] = useState<string | null>(null) // RecipeModal (preserves plan state)
@@ -141,7 +129,6 @@ export function PlanWeek({ startStr, days, onClose, onApplied, initialUseUp, mea
 
   function reshuffle() {
     const dates = [...selectedDays].filter((d) => !locked.has(d)).sort()
-    // Reject the dishes currently on those nights so they don't reappear.
     for (const c of cards) if (dates.includes(c.date)) rejected.current.add(c.title)
     const lockedTitles = cards.filter((c) => locked.has(c.date)).map((c) => c.title)
     void draft(dates, [...rejected.current, ...lockedTitles])
@@ -151,7 +138,6 @@ export function PlanWeek({ startStr, days, onClose, onApplied, initialUseUp, mea
     const others = cards.filter((c) => c.date !== card.date).map((c) => c.title)
     void draft([card.date], [...rejected.current, ...others])
   }
-  // Manually replace one night with a chosen library recipe.
   function pickRecipe(date: string, r: Recipe) {
     const old = cards.find((c) => c.date === date)
     if (old) rejected.current.add(old.title)
@@ -196,19 +182,15 @@ export function PlanWeek({ startStr, days, onClose, onApplied, initialUseUp, mea
   async function applyAll() {
     setApplying(true)
     try {
-      // A caller that passed `onApply` owns BOTH halves of the write — the slots and
-      // the grocery rebuild — because it may have to write them somewhere this
-      // screen can't see (the planning step posts them to its own fill endpoint so
-      // the nights come back marked and undoable).
+      // A caller that passed `onApply` owns BOTH halves of the write, because it may write them
+      // somewhere this screen can't see.
       if (onApply) {
         await onApply(shown)
       } else {
         for (const c of shown) {
           await api.planSlot(c.recipeId ? { date: c.date, mealType: c.mealType, recipeId: c.recipeId } : { date: c.date, mealType: c.mealType, title: c.title })
         }
-        // "& build list": rebuild the grocery from the new week's dinners so items
-        // are linked to the planned recipes (otherwise the By-meal view stays empty
-        // / shows stale items from a previous plan).
+        // "& build list": rebuild the grocery so items are linked to the planned recipes.
         await api.rebuildGrocery(startStr).catch(() => {})
       }
       onApplied()
@@ -226,12 +208,10 @@ export function PlanWeek({ startStr, days, onClose, onApplied, initialUseUp, mea
 
   return (
     <div className="plan-screen">
-      {/* Left: the guardrails (headed by the screen title, per the mock) */}
       <div className="plan-config">
         <div className="plan-title wf-serif">Plan my week</div>
         <div className="tiny muted plan-sub">Tell Waffled the guardrails — it drafts the meals and the grocery list in one go.</div>
-        {/* A single allowed meal is not a choice — the segment goes away rather than
-            sitting there as one permanently-selected button. */}
+        {/* A single allowed meal is not a choice — the segment goes away entirely. */}
         {types.length > 1 && (
           <>
             <div className="flabel">Plan which meal?</div>
@@ -291,7 +271,6 @@ export function PlanWeek({ startStr, days, onClose, onApplied, initialUseUp, mea
           <textarea className="plan-keep" rows={2} placeholder="e.g. Lottie skips spicy · Tue & Thu are busy — keep under 30 min" value={keepInMind} onChange={(e) => setKeepInMind(e.target.value)} />
         </div>
 
-        {/* "Try New Recipe": nudge the plan toward novelty + list specific dishes to try. */}
         <div className="plan-card">
           <label
             style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontWeight: 700 }}
@@ -323,7 +302,6 @@ export function PlanWeek({ startStr, days, onClose, onApplied, initialUseUp, mea
         </div>
       </div>
 
-      {/* Right: the drafted week */}
       <div className="plan-results">
         <div className="plan-results-head">
           <div className="card-h wf-serif">Here’s your week</div>
@@ -335,7 +313,6 @@ export function PlanWeek({ startStr, days, onClose, onApplied, initialUseUp, mea
         </div>
         {via && VIA_LABEL[via] && cards.length > 0 && <div className="tiny muted" style={{ margin: '-4px 2px 12px' }}>Drafted via {VIA_LABEL[via]}</div>}
 
-        {/* Before drafting: configure on the left, then kick it off here. */}
         {!started && (
           <div className="plan-empty">
             <div className="plan-empty-emoji">🍽️</div>
@@ -425,9 +402,8 @@ export function PlanWeek({ startStr, days, onClose, onApplied, initialUseUp, mea
 
       {viewRecipeId && <RecipeModal recipeId={viewRecipeId} onClose={() => setViewRecipeId(null)} />}
 
-      {/* A suggested dish that isn't in the library has no ingredients/steps to show,
-          so tapping it explains that (rather than dumping you into the picker) and
-          offers a web search or a swap to one of your own recipes. */}
+      {/* A suggested dish that isn't in the library has nothing to show, so tapping it explains
+          that and offers a web search or a swap to one of your own. */}
       {newInfo && (
         <div className="modal-overlay" onClick={() => setNewInfo(null)}>
           <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 400, textAlign: 'center', padding: 28 }}>
@@ -455,8 +431,7 @@ export function PlanWeek({ startStr, days, onClose, onApplied, initialUseUp, mea
         </div>
       )}
 
-      {/* Manual swap: reuse the full recipe browser (filters + grid + View) in an
-          overlay so the plan state stays intact behind it. */}
+      {/* Manual swap reuses the full recipe browser in an overlay so plan state stays intact. */}
       {pickForDate && (
         <div className="plan-pick-overlay">
           <div className="plan-pick-head">

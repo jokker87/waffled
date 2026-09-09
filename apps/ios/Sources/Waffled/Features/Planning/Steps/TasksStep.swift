@@ -1,19 +1,14 @@
 import SwiftUI
 
-/// Weekly Planning · step 8 "Tasks" — "Who's doing what?"
+/// Weekly Planning · step 8 "Tasks" — "Who's doing what?" Per-person columns, an
+/// up-for-grabs strip, and the app's own `ChoreEditSheet` (`canDelete: false`). See
+/// docs/product/weekly-planning-plan.md.
 ///
-/// Per-person columns, an up-for-grabs strip, and the app's own `ChoreEditSheet` for both
-/// adding and editing (`canDelete: false` — this step asks who does what, not which chores
-/// should exist). Ported from `planning/steps/TasksStep.tsx`; rationale, and why every move
-/// is reversible, in docs/product/weekly-planning-plan.md.
-///
-/// THREE CONSTRAINTS THAT LOOK ARBITRARY AND ARE NOT:
-///  * **Never a `List`.** `List` silently refuses `.dropDestination`, so the drop targets
-///    would be dead with no error anywhere.
-///  * **The drag payload is `PlanningTaskDrag`, never a `String`** — a string id is offered
-///    to every text field in the app and gets pasted in as text.
-///  * **No `ScrollView` and no horizontal padding here.** The shell owns both and already
-///    insets every step by 16; a second 16 drew these columns 32pt narrower than Calendar's.
+/// THREE CONSTRAINTS THAT LOOK ARBITRARY AND ARE NOT: never a `List` (it silently refuses
+/// `.dropDestination`); the drag payload is `PlanningTaskDrag`, never a `String` (a
+/// string id gets pasted into every text field in the app); and no `ScrollView` or
+/// horizontal padding here, because the shell owns both and already insets every step by
+/// 16.
 struct TasksStepView: View {
     let props: PlanningStepProps
 
@@ -23,7 +18,6 @@ struct TasksStepView: View {
     /// Moving a task between people is `chore.manage` — the server enforces it, and the
     /// Chores board hides its own drag grip the same way. Don't offer a tap that 403s.
     private var canAssign: Bool { sync.can("chore.manage") }
-    /// A write is in flight somewhere — the shell's or ours.
     private var frozen: Bool { props.busy || model.savingChoreId != nil }
 
     /// The column a drag is hovering, for the highlight ring. Nil the rest of the time.
@@ -34,9 +28,8 @@ struct TasksStepView: View {
     ///
     /// DELIBERATELY NOT USED TO GATE THE GRIP. `frozen` flips the moment a hand-out
     /// starts, so gating the grip on it would delete the drag source out from under the
-    /// finger holding it — including the very drag that started the write. The Chores
-    /// board gates its own grip on the permission alone for the same reason. A grip whose
-    /// drop lands nowhere is far better than one that vanishes mid-gesture.
+    /// finger holding it. The Chores board gates its grip on the permission alone for the
+    /// same reason.
     private var canDrop: Bool { canAssign && !frozen }
 
     var body: some View {
@@ -63,7 +56,7 @@ struct TasksStepView: View {
         .task { await sync.loadCurrencies() }
         // Both halves of the crumb: `rev` covers "what's still up for grabs" (it comes
         // off the board), `assigned` covers the tally, which a write can move even when
-        // the re-read afterwards doesn't land.
+        // the re-read doesn't.
         .onChange(of: model.rev) { props.setDecisionData(model.crumb) }
         .onChange(of: model.assigned) { props.setDecisionData(model.crumb) }
         .onAppear {
@@ -113,8 +106,8 @@ struct TasksStepView: View {
                 choreCard(chore, owner: nil, board: board)
             }
 
-            // The strip's own tile — a task nobody owns yet, which is not the same thing
-            // as adding one to a person's column.
+            // The strip's own tile — a task nobody owns yet, which is not the same as
+            // adding one to a person's column.
             addButton("Add a task") { model.openAdd(personId: nil) }
         }
         .padding(14)
@@ -125,7 +118,7 @@ struct TasksStepView: View {
         .clipShape(RoundedRectangle(cornerRadius: WF.rLG, style: .continuous))
         .wfShadow1()
         // The strip is a drop target too, which is what makes a hand-out reversible by
-        // drag as well as by tap (web parity).
+        // drag.
         .planningTaskDropTarget(.upForGrabs, enabled: canDrop, hovered: $dropTarget, onDrop: drop)
     }
 
@@ -156,7 +149,6 @@ struct TasksStepView: View {
 
                 addButton("Add for \(person.name)") { model.openAdd(personId: person.id) }
 
-                // What they already carry — the fairness read, stated rather than scored.
                 Text(model.carries[person.id] ?? "")
                     .font(.system(size: 11.5, weight: .semibold)).foregroundStyle(WF.ink3)
             }
@@ -169,28 +161,22 @@ struct TasksStepView: View {
 
     // MARK: - One card
     //
-    // FIVE regions that must never be mistaken for each other, and they are SIBLINGS,
-    // not nested — so no tap has to be stopped from reaching a parent and no region can
-    // swallow another's:
-    //   the grip          drags the card onto a person (or the strip)
-    //   the title block   opens the app's own chore editor
-    //   the day chip      opens the SAME editor (one card, one editor, so a title change
-    //                     and a day change can't race each other on the same chore)
-    //   the faces         hand it over / take it back
-    //   the reward badge  says what it's worth, and is not a control
+    // FIVE regions that must never be mistaken for each other, and they are SIBLINGS, not
+    // nested, so no tap has to be stopped from reaching a parent:
+    //   the grip / the title block / the day chip / the faces / the reward badge (not a control).
+    // The title block and the day chip open the SAME editor, so a title change and a day
+    // change can't race each other on the same chore.
     //
     // THE GRIP IS WHY THE CARD ITSELF ISN'T `.draggable`. Three of those regions are
-    // Buttons; a drag on the card would have to win the gesture from each of them, which
-    // means demoting every one to `.onTapGesture` and hoping the arbitration goes our way
-    // (RecipeEditorView's ingredient rows already learned this against TextFields). A
-    // grip owns one small rectangle and takes nothing away from the taps beside it.
+    // Buttons; a drag on the card would have to win the gesture from each of them. A grip
+    // owns one small rectangle and takes nothing away from the taps beside it.
 
     @ViewBuilder
     private func choreCard(_ chore: WaffledAPI.PlanningTasksChore, owner: String?,
                            board: WaffledAPI.PlanningTasksBoard) -> some View {
         let unset = model.dayUnset[chore.id] ?? false
         // Unset AND settable reads as an invitation; unset with nothing you can do about
-        // it stays the calm statement of fact it was.
+        // it stays a statement of fact.
         let settable = canAssign && (model.daySettable[chore.id] ?? false)
         let chipText = unset && settable ? "Set a day" : (model.dayChip[chore.id] ?? "")
 
@@ -199,10 +185,9 @@ struct TasksStepView: View {
                 // The PERMISSION only — never `frozen`. See `canDrop`.
                 if canAssign { grip(chore) }
                 if canAssign {
-                    // Editing a chore is PATCH /api/chores/:id, which the chores module
-                    // gates on chore.manage — the same rule the board applies when it
-                    // decides whether a card opens the editor. No looser rule here: a
-                    // sheet that 403s on Save is worse than no sheet.
+                    // Editing a chore is PATCH /api/chores/:id, gated on chore.manage —
+                    // the same rule the board applies. No looser rule here: a sheet that
+                    // 403s on Save is worse than no sheet.
                     Button { model.openEdit(chore, owner: owner) } label: {
                         titleBlock(chore)
                     }
@@ -236,7 +221,7 @@ struct TasksStepView: View {
             if canAssign, !board.people.isEmpty {
                 ChipFlow(spacing: 8, lineSpacing: 8) {
                     // 🙌 is the undo: put it back where anybody can take it. Only on a
-                    // card somebody is holding — the strip is already up for grabs.
+                    // card somebody is holding.
                     if owner != nil {
                         Button { give(chore, to: nil) } label: {
                             Text("🙌").font(.system(size: 17))
@@ -266,11 +251,11 @@ struct TasksStepView: View {
     }
 
     /// The drag handle. Same glyph the recipe editor's ingredient rows use, so "this is
-    /// the bit you grab" reads the same wherever the app offers a drag.
+    /// the bit you grab" reads the same everywhere.
     ///
     /// HIDDEN FROM VOICEOVER ON PURPOSE. A drag isn't a gesture VoiceOver can perform, so
-    /// a labelled grip would be a dead end; the faces below the card are the accessible
-    /// way to hand a task over, and they do exactly the same thing.
+    /// a labelled grip would be a dead end; the faces below the card do exactly the same
+    /// thing.
     private func grip(_ chore: WaffledAPI.PlanningTasksChore) -> some View {
         Image(systemName: "line.3.horizontal")
             .font(.system(size: 13, weight: .bold)).foregroundStyle(WF.ink3)
@@ -280,7 +265,7 @@ struct TasksStepView: View {
     }
 
     /// The floating ghost under the finger — the Chores board's own drag preview, because
-    /// this is the same act on the same data and it should look like it.
+    /// this is the same act on the same data.
     private func dragPreview(_ chore: WaffledAPI.PlanningTasksChore) -> some View {
         HStack(spacing: 6) {
             Text(chore.emoji ?? "🧹").font(.system(size: 14))
@@ -332,16 +317,15 @@ struct TasksStepView: View {
         .disabled(props.busy)
     }
 
-    /// "3", not "3.0" — the amount is a `Double` on the wire but a whole number of stars
-    /// in every household anybody has.
+    /// "3", not "3.0" — the amount is a `Double` on the wire but a whole number of stars.
     private func rewardText(_ amount: Double) -> String {
         amount == amount.rounded() ? String(Int(amount)) : String(format: "%.1f", amount)
     }
 
     // MARK: - The app's own chore editor
 
-    /// `.sheet(item:)` hands nil back on dismissal — which fires for a cancel and a save
-    /// alike — so the model decides what that meant and reports the handoff honestly.
+    /// `.sheet(item:)` hands nil back on dismissal — for a cancel and a save alike — so
+    /// the model decides what that meant and reports the handoff honestly.
     private var composerBinding: Binding<PlanningTasksModel.Composer?> {
         Binding(
             get: { model.composer },
@@ -354,9 +338,9 @@ struct TasksStepView: View {
     @ViewBuilder
     private func editor(_ composer: PlanningTasksModel.Composer) -> some View {
         // Snapshot the sync-derived inputs HERE (read `sync` once) instead of letting the
-        // sheet observe SyncManager — observing it re-lays-out the whole sheet on every
-        // unrelated sync mutation, which is what hung the Chores board's editor.
-        // Managers can assign to anyone; everyone else only to themselves (web parity).
+        // sheet observe SyncManager, which re-lays-out the whole sheet on every unrelated
+        // sync mutation. Managers can assign to anyone; everyone else only to themselves
+        // (web parity).
         let assignable = canAssign ? sync.members : sync.members.filter { $0.id == sync.currentPersonId }
 
         switch composer {
@@ -365,11 +349,9 @@ struct TasksStepView: View {
                 assignableMembers: assignable,
                 currencies: sync.currencies,
                 target: .new(personId: personId),
-                // This step asks who does what, not which chores should exist — see the
-                // Planning a week is mostly one-offs ("book the sitter", "return the
-                // books"), and the editor already defaults a new chore to "Just once" —
-                // dated to the day the SERVER picked for this session rather than to
-                // whatever day this phone thinks it is.
+                // Planning a week is mostly one-offs, and the editor already defaults a
+                // new chore to "Just once" — dated to the day the SERVER picked for this
+                // session rather than to whatever day this phone thinks it is.
                 initialDate: DateFmt.date(model.newTaskDay ?? "", "yyyy-MM-dd", .current) ?? Date(),
                 // The parked note's own words, so nobody retypes what they already wrote.
                 prefillTitle: note,
@@ -386,18 +368,17 @@ struct TasksStepView: View {
                     currencies: sync.currencies,
                     target: .edit(instance),
                     initialDate: DateFmt.date(chore.dueOn ?? model.newTaskDay ?? "", "yyyy-MM-dd", .current) ?? Date(),
-                    // Web parity: this step asks who does what, not which chores should
-                    // exist. Deleting one reaches far outside the week being planned, and
-                    // the Meals step's shopping trip is a real chore on this very board
-                    // whose identity other steps resolve by id. With the button gone,
+                    // This step asks who does what, not which chores should exist:
+                    // deleting one reaches far outside the week being planned, and the
+                    // Meals step's shopping trip is a real chore on this board whose
+                    // identity other steps resolve by id. With the button gone,
                     // `onDelete` below is unreachable — kept only to satisfy the
                     // initialiser.
                     canDelete: false,
                     onSave: { choreId, body in await model.saveFromComposer(choreId: choreId, body: body) },
-                    // Main's editor now reports a failure back through onDelete, so the
-                    // signature is (id, body) async -> String?. Unreachable either way
-                    // (canDelete: false above removes the button); kept honest rather than
-                    // silently deleting from a step that does not offer it.
+                    // Unreachable (canDelete: false removes the button), but the
+                    // signature stays honest rather than silently deleting from a step
+                    // that does not offer it.
                     onDelete: { _, _ in "Deleting isn’t part of planning a week." })
             }
         }
@@ -424,8 +405,8 @@ struct TasksStepView: View {
     private func reload() {
         Task {
             await model.load(weekStart: props.weekStart)
-            // Chores changed under every other screen too — the tab badge, Today's
-            // "Needs your OK", the kiosk board.
+            // Chores changed under every other screen too — the tab badge, Today's "Needs
+            // your OK", the kiosk board.
             sync.bumpChores()
             props.refresh()
         }
@@ -436,19 +417,15 @@ struct TasksStepView: View {
 
 private extension View {
     /// Make this surface accept a dragged task card, with the highlight ring that says
-    /// so. Used by the up-for-grabs strip and by every person's block, so the two
-    /// directions of a hand-out are the same piece of code — a drag can never do
-    /// something the drag back can't undo.
+    /// so. Used by the up-for-grabs strip and by every person's block, so a drag can
+    /// never do something the drag back can't undo.
     ///
     /// `enabled: false` attaches NO drop destination at all, rather than one that refuses
-    /// on arrival: a ring that lights up for a drop that can't land is worse than no ring.
+    /// on arrival. Attach it AFTER the surface's own background/clipShape/shadow —
+    /// modifier order is load-bearing for drag and drop (see `MealPlanReviewCard`).
     ///
-    /// Attached AFTER the surface's own background/clipShape/shadow — modifier order is
-    /// load-bearing for drag and drop (see `MealPlanReviewCard`).
-    ///
-    /// This works ONLY because the step body is NOT a `List` — it is plain content inside
-    /// the shell's own `ScrollView`. `List` silently drops `.dropDestination` with no
-    /// error anywhere, so do not restructure the step into one.
+    /// This works ONLY because the step body is NOT a `List`, which silently drops
+    /// `.dropDestination` with no error anywhere. Do not restructure the step into one.
     @ViewBuilder
     func planningTaskDropTarget(_ column: PlanningTaskColumn, enabled: Bool,
                                 hovered: Binding<PlanningTaskColumn?>,
@@ -461,8 +438,8 @@ private extension View {
                 guard let dragged = items.first else { return false }
                 onDrop(dragged.choreId, column)
                 // TRUE even when the model resolves the drop to nothing (a card dropped
-                // where it already sat). It WAS a valid target; returning false fires the
-                // snap-back animation, which reads as a rejection of a harmless gesture.
+                // where it already sat): returning false fires the snap-back animation,
+                // which reads as a rejection.
                 return true
             } isTargeted: { over in
                 withAnimation(.easeInOut(duration: 0.12)) {

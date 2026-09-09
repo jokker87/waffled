@@ -1,11 +1,10 @@
-// Weekly Planning · step 1 "Loose ends" — the read over four modules, the ROUTING that
-// is the step's whole job, and the two answers allowed to write. Real Postgres.
+// Weekly Planning · step 1 "Loose ends" — the read over four modules, the ROUTING that is
+// the step's whole job, and the two answers allowed to write. Real Postgres.
 //
-// The load-bearing assertions: an overdue chore is STILL overdue after being routed,
-// and the decision lands on the SESSION (`planning_session_steps.data.routes`) where
-// every later step reads it. "Not done" is computed and stored nowhere; "Parked" is the
-// one group with a table and the only one where Drop is a real answer; a source module
-// that is off contributes nothing, on the read AND the write.
+// The load-bearing assertions: an overdue chore is STILL overdue after being routed, and
+// the decision lands on the SESSION (`planning_session_steps.data.routes`) where every
+// later step reads it. A source module that is off contributes nothing, on the read AND
+// the write.
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest'
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from './helpers/pg'
 import jwt from 'jsonwebtoken'
@@ -51,7 +50,6 @@ interface LooseEnd {
   title: string
   detail: string | null
   actions: string[]
-  // Who it already belongs to, when anything does.
   owner?: { id: string; name: string; colorHex: string | null; avatarEmoji: string | null } | null
 }
 interface Destination { to: string; label: string; hint: string; primary?: boolean }
@@ -64,7 +62,6 @@ interface LooseEndsPayload {
   destinations: { notDone: Destination[]; parked: Destination[] }
   routes: Route[]
   sources: string[]
-  // The lists this step could ask about, with how each currently stands.
   lists?: { id: string; name: string; emoji: string | null; relevant: boolean }[]
 }
 
@@ -83,7 +80,6 @@ const addDays = (iso: string, n: number) => {
 
 const setModules = (mods: Record<string, boolean>) => call('PATCH', '/api/household/modules', kevin, mods)
 
-// The session every routing test writes its decisions onto.
 let sessionId: string
 
 beforeAll(async () => {
@@ -117,17 +113,15 @@ afterAll(async () => {
   await pg?.stop()
 })
 
-// The household's CURRENT week start — the anchor the list read uses, and what the
-// view calls minWeekStart. Not the planned week (that one is always >= today, so
-// comparing anything against it filters nothing).
+// The household's CURRENT week start — the anchor the list read uses. Not the planned
+// week (always >= today, so comparing anything against it filters nothing).
 async function currentWeekStart(): Promise<string> {
   return json(await call('GET', '/api/weekly-planning', kevin)).minWeekStart as string
 }
 async function plannedWeekStart(): Promise<string> {
   return json(await call('GET', '/api/weekly-planning', kevin)).defaultWeekStart as string
 }
-// The routes as the SHELL serves them to every other step — the actual cross-step
-// contract, not our own endpoint's convenience copy.
+// The routes as the SHELL serves them — the actual cross-step contract, not our own copy.
 async function routesFromSessionView(): Promise<Route[]> {
   const view = json(await call('GET', '/api/weekly-planning', kevin))
   const step = view.steps.find((s: { key: string }) => s.key === 'looseEnds')
@@ -150,7 +144,6 @@ describe('loose ends · the module gate', () => {
     expect(p.notDone).toEqual([])
     expect(p.parked).toEqual([])
     expect(p.counts).toEqual({ notDone: 0, parked: 0 })
-    // The week it is about comes from the server, snapped and floored like everywhere else.
     expect(p.weekStart).toMatch(/^\d{4}-\d{2}-\d{2}$/)
   })
 })
@@ -160,7 +153,6 @@ describe('loose ends · where a card can send things', () => {
   it('offers the four triage destinations for "not done" and the two verbs for "parked"', async () => {
     const p = await read()
     expect(p.destinations.notDone.map((d) => d.to)).toEqual(['tasks', 'calendar', 'kids', 'goals'])
-    // The reason under the name is part of the decision, so it is server-owned too.
     expect(p.destinations.notDone[0]).toMatchObject({ to: 'tasks', label: 'Tasks', primary: true })
     expect(p.destinations.notDone[0].hint).toMatch(/owner and a day/i)
     expect(p.destinations.parked.map((d) => d.to)).toEqual(['tasks', 'calendar'])
@@ -170,11 +162,10 @@ describe('loose ends · where a card can send things', () => {
   it('drops a destination whose step this household is not running', async () => {
     await setModules({ chores: false })
     let p = await read()
-    // `tasks` requires chores, so routing there would send things into a step the
-    // session skips over.
+    // `tasks` requires chores, so routing there would send things into a step the session
+    // skips.
     expect(p.destinations.notDone.map((d) => d.to)).not.toContain('tasks')
     expect(p.destinations.parked.map((d) => d.to)).toEqual(['calendar'])
-    // …and the "we checked" line stops claiming a module that is off.
     expect(p.sources).not.toContain('chores')
 
     await call('PUT', '/api/weekly-planning/config', kevin, { steps: { kids: false } })
@@ -213,7 +204,6 @@ describe('loose ends · overdue chores', () => {
     expect(item!.kind).toBe('chore')
     expect(item!.title).toBe('Take the bins out')
     expect(item!.detail).toMatch(/late|overdue|days/i)
-    // The only WRITING answer a chore can take here. Everything else is a route.
     expect(item!.actions).toEqual(['done'])
   })
 
@@ -238,11 +228,9 @@ describe('loose ends · overdue chores', () => {
     const res = await route({ sessionId, kind: 'chore', id: overdueId, title: 'Take the bins out', source: 'notDone', to: 'tasks' })
     expect(res.statusCode).toBe(200)
 
-    // Still overdue, still pending, still assigned to whoever had it. Nothing moved.
     const after = await query(`select * from chore_instances where id = $1`, [overdueId])
     expect(after.rows[0]).toEqual(before.rows[0])
 
-    // The decision lives on the SESSION, in the jsonb 0099 reserves for it…
     const { rows } = await query(
       `select data from planning_session_steps where session_id = $1 and step_key = 'looseEnds'`,
       [sessionId]
@@ -250,15 +238,11 @@ describe('loose ends · overdue chores', () => {
     expect(rows[0].data.routes).toEqual([
       { kind: 'chore', id: overdueId, title: 'Take the bins out', source: 'notDone', to: 'tasks' },
     ])
-    // …and the step's status is NOT touched: nobody has answered the step yet.
     const step = json(await call('GET', '/api/weekly-planning', kevin)).steps.find((s: { key: string }) => s.key === 'looseEnds')
     expect(step.status).toBe('pending')
 
-    // Every later step reads it straight off the session view it already receives.
     expect(await routesFromSessionView()).toHaveLength(1)
-    // And our own read reports it, so the deck can hide what it already triaged.
     expect((await read(`?sessionId=${sessionId}`)).routes).toHaveLength(1)
-    // Without a session there is nothing to report.
     expect((await read()).routes).toEqual([])
   })
 
@@ -276,15 +260,13 @@ describe('loose ends · overdue chores', () => {
     expect(await routesFromSessionView()).toEqual([])
   })
 
-  // The routes array is a decision LOG, not a queue, so it must never point at
-  // something already finished — a later step would render a row for a chore its own
-  // module considers done, and could not tell without re-reading four modules.
+  // The routes array is a decision LOG, not a queue, so it must never point at something
+  // already finished — a later step could not tell without re-reading four modules.
   it('retires an item’s route when it is settled instead', async () => {
     await route({ sessionId, kind: 'chore', id: overdueId, title: 'Take the bins out', source: 'notDone', to: 'tasks' })
     expect(await routesFromSessionView()).toHaveLength(1)
     expect((await resolve({ kind: 'chore', id: overdueId, action: 'done', sessionId })).statusCode).toBe(200)
     expect(await routesFromSessionView()).toEqual([])
-    // Undone so the next test starts from an open instance.
     await query(`update chore_instances set status='pending', completed_by=null, completed_at=null where id = $1`, [overdueId])
   })
 
@@ -294,7 +276,6 @@ describe('loose ends · overdue chores', () => {
     const { rows } = await query(`select status, completed_by from chore_instances where id = $1`, [overdueId])
     expect(rows[0].status).toBe('done')
     expect(rows[0].completed_by).toBe(ownerId)
-    // …and the read stops asking, because the source stopped being open.
     expect((await read()).notDone.map((i) => i.id)).not.toContain(overdueId)
   })
 
@@ -319,8 +300,8 @@ describe('loose ends · overdue chores', () => {
     )
     const item = (await read()).notDone.find((i) => i.id === proof[0].id)
     expect(item).toBeTruthy()
-    // Planning has no camera, so completing here would 500 on ProofRequiredError. It
-    // can still be ROUTED — which is the whole point of the step.
+    // Planning has no camera, so completing here would 500 on ProofRequiredError. It can
+    // still be ROUTED — which is the whole point of the step.
     expect(item!.actions).toEqual([])
     expect((await resolve({ kind: 'chore', id: proof[0].id, action: 'done' })).statusCode).toBe(400)
     expect((await route({ sessionId, kind: 'chore', id: proof[0].id, title: 'proof', source: 'notDone', to: 'tasks' })).statusCode).toBe(200)
@@ -338,7 +319,6 @@ describe('loose ends · overdue chores', () => {
 
     await setModules({ chores: false })
     expect((await read()).notDone.map((i) => i.id)).not.toContain(late[0].id)
-    // The write path is gated too — planning must not be a hole into a disabled module.
     expect((await resolve({ kind: 'chore', id: late[0].id, action: 'done' })).statusCode).toBe(403)
     const { rows } = await query(`select status from chore_instances where id = $1`, [late[0].id])
     expect(rows[0].status).toBe('pending')
@@ -376,9 +356,8 @@ describe('loose ends · unchecked list items', () => {
     expect(item!.actions).toEqual(['done'])
   })
 
-  // The anchor is the household's CURRENT week, not the planned one: the planned week
-  // is always today or later, so anchoring there would filter nothing and the step
-  // would flood with every unchecked row in the household.
+  // The anchor is the household's CURRENT week, not the planned one: the planned week is
+  // always today or later, so anchoring there would flood the step.
   it('does NOT surface something typed THIS week — that is not a leftover, it is the week', async () => {
     const { rows } = await query(
       `insert into list_items (household_id, list_id, name) values ($1,$2,'Bought this morning') returning id`,
@@ -387,10 +366,9 @@ describe('loose ends · unchecked list items', () => {
     expect((await read()).notDone.map((i) => i.id)).not.toContain(rows[0].id)
   })
 
-  // The third case is the week-key guard: a row keyed to the week being planned (or a
-  // later one) is that week's work, not last week's leftover. `week_start` is a grocery
-  // concept and grocery can no longer reach this read at all, so the clause is now a
-  // guard for any future surface that keys a custom row to a week.
+  // The week-key guard: a row keyed to the week being planned (or later) is that week's
+  // work. `week_start` is a grocery concept, so the clause now guards future surfaces
+  // only.
   it('does NOT surface a checked item, a suggestion, or a row keyed to the week being planned', async () => {
     const week = await currentWeekStart()
     const planned = await plannedWeekStart()
@@ -439,15 +417,10 @@ describe('loose ends · unchecked list items', () => {
 })
 
 // ── "Not done" · which LISTS even count ───────────────────────────────────────
-// The step reads only the lists a person actually keeps: `list_type = 'custom'`.
-//
-//   · GROCERY rebuilds itself from the meal plan every week. An unchecked "Whole milk"
-//     is a shopping list, not a loose end — routing it to the Tasks step is nonsense,
-//     and a dozen of them bury the things that genuinely are open. A hand-typed
-//     grocery row ("Marble rye") goes for the same reason: it is still shopping.
-//   · TEMPLATES store their items checked=false permanently — that IS the blueprint
-//     (0072) — and templates aren't even in the Lists rail (listLists filters them
-//     out), so a user could not see where the flood was coming from.
+// Only the lists a person actually keeps: `list_type = 'custom'`. GROCERY rebuilds itself
+// from the meal plan every week, so an unchecked row there is shopping, not a loose end
+// (a hand-typed grocery row for the same reason). TEMPLATES store items checked=false
+// permanently (0072) and aren't in the Lists rail, so the flood would be invisible.
 describe('loose ends · which lists count', () => {
   let groceryAutoId: string
   let groceryTypedId: string
@@ -463,9 +436,9 @@ describe('loose ends · which lists count', () => {
       )
       return rows[0].id as string
     }
-    // Seeded so that every OTHER clause in the read passes them — `week_start` NULL and
-    // a `created_at` well before the current week — or an existing filter would take
-    // the credit and this would prove nothing.
+    // Seeded so every OTHER clause in the read passes them — `week_start` NULL,
+    // `created_at` well before the current week — or an existing filter would take the
+    // credit.
     const mkItem = async (listId: string, name: string, source = 'manual') => {
       const { rows } = await query(
         `insert into list_items (household_id, list_id, name, source, created_at)
@@ -486,7 +459,6 @@ describe('loose ends · which lists count', () => {
   it('leaves the grocery list out of "not done" — it rebuilds itself from the meal plan', async () => {
     const ids = (await read()).notDone.map((i) => i.id)
     expect(ids).not.toContain(groceryAutoId)
-    // Not only the derived rows: a typed grocery row is still shopping.
     expect(ids).not.toContain(groceryTypedId)
   })
 
@@ -497,25 +469,19 @@ describe('loose ends · which lists count', () => {
   it('still surfaces an ordinary custom list, and counts only what it shows', async () => {
     const view = await read()
     expect(view.notDone.map((i) => i.id)).toContain(customItemId)
-    // The switch and both see-all headers render this tally, so nothing excluded from
-    // the rows may still be inside the number.
+    // The switch and both see-all headers render this tally, so nothing excluded from the
+    // rows may still be inside the number.
     expect(view.counts.notDone).toBe(view.notDone.length)
     expect(view.notDone.filter((i) => i.kind === 'list').map((i) => i.id)).toContain(customItemId)
   })
 })
 
-// A household gets to say which of its lists this step is even about.
-//
-// "I have lists on there that are more longer-lived and I don't want the same items to
-// keep coming up every time. So I'd rather choose what lists are relevant versus not.
-// Chores and rhythms always seem applicable if they're not done, but lists maybe not so
-// much." Which is the difference between a list and the other three sources: an overdue
-// chore and a late rhythm are late BY DEFINITION, and a habit is short or it isn't — but
-// an unchecked row on "Someday" is the list working as intended. Only lists get this.
+// A household gets to say which of its lists this step is even about — only lists,
+// because an overdue chore and a late rhythm are late BY DEFINITION and a habit is short
+// or it isn't, while an unchecked row on "Someday" is the list working as intended.
 //
 // OPT-OUT, not opt-in: absent means relevant, so a household that never opens the setting
-// sees exactly what it saw before, and the switch silences the specific offenders rather
-// than asking everyone to re-declare what they already had.
+// sees what it saw before.
 describe('loose ends · which lists the household wants asked about', () => {
   let keptId: string
   let mutedId: string
@@ -549,8 +515,8 @@ describe('loose ends · which lists the household wants asked about', () => {
     mutedItemId = await mkItem(mutedId, 'Learn the banjo')
   })
 
-  // Every custom list in the household, ruled out — including the ones other suites in
-  // this file created, since "there are none left to check" means none at all.
+  // Every custom list in the household, including ones other suites created — "none left
+  // to check" means none at all.
   const allCandidates = async () =>
     ((await config()).lists as { id: string }[]).map((l) => l.id)
   const setAll = async (relevant: boolean) => {
@@ -558,9 +524,9 @@ describe('loose ends · which lists the household wants asked about', () => {
     await setLists(Object.fromEntries(ids.map((id) => [id, relevant])))
   }
 
-  // Every test here leaves the household exactly as it found it: this file's earlier
-  // suites assert on `sources` and on the full "not done" deck, and a stray mute would
-  // quietly rewrite what they see.
+  // Every test here leaves the household exactly as it found it: earlier suites assert on
+  // `sources` and on the full "not done" deck, and a stray mute would rewrite what they
+  // see.
   afterEach(async () => { await setAll(true) })
 
   it('says nothing about a list nobody has ruled on — absent means relevant', async () => {
@@ -575,8 +541,6 @@ describe('loose ends · which lists the household wants asked about', () => {
     const ids = view.notDone.map((i) => i.id)
     expect(ids).not.toContain(mutedItemId)
     expect(ids).toContain(keptItemId)
-    // The tally is what the switch and both see-all headers render, so nothing dropped
-    // from the rows may still be inside the number.
     expect(view.counts.notDone).toBe(view.notDone.length)
   })
 
@@ -595,28 +559,24 @@ describe('loose ends · which lists the household wants asked about', () => {
     expect(c.lists[keptId]).toBe(false)
   })
 
-  // The cleared state says "we checked chores, lists, rhythms and goals". With every
-  // list ruled out that is not true, and this codebase does not tell the user something
-  // untrue to keep a sentence tidy.
+  // The cleared state says "we checked chores, lists, rhythms and goals". With every list
+  // ruled out that is not true.
   it('stops claiming it checked the lists once there are none left to check', async () => {
     expect((await read()).sources).toContain('lists')
     await setAll(false)
     const view = await read()
     expect(view.sources).not.toContain('lists')
-    // The other three are unaffected — they were never part of this.
     expect(view.sources).toEqual(['chores', 'rhythms', 'goals'])
   })
 
-  // The STEP gets them too, on its own read. The chooser lives in the step now — "we want
-  // the lists election to be in the weekly planning loose ends step" — and a step that had
-  // to fetch the config as well would be two reads describing one thing, free to disagree.
-  // Same server-side helper as the config read, so they cannot.
+  // The STEP gets them on its own read: a step that had to fetch the config as well would
+  // be two reads describing one thing. Same server-side helper as the config read, so
+  // they can't disagree.
   it('rides along with the step’s own read, so the step needn’t ask twice', async () => {
     const view = await read()
     const names = (view.lists ?? []).map((l) => l.name)
     expect(names).toContain('Someday')
     expect(names).not.toContain('Grocery')
-    // And it agrees with the sources line computed off the same value.
     expect(view.sources).toContain('lists')
   })
 
@@ -631,8 +591,6 @@ describe('loose ends · which lists the household wants asked about', () => {
     const names = (c.lists as { id: string; name: string; relevant: boolean }[]).map((l) => l.name)
     expect(names).toContain('Repairs')
     expect(names).toContain('Someday')
-    // Grocery rebuilds itself and a template is unchecked by design — neither is a
-    // candidate, so neither may appear as a switch that pretends to do something.
     expect(names).not.toContain('Grocery')
     expect(names).not.toContain('Camping trip')
   })
@@ -644,8 +602,6 @@ describe('loose ends · which lists the household wants asked about', () => {
     expect(rows.find((l) => l.id === keptId)?.relevant).toBe(true)
   })
 
-  // Both guards, on keys that belong to nothing — so a real list's own ruling cannot be
-  // what makes this pass.
   it('ignores junk rather than storing it', async () => {
     await call('PUT', '/api/weekly-planning/config', kevin, { lists: { 'ruled-by-nobody': 'nope', '': true } })
     const c = (await config()).config
@@ -654,16 +610,12 @@ describe('loose ends · which lists the household wants asked about', () => {
   })
 })
 
-// WHO EACH THING ALREADY BELONGS TO.
+// WHO EACH THING ALREADY BELONGS TO. Routing something to Tasks when it already has an
+// owner is a different decision from routing something nobody has picked up.
 //
-// "Some of these are already assigned an owner but we have no idea who." The deck showed
-// a title and how late it was, and nothing else — so a board of eleven rows could not tell
-// you whose bed was unmade. Routing something to Tasks when it already has an owner is a
-// different decision from routing something nobody has picked up.
-//
-// Resolved from ONE person map in `getLooseEnds` rather than joined per source: two of the
-// four sources (rhythms, goals) come back through another module's own reader and own no
-// SQL to join, and one payload with two mechanisms for the same field is how they drift.
+// Resolved from ONE person map in `getLooseEnds` rather than joined per source: two of
+// the four sources come back through another module's reader and own no SQL to join, and
+// one payload with two mechanisms for the same field is how they drift.
 describe('loose ends · who each thing already belongs to', () => {
   let ownedInstance = ''
   let unownedInstance = ''
@@ -672,10 +624,9 @@ describe('loose ends · who each thing already belongs to', () => {
   let familyGoal = ''
   let elaineId = ''
 
-  // Its own fixtures throughout. The other suites in this file RESOLVE what they create
-  // — a rhythm gets re-anchored, a goal gets logged against — so leaning on their rows
-  // for an owner assertion reads as a passing test right up until it silently has
-  // nothing left to assert on. (It did: two assertions here found zero rows first time.)
+  // Its own fixtures throughout. The other suites in this file RESOLVE what they create,
+  // so leaning on their rows for an owner assertion passes right up until it has nothing
+  // left to assert on.
   beforeAll(async () => {
     const week = await currentWeekStart()
     const { rows: p } = await query(
@@ -733,8 +684,8 @@ describe('loose ends · who each thing already belongs to', () => {
     const owner = item!.owner!
     expect(owner.id).toBe(elaineId)
     expect(owner.name).toBe('Elaine')
-    // The colour and the avatar travel with the name so a client renders the person the
-    // way the rest of the app does, rather than inventing a chip of its own.
+    // The colour and avatar travel with the name so a client renders the person the way
+    // the rest of the app does.
     expect(owner.colorHex).toBe('#7fc1e8')
     expect(owner.avatarEmoji).toBe('🧣')
   })
@@ -745,17 +696,14 @@ describe('loose ends · who each thing already belongs to', () => {
     expect(item!.owner?.name).toBe('Elaine')
   })
 
-  // A habit with exactly one participant is that person's. A FAMILY habit — several
-  // participants, or a family target basis — belongs to everybody, and inventing an owner
-  // for it would be worse than leaving the slot empty.
+  // A habit with exactly one participant is that person's. A FAMILY habit belongs to
+  // everybody, and inventing an owner would be worse than an empty slot.
   it('names the one person a habit goal is for, and nobody for the family’s', async () => {
     const view = await read()
     expect(view.notDone.find((x) => x.id === soloGoal)?.owner?.name).toBe('Elaine')
     expect(view.notDone.find((x) => x.id === familyGoal)?.owner ?? null).toBeNull()
   })
 
-  // Up for grabs is a real state, not a missing name — and the deck has to be able to say
-  // so, because "nobody has this" is exactly the row worth routing.
   it('leaves an unassigned chore ownerless rather than guessing', async () => {
     const item = (await read()).notDone.find((x) => x.id === unownedInstance)
     expect(item).toBeTruthy()
@@ -804,8 +752,8 @@ describe('loose ends · rhythms past due', () => {
       title: 'Book the dentist',
       satisfiedBy: 'scheduling',
       every: '6 months',
-      // 170 days into a ~182-day period: the booking runway (period_end - lead_time)
-      // is already open, which is what makes an unbooked period a loose end today.
+      // 170 days into a ~182-day period: the booking runway (period_end - lead_time) is
+      // already open, which is what makes an unbooked period a loose end today.
       startsOn: new Date(Date.now() - 170 * 864e5).toISOString().slice(0, 10),
       leadTime: '30 days',
     })
@@ -815,7 +763,7 @@ describe('loose ends · rhythms past due', () => {
     expect(item!.detail).toMatch(/nothing booked/i)
 
     // No periodStart in the request: a client echo of a boundary that has since moved
-    // inserts happily and silences nothing, so the server re-derives it.
+    // would insert happily and silence nothing, so the server re-derives it.
     expect((await resolve({ kind: 'rhythm', id, action: 'done' })).statusCode).toBe(200)
     const { rows } = await query(`select period_start::text as period_start from rhythm_skips where rhythm_id = $1`, [id])
     expect(rows).toHaveLength(1)
@@ -899,15 +847,12 @@ describe('loose ends · parked items', () => {
     expect(item).toBeTruthy()
     expect(item!.kind).toBe('parked')
     expect(item!.title).toBe('Ask about the school trip')
-    // "Talk about it now" and "Drop it" — and Drop is only ever a real answer HERE.
     expect(item!.actions.sort()).toEqual(['done', 'drop'])
-    // The source line names who wrote it and when; it is what earns the Drop under it.
     expect(item!.detail).toMatch(/^Parked by Kevin · today$/)
     expect(p.counts.parked).toBe(1)
   })
 
   it('counts how many finished sessions have passed a note over', async () => {
-    // A session that FINISHES after the note was written has walked past it.
     await call('POST', `/api/weekly-planning/session/${sessionId}/complete`, kevin)
     expect((await read()).parked.find((i) => i.id === parkedId)!.detail).toMatch(/passed over once$/)
     await call('PATCH', `/api/weekly-planning/session/${sessionId}`, kevin, { status: 'active' })
@@ -929,8 +874,8 @@ describe('loose ends · parked items', () => {
     expect((await park({ note: 'ok', stepKey: 'lobby' })).statusCode).toBe(400)
   })
 
-  // Routing a note is the other half of what step_key is for: it names the step that
-  // will look at the note, whichever end of the session wrote it.
+  // Routing a note is the other half of what step_key is for: it names the step that will
+  // look at the note, whichever end of the session wrote it.
   it('routing a note sets its step_key, and stays "open" until somebody answers it', async () => {
     const res = await route({ sessionId, kind: 'parked', id: parkedId, title: 'Ask about the school trip', source: 'parked', to: 'tasks' })
     expect(res.statusCode).toBe(200)
@@ -938,7 +883,6 @@ describe('loose ends · parked items', () => {
     expect(rows[0]).toMatchObject({ step_key: 'tasks', status: 'open' })
     expect((await routesFromSessionView()).find((r) => r.id === parkedId)!.source).toBe('parked')
 
-    // Undo gives the tag back.
     await route({ sessionId, kind: 'parked', id: parkedId, to: null })
     const { rows: after } = await query(`select step_key from planning_parked_items where id = $1`, [parkedId])
     expect(after[0].step_key).toBe(null)
@@ -979,7 +923,6 @@ describe('loose ends · the route contract', () => {
     expect((await route({ ...base, id, to: 'looseEnds' })).statusCode).toBe(400)
     await setModules({ familyNight: false })
     expect((await route({ ...base, id, to: 'familyNight' })).statusCode).toBe(400)
-    // A route needs the label it was routed under — a later step renders that.
     expect((await route({ sessionId, kind: 'parked', id, source: 'parked', title: '  ', to: 'tasks' })).statusCode).toBe(400)
     await resolve({ kind: 'parked', id, action: 'drop' })
   })
@@ -989,22 +932,15 @@ describe('loose ends · the route contract', () => {
     expect((await route({ sessionId: 'nope', kind: 'parked', id: ownerId, title: 'x', to: 'tasks' })).statusCode).toBe(400)
     expect((await route({ sessionId, kind: 'parked', id: 'nope', title: 'x', to: 'tasks' })).statusCode).toBe(400)
     expect((await route({ sessionId, kind: 'nonsense', id: ownerId, title: 'x', to: 'tasks' })).statusCode).toBe(400)
-    // A parked note that isn't ours can't be tagged.
     expect((await route({ sessionId, kind: 'parked', id: '11111111-1111-1111-1111-111111111111', title: 'x', to: 'tasks' })).statusCode).toBe(404)
   })
 })
 
-// THE READ IS HOUSEHOLD-SCOPED, and it was not.
-//
-// `?sessionId=` makes step 1's read self-contained, and it was passed straight through to
-// `listRoutes`, which selected from `planning_session_steps` by `session_id` ALONE. That
-// table has no `household_id` of its own — it is scoped only through `planning_sessions` —
-// so an id belonging to another household read that household's routes, and every route
-// entry carries a `title`: the wording of another family's chores, list items and notes.
-//
-// Found by a `/code-review medium` pass on PR #184. The WRITE paths were always guarded
-// (404 on a foreign session, 400 on a malformed id) and `horizon.ts` guards its own read;
-// this one read was the exception, which is what made it easy to miss.
+// THE READ IS HOUSEHOLD-SCOPED. `?sessionId=` makes step 1's read self-contained, and
+// `listRoutes` selects from `planning_session_steps`, which has no `household_id` of its
+// own — it is scoped only through `planning_sessions`. Unguarded, a foreign session id
+// reads another household's routes, and every route entry carries a `title`: the wording
+// of another family's chores, list items and notes.
 describe('loose ends · the read cannot see another household', () => {
   let theirSession = ''
 
@@ -1018,7 +954,6 @@ describe('loose ends · the read cannot see another household', () => {
       [h[0].id]
     )
     theirSession = se[0].id
-    // A routed item, with words on it — the thing that would leak.
     await query(
       `insert into planning_session_steps (session_id, step_key, status, data)
        values ($1,'looseEnds','pending',$2::jsonb)`,
@@ -1040,7 +975,7 @@ describe('loose ends · the read cannot see another household', () => {
     expect(view.weekStart).toBeTruthy()
   })
 
-  // A malformed id reached Postgres as `uuid = 'nope'` → 22P02 → 500. It is now simply
+  // A malformed id would reach Postgres as `uuid = 'nope'` → 22P02 → 500. It is simply
   // "no session", the same answer `horizon.ts` gives.
   it('treats a malformed session id as no session rather than a 500', async () => {
     const r = await call('GET', '/api/weekly-planning/loose-ends?sessionId=nope', kevin)
@@ -1053,8 +988,6 @@ describe('loose ends · the resolve contract', () => {
   it('refuses an unknown kind or action rather than guessing', async () => {
     expect((await resolve({ kind: 'nonsense', id: ownerId, action: 'done' })).statusCode).toBe(400)
     expect((await resolve({ kind: 'parked', id: ownerId, action: 'burn' })).statusCode).toBe(400)
-    // `move` was a step-1 answer before the step became intake; it is gone, and the
-    // Tasks step is what gives something an owner and a day now.
     expect((await resolve({ kind: 'chore', id: ownerId, action: 'move' })).statusCode).toBe(400)
   })
 

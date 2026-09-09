@@ -5,16 +5,12 @@ import type { StepBodyProps } from '../registry'
 
 // Step 1 · Loose ends — the deck, the group switch, the trail and the see-all list.
 //
-// What's asserted here is the design's argument, not the markup:
-//   · STEP 1 ROUTES; IT DOES NOT REPAIR. A card's primary choices are DESTINATIONS,
-//     and choosing one must post to /route and never to /resolve — "routing here
-//     changes nothing in your modules."
-//   · The switch carries BOTH counts (a ✓ when a group is clear) and the one line that
-//     explains the two kinds.
-//   · "Leave it open" writes NOTHING. That is what keeps per-item state out of any
-//     planning table, so it must not fire a request.
-//   · The routes are the cross-step contract, so they ride on setDecisionData —
-//     otherwise the shell's own answer would overwrite the step's data with a crumb.
+// What's asserted is the design's argument, not the markup:
+//   · STEP 1 ROUTES; IT DOES NOT REPAIR — a choice posts to /route, never /resolve;
+//   · "Leave it open" writes NOTHING, which is what keeps per-item state out of any
+//     planning table, so it must not fire a request;
+//   · the routes are the cross-step contract, so they ride on setDecisionData or the
+//     shell's own answer overwrites the step's data with a crumb.
 
 const Body = mod.Body
 
@@ -29,8 +25,7 @@ const step = (data: Record<string, unknown> = {}): PlanningStep => ({
   status: 'pending',
   data,
   decidedAt: null,
-  // Step 1 never receives a handoff: it already draws the whole board, so the server
-  // excludes `looseEnds` from `parkedByStep`.
+  // Step 1 never receives a handoff: the server excludes `looseEnds` from `parkedByStep`.
   parked: [],
 })
 
@@ -42,19 +37,15 @@ const end = (over: Partial<Record<string, unknown>> = {}) => ({
   emoji: '🗑️',
   detail: '3 days late',
   actions: ['done'],
-  // Nobody by default; the fixtures that care say who.
   owner: null as { id: string; name: string; colorHex: string | null; avatarEmoji: string | null } | null,
   ...over,
 })
 
-// The person an assigned row belongs to, shaped as the server sends it — colour and
-// avatar included, so the row renders the person the way the rest of the app does.
 const WALLY = { id: 'p2', name: 'Wally', colorHex: '#25A368', avatarEmoji: '🐢' }
 
 const VIEW = {
   weekStart: '2026-09-06',
   notDone: [
-    // A chore somebody already has, and a list item that cannot have an owner at all.
     end({ owner: WALLY }),
     end({ key: 'list:l1', kind: 'list', id: 'l1', title: 'Return the library books', emoji: null, detail: 'on Around the house' }),
   ],
@@ -79,7 +70,6 @@ const VIEW = {
   },
   routes: [] as { kind: string; id: string; title: string; source: string; to: string }[],
   sources: ['chores', 'lists', 'rhythms', 'goals'],
-  // The lists this step could ask about, as the step's own read now carries them.
   lists: [
     { id: 'l1', name: 'Around the house', emoji: '🏠', relevant: true },
     { id: 'l2', name: 'Someday', emoji: '💭', relevant: true },
@@ -88,9 +78,8 @@ const VIEW = {
 
 const calls: { url: string; method: string; body: Record<string, unknown> | null }[] = []
 
-// A stateful double: routing really records a route and hides the item on the next
-// read, and settling really removes it — because that is the point. A double that
-// replayed the same view couldn't tell a route from a no-op.
+// A stateful double: a double that replayed the same view couldn't tell a route from a
+// no-op.
 function mockApi(initial: Record<string, unknown> = VIEW, opts: { capabilities?: string[] } = {}) {
   calls.length = 0
   const state = JSON.parse(JSON.stringify(initial)) as typeof VIEW & {
@@ -102,8 +91,8 @@ function mockApi(initial: Record<string, unknown> = VIEW, opts: { capabilities?:
     const body = init?.body ? JSON.parse(String(init.body)) : null
     calls.push({ url: u, method, body })
 
-    // Who is looking. The chooser is capability-gated, so the step has to know — and the
-    // fallthrough below would otherwise hand `useHousehold` the loose-ends view.
+    // The chooser is capability-gated, so the step has to know who is looking; without
+    // this the fallthrough hands `useHousehold` the loose-ends view.
     if (u.includes('/api/household')) {
       return {
         ok: true,
@@ -114,7 +103,6 @@ function mockApi(initial: Record<string, unknown> = VIEW, opts: { capabilities?:
         }),
       }
     }
-    // Ruling a list in or out. Merged server-side, so only the switch that moved is sent.
     if (method === 'PUT' && u.includes('/api/weekly-planning/config')) {
       for (const [id, on] of Object.entries((body?.lists ?? {}) as Record<string, boolean>)) {
         const row = (state.lists ?? []).find((l) => l.id === id)
@@ -141,15 +129,14 @@ function mockApi(initial: Record<string, unknown> = VIEW, opts: { capabilities?:
       state.counts = { notDone: state.notDone.length, parked: state.parked.length }
       return { ok: true, json: async () => ({ item: { id: 'new', note: body.note } }) }
     }
-    // A fresh object per read, like a real response — returning the same identity
-    // would let a component that never re-reads it look like it worked.
+    // A fresh object per read: the same identity would let a component that never
+    // re-reads it look like it worked.
     return { ok: true, json: async () => JSON.parse(JSON.stringify(state)) }
   }) as unknown as typeof fetch
 }
 
-// jsdom has no scrollIntoView at all. Record WHICH section the component scrolls to —
-// that is the behaviour ("see all opens where you were"), and the pixels are not
-// something a jsdom test could speak to anyway.
+// jsdom has no scrollIntoView at all; record WHICH section is scrolled to, which is the
+// behaviour under test.
 const scrolled: string[] = []
 beforeAll(() => {
   Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
@@ -188,13 +175,11 @@ describe('loose ends · routing, which is the step', () => {
     renderStep()
     expect(await screen.findByText('Take the bins out')).toBeInTheDocument()
     expect(screen.getByText('3 days late')).toBeInTheDocument()
-    // The read is scoped to the week AND the session — the session is where routes live.
-    // Named rather than taken as `calls[0]`: the step also reads who is looking (for the
-    // lists chooser), and which request lands first is not this assertion's point.
+    // Named rather than `calls[0]`: the step also reads who is looking, and which request
+    // lands first is not this assertion's point.
     const read = calls.find((c) => c.method === 'GET' && c.url.includes('/loose-ends'))!
     expect(read.url).toContain('weekStart=2026-09-06')
     expect(read.url).toContain('sessionId=s1')
-    // One at a time: the second item is not on screen.
     expect(screen.queryByText('Return the library books')).not.toBeInTheDocument()
     for (const label of ['Tasks', 'Calendar', 'Kids', 'Goals']) {
       expect(screen.getByRole('button', { name: new RegExp(label) })).toBeInTheDocument()
@@ -222,18 +207,13 @@ describe('loose ends · routing, which is the step', () => {
     fireEvent.click(screen.getByRole('button', { name: /Tasks/ }))
     await waitFor(() => expect(screen.getByText('2 of 2')).toBeInTheDocument())
 
-    // The trail names what just went where, so a fast path still leaves a receipt.
     const trail = await screen.findByText('Take the bins out')
     expect(trail).toBeInTheDocument()
     expect(screen.getByText(/→ Tasks/)).toBeInTheDocument()
-    // …and it says what the arrow MEANS. "I clicked 'put it on the calendar' and the
-    // item moved at the bottom to the -> calendar, what does that mean?" — a title, an
-    // arrow and a step name is a receipt only if you already know the mechanism.
     expect(screen.getByTestId('wp-le-trail-h')).toHaveTextContent(/come up at that step/i)
 
     fireEvent.click(screen.getByRole('button', { name: 'Undo' }))
     await waitFor(() => expect(routeCalls()).toHaveLength(2))
-    // Undo is the same verb with no destination.
     expect(routeCalls()[1].body).toMatchObject({ kind: 'chore', id: 'c1', to: null })
     await waitFor(() => expect(screen.getByText('1 of 2')).toBeInTheDocument())
   })
@@ -241,7 +221,6 @@ describe('loose ends · routing, which is the step', () => {
   it('seeds what was already routed from the step’s own persisted data', async () => {
     mockApi({ ...VIEW, routes: [{ kind: 'chore', id: 'c1', title: 'Take the bins out', source: 'notDone', to: 'tasks' }] })
     renderStep({ step: step({ routes: [{ kind: 'chore', id: 'c1', title: 'Take the bins out', source: 'notDone', to: 'tasks' }] }) })
-    // A reload mid-step must not re-ask what has already been triaged.
     expect(await screen.findByText('Return the library books')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Not done 1/ })).toBeInTheDocument()
   })
@@ -259,7 +238,6 @@ describe('loose ends · routing, which is the step', () => {
     renderStep()
     fireEvent.click(await screen.findByRole('button', { name: /Tasks/ }))
     expect(await screen.findByText(/not running in this household/i)).toBeInTheDocument()
-    // …and the card is still there to be sent somewhere else.
     expect(screen.getByText('Take the bins out')).toBeInTheDocument()
   })
 })
@@ -279,7 +257,6 @@ describe('loose ends · the two answers that write', () => {
     renderStep()
     fireEvent.click(await screen.findByRole('button', { name: /Leave it open/ }))
     expect(await screen.findByText('Return the library books')).toBeInTheDocument()
-    // Not a request. Per-item "seen it" state has no table and no route on purpose.
     expect(routeCalls()).toHaveLength(0)
     expect(resolveCalls()).toHaveLength(0)
   })
@@ -291,11 +268,7 @@ describe('loose ends · the group switch', () => {
     renderStep()
     expect(await screen.findByRole('button', { name: /Not done 2/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Parked 1/ })).toBeInTheDocument()
-    // The switch is the entire explanation, so the note travels with it.
     expect(screen.getByText(/computed from your modules/i)).toBeInTheDocument()
-    // And the note says what the step DOES read, not what it doesn't. The grocery
-    // sentence was an answer to a question the bug provoked; with groceries gone
-    // there is no question, and a screen narrating what it isn't showing is noise.
     expect(screen.queryByText(/grocery/i)).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /Parked 1/ }))
     expect(await screen.findByText(/exists nowhere else yet/i)).toBeInTheDocument()
@@ -306,7 +279,6 @@ describe('loose ends · the group switch', () => {
     renderStep()
     fireEvent.click(await screen.findByRole('button', { name: /Parked 1/ }))
     expect(await screen.findByText('Ask about the school trip')).toBeInTheDocument()
-    // The line that earns the Drop underneath it.
     expect(screen.getByText(/passed over 3 times/)).toBeInTheDocument()
     for (const label of ['Make it a task', 'Put it on the calendar', 'Talk about it now', 'Keep it parked']) {
       expect(screen.getByRole('button', { name: new RegExp(label) })).toBeInTheDocument()
@@ -351,13 +323,9 @@ describe('loose ends · see all', () => {
     expect(screen.getByRole('heading', { name: /Parked/ })).toBeInTheDocument()
   })
 
-  // THE IA BUG. The group switch must not survive into see-all: still on screen and still
-  // looking selected, it would govern nothing there, so "Not done" + See all would read as a
-  // filtered list while BOTH groups were listed. The v4 mock's boardList frame is the answer: it
-  // renders the two labelled sections and the
-  // disclaimer, and no switch. In see-all the section headings ARE the grouping, so a
-  // switch there is redundant AND misleading; it belongs to the one-at-a-time mode,
-  // where it genuinely picks the deck you are working through.
+  // The group switch must not survive into see-all: it would govern nothing there, so
+  // "Not done" + See all would read as a filtered list while BOTH groups were listed. In
+  // see-all the section headings ARE the grouping.
   it('drops the group switch — in see all the section headings ARE the grouping', async () => {
     mockApi()
     renderStep()
@@ -368,8 +336,6 @@ describe('loose ends · see all', () => {
     expect(screen.queryByRole('group', { name: /which loose ends/i })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^Not done/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^Parked/ })).not.toBeInTheDocument()
-    // Nothing is lost with it: the headings carry both counts, and the way back is the
-    // control that was always there.
     expect(screen.getByRole('heading', { name: /Not done 2/ })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /Parked 1/ })).toBeInTheDocument()
 
@@ -391,9 +357,6 @@ describe('loose ends · see all', () => {
     expect(screen.getByRole('button', { name: /Parked 1/ })).toHaveAttribute('aria-pressed', 'true')
   })
 
-  // Not a second filter — both sections are always there. Entering from Parked just
-  // lands you on the Parked one, so the transition keeps the context you were in
-  // instead of appearing to throw it away.
   it('opens on the section you were toggled to', async () => {
     scrolled.length = 0
     mockApi()
@@ -404,9 +367,6 @@ describe('loose ends · see all', () => {
     await waitFor(() => expect(scrolled).toEqual(['wp-le-sec-parked']))
   })
 
-  // "See all" reads as the FULLER screen, so it must not be the one place you cannot
-  // drop a new note. The bar is attached to the Parked section, which is what it adds
-  // to — the same reason the section headings had to carry the counts.
   it('keeps the capture bar reachable, attached to the Parked section', async () => {
     mockApi()
     renderStep()
@@ -418,14 +378,11 @@ describe('loose ends · see all', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Park it' }))
     await waitFor(() => expect(parkCalls()).toHaveLength(1))
     expect(parkCalls()[0].body).toEqual({ note: 'Renew the passports', sessionId: 's1' })
-    // Still on the see-all screen, with the new note counted into the section it
-    // landed in — parking is not a reason to be thrown back to the deck.
     expect(await screen.findByRole('heading', { name: /Parked 2/ })).toBeInTheDocument()
   })
 
-  // One bar, one piece of state, two places it can appear — so a half-typed note must
-  // not evaporate when you change your mind about the view. That is the same class of
-  // bug as the switch that looked like it filtered.
+  // One bar, one piece of state, two places it can appear: a half-typed note must
+  // survive changing the view.
   it('carries a half-typed note across the mode switch', async () => {
     mockApi()
     renderStep()
@@ -456,7 +413,6 @@ describe('loose ends · the cleared state', () => {
     mockApi({ ...VIEW, notDone: [], counts: { notDone: 0, parked: 1 } })
     renderStep()
     expect(await screen.findByText("Nothing's left undone")).toBeInTheDocument()
-    // A claim a step never backs up is just a claim, so it names its sources.
     expect(screen.getByText(/we checked your chores, lists, rhythms, goals/i)).toBeInTheDocument()
     expect(screen.getByText(/1 parked note is still waiting/i)).toBeInTheDocument()
 
@@ -491,16 +447,9 @@ describe('loose ends · the crumb on the record', () => {
   })
 })
 
-// WHICH LISTS THIS STEP ASKS ABOUT — chosen here, in the step, by whoever is running it.
-//
-// "I think we want the lists election to be in the weekly planning loose ends step, and it
-// shouldn't be admin gated, maybe adult gated but any adult can run weekly planning and
-// choose what lists should matter vs not."
-//
-// The friction is here: you are looking at "Learn the banjo" off a someday list for the
-// fourth week running. Sending you to Settings → Modules to silence it is the ejection
-// this module exists to avoid — and Settings is admin-only, which the person driving the
-// session on a Sunday evening may well not be.
+// WHICH LISTS THIS STEP ASKS ABOUT — chosen in the step by whoever is running it, not in
+// Settings: the friction is here, and Settings is admin-only while any adult may drive
+// the session.
 describe('loose ends · which lists it asks about', () => {
   const openChooser = async () => {
     fireEvent.click(await screen.findByRole('button', { name: /Which lists/i }))
@@ -525,8 +474,6 @@ describe('loose ends · which lists it asks about', () => {
     renderStep()
     await openChooser()
     fireEvent.click(screen.getByLabelText('Ask about Someday in the weekly planning session'))
-    // The step's own read is what decides the deck — the chooser writes and then asks
-    // again rather than guessing which cards would have gone.
     await waitFor(() => expect(calls.filter((c) => c.method === 'GET' && c.url.includes('/loose-ends')).length)
       .toBeGreaterThan(1))
   })
@@ -539,8 +486,6 @@ describe('loose ends · which lists it asks about', () => {
     expect(screen.getByText(/💭 Someday/)).toBeTruthy()
   })
 
-  // A kid running the session sees the deck and can triage it; the household-wide choice
-  // is not theirs to make.
   it('is not offered to someone without the capability', async () => {
     mockApi(VIEW, { capabilities: [] })
     renderStep()
@@ -548,7 +493,6 @@ describe('loose ends · which lists it asks about', () => {
     expect(screen.queryByRole('button', { name: /Which lists/i })).toBeNull()
   })
 
-  // Nothing to choose between ⇒ no control, rather than an empty sheet.
   it('is absent when the household keeps no list it could ask about', async () => {
     mockApi({ ...VIEW, lists: [] })
     renderStep()
@@ -557,14 +501,8 @@ describe('loose ends · which lists it asks about', () => {
   })
 })
 
-// WHERE A ROW COMES FROM, AND WHO ALREADY HAS IT.
-//
-// "I dont know whether its a task or goal or what (where is it coming from?)" and "some of
-// these are already assigned an owner but we have no idea who."
-//
-// The card deck has always labelled the kind; SEE-ALL dropped it, which is the mode the
-// report came from — eleven rows of bare titles, one of them a chore called "Groceries"
-// sitting next to an unchecked list item. The owner was missing from both modes.
+// WHERE A ROW COMES FROM, AND WHO ALREADY HAS IT. Both modes label the kind and the
+// owner: bare titles leave a chore and an unchecked list item indistinguishable.
 describe('loose ends · where a row comes from and who has it', () => {
   it('labels every see-all row with the source it came from', async () => {
     mockApi()
@@ -588,8 +526,6 @@ describe('loose ends · where a row comes from and who has it', () => {
     expect(within(row as HTMLElement).getByText('Wally')).toBeTruthy()
   })
 
-  // The card is one item at a time, so the ambiguity is milder there — but "we have no
-  // idea who" was true of it too, and it is the same payload field.
   it('names the person on the card as well', async () => {
     mockApi()
     renderStep()
@@ -597,8 +533,6 @@ describe('loose ends · where a row comes from and who has it', () => {
     expect(within(card as HTMLElement).getByText('Wally')).toBeTruthy()
   })
 
-  // Nothing rather than a placeholder: a list item cannot have an owner at all, and an
-  // empty chip on every row would be noise on the mode that already has the most of it.
   it('shows no owner where there is none', async () => {
     mockApi()
     renderStep()

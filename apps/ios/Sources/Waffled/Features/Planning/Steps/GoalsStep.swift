@@ -1,29 +1,16 @@
 import SwiftUI
 
-/// Weekly Planning · step 6 "Goals" — "What's each group's focus this week?"
+/// Weekly Planning · step 6 "Goals" — "What's each group's focus this week?" Web parity with
+/// `planning/steps/GoalsStep.tsx`.
 ///
-/// Web parity with `planning/steps/GoalsStep.tsx`.
+/// THE TABS ARE THE `goal_lists` THAT ALREADY EXIST. Picking a goal sets the goals module's own
+/// `is_featured`; there is no second "focus" concept, a hand-made pin is never cleared, and
+/// picking NOTHING settles the group just the same.
 ///
-/// THE TABS ARE THE `goal_lists` THAT ALREADY EXIST — the family one, the couple's private
-/// one, one per person. Borrowing the group picker keeps ONE group on screen at a time
-/// (six cards of everybody's goals is what this step exists to avoid), and a ★ on a tab
-/// says that group has settled. Picking a goal sets the goals module's own `is_featured`;
-/// there is no second "focus" concept, a hand-made pin is never cleared, and picking
-/// NOTHING settles the group just the same.
-///
-/// ANSWERING THE STEP IS SEPARATE FROM SETTING FOCUS. `/goals/focus` merges onto the step
-/// row and leaves `status` alone — the shell's affirmative decides the step. So this body
-/// must mirror the server's focus map back through `setDecisionData` after every read and
-/// write, because that affirmative REPLACES the step's data with whatever the crumb holds.
-///
-/// PROGRESS GOES THROUGH `GoalDisplay`, never `totalProgress`: a habit resets each period,
-/// so a lifetime 340 would read as long-since done where this week's answer is "2 of 5".
-///
-/// "＋ NEW GOAL FOR THIS WEEK" OPENS THE GOALS MODULE'S OWN EDITOR AS A SHEET, never a
-/// route away — leaving for the Goals screen abandons the session with nothing to bring
-/// the family back. The group is FIXED to the tab they were on (`lockedListId`) and the
-/// goal is pinned on the way in (`startFeatured`), so it returns as this week's focus
-/// without a second trip.
+/// ANSWERING THE STEP IS SEPARATE FROM SETTING FOCUS: `/goals/focus` merges onto the step row
+/// and leaves `status` alone. So this body must mirror the server's focus map back through
+/// `setDecisionData` after every read and write, because the affirmative REPLACES the step's
+/// data with whatever the crumb holds.
 struct GoalsStepView: View {
     let props: PlanningStepProps
 
@@ -31,8 +18,6 @@ struct GoalsStepView: View {
     @State private var model = PlanningGoalsStepModel()
 
     var body: some View {
-        // NO OUTER ScrollView on purpose: the shell owns the chrome around a step, and
-        // scrolling belongs with it — a second one nested inside would fight it.
         VStack(alignment: .leading, spacing: 12) {
             if !model.loaded {
                 WaffledLoading()
@@ -54,63 +39,41 @@ struct GoalsStepView: View {
                 if let active = model.active { groupCard(active) }
             }
         }
-        // Keyed on the session, not a bare `.task`: stepping to another week starts a new
-        // session, and this step must re-read rather than sit on the previous one's groups.
         .task(id: props.sessionId) { await reload() }
-        // Mirror what the session already knows onto the crumb after EVERY fresh read AND
-        // every write — not only after a tap. The shell resets the crumb on step change and
-        // REPLACES the step's stored data when the affirmative is pressed, so a body that
-        // only set it in its tap handler would erase its own record after a remount.
+        // Mirror what the session knows onto the crumb after EVERY fresh read AND every write,
+        // not only after a tap: the shell resets the crumb on step change and REPLACES the
+        // step's stored data when the affirmative is pressed.
         //
-        // NEVER `setDecisionData(model.crumb)` STRAIGHT THROUGH. Unlike the count-shaped
-        // crumbs on Family Night and Tasks, this one is a MIRROR of server state that the
-        // affirmative overwrites — so handing the shell a nil (a fetch that failed offline,
-        // or 403'd because goals was toggled off mid-session) is not "no news", it is the
-        // wipe: `decideStep` writes `data = excluded.data` with `input.data ?? {}`.
+        // NEVER `setDecisionData(model.crumb)` STRAIGHT THROUGH. This crumb is a MIRROR of
+        // server state, so handing the shell a nil (a failed fetch, or a 403 because goals was
+        // toggled off mid-session) is not "no news", it is the wipe: `decideStep` writes
+        // `data = excluded.data` with `input.data ?? {}`.
         .onChange(of: model.rev) {
             if let crumb = model.crumb { props.setDecisionData(crumb) }
         }
-        // THIS STEP LENDS THE BANNER NOTHING, even though it now HAS a composer. The
-        // banner's verb hands a parked note's words to a composer that then makes one
-        // thing; this composer is scoped to the group on screen and would have to seed a
-        // title as well, so "Make a goal" from the banner is a real feature and not a
-        // rename of this one — tracked as a follow-up rather than half-done here.
-        // Withdrawn explicitly, because the verb is the SHELL's state and would otherwise
-        // still be the previous step's.
         .onAppear { props.lendVerb(nil) }
-        // The goals module's REAL editor, over the week rather than instead of it —
-        // presented through the goals module's OWN `.goalEditor` modifier, so it behaves
-        // the way that editor behaves everywhere else (a sheet on the phone, a full-screen
-        // cover on the family display) instead of growing a planning-only presentation.
         .goalEditor(isPresented: newGoalSheet) {
             if let g = model.newGoalGroup {
                 GoalCreateSheet(
-                    // One list, and it is the tab they were on: the sheet states the
-                    // group instead of offering it, and derives `participantIds` from
-                    // these members.
                     lists: [g.asGoalList],
                     defaultListId: g.listId,
-                    // DELIBERATELY EMPTY. `members` only feeds the editor's "New group"
-                    // sheet, which `lockedListId` removes — and handing it `sync.members`
-                    // would make this presentation observe SyncManager and re-lay-out the
-                    // whole editor on every unrelated sync mutation (the thing that hung
-                    // the Chores board's editor; see `TasksStep.editor`).
+                    // DELIBERATELY EMPTY. `members` only feeds the editor's "New group" sheet,
+                    // which `lockedListId` removes — and handing it `sync.members` would make
+                    // this presentation observe SyncManager and re-lay-out the whole editor on
+                    // every unrelated sync mutation (see `TasksStep.editor`).
                     members: [],
                     lockedListId: g.listId,
                     startFeatured: true
                 ) { goalBody, _ in
-                    // The GROUP IS CAPTURED HERE, synchronously, not read back off the
-                    // model inside the task: the editor dismisses itself on submit, which
-                    // clears the sheet flag before the task runs.
+                    // The GROUP IS CAPTURED HERE, synchronously: the editor dismisses itself
+                    // on submit, which clears the sheet flag before the task runs.
                     let target = g.listId
                     Task {
                         let made = await model.submitNewGoal(
                             sessionId: props.sessionId, listId: target, body: goalBody)
-                        // The goal lives in the goals module, so tell the shell to
-                        // re-read: the agenda sheet and the counter should agree. ONLY ON
-                        // A REAL SAVE — a refresh flips the shell busy and greys the whole
-                        // step out, which over a goal that never saved is a second, false
-                        // failure on top of the banner.
+                        // ONLY ON A REAL SAVE: a refresh flips the shell busy and greys the
+                        // whole step out, which over a goal that never saved is a second,
+                        // false failure on top of the banner.
                         if made { props.refresh() }
                     }
                 }
@@ -118,9 +81,6 @@ struct GoalsStepView: View {
         }
     }
 
-    /// The presentation flag, over the model's own state — the model, not the view,
-    /// decides which group is being added to, so a refetch that lands mid-compose cannot
-    /// move it.
     private var newGoalSheet: Binding<Bool> {
         Binding(
             get: { model.newForListId != nil },
@@ -135,8 +95,8 @@ struct GoalsStepView: View {
                 HStack(spacing: 8) {
                     ForEach(model.groups) { tab($0) }
                 }
-                // Room for the selected chip's 1.5pt border, which a clipped scroll view
-                // would otherwise shave off the first and last tab.
+                // Room for the selected chip's 1.5pt border, which a clipped scroll view would
+                // otherwise shave off the first and last tab.
                 .padding(.horizontal, 2).padding(.vertical, 2)
             }
             Text("\(model.settledCount) of \(model.groups.count) settled")
@@ -154,15 +114,11 @@ struct GoalsStepView: View {
                     .font(.system(size: 13.5, weight: .semibold))
                     .foregroundStyle(on ? WF.ink : WF.ink2)
                     .lineLimit(1)
-                // The lock is the list's own privacy showing through — the server never
-                // sent this tab to anyone outside the group in the first place.
                 if g.isPrivate { Text("🔒").font(.system(size: 10)) }
                 if g.settled {
                     Text("★").font(.system(size: 12, weight: .bold)).foregroundStyle(WF.gold)
                 }
             }
-            // 14 rather than the usual 12: a settled tab's ★ is the last thing in the row,
-            // and `wfChip` clips to a capsule whose curve eats into the ends.
             .padding(.horizontal, 14).padding(.vertical, 8)
             .wfChip(selected: on)
         }
@@ -194,12 +150,6 @@ struct GoalsStepView: View {
         }
     }
 
-    /// The escape hatch, right under the verdict: nothing in this group is worth the
-    /// week, so make the thing that is.
-    ///
-    /// GATED ON THE GOALS MODULE'S OWN RULE, not on nothing: `goal.manage` holders may add
-    /// to any group, everybody else only to a group that is just them. Offering the editor
-    /// for a group the server would refuse is show-then-403, so the button says why.
     private func newGoalButton(
         _ g: WaffledAPI.PlanningGoalGroup, frozen: Bool
     ) -> some View {
@@ -243,8 +193,6 @@ struct GoalsStepView: View {
         }
     }
 
-    /// The group's people, overlapped. Four at most — beyond that the sub line already says
-    /// how many there are, and a fifth face only makes the stack unreadable.
     private func avatarStack(_ members: [WaffledAPI.PlanningGoalMember]) -> some View {
         HStack(spacing: -8) {
             ForEach(members.prefix(4)) { m in
@@ -282,8 +230,6 @@ struct GoalsStepView: View {
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
 
-                    // "kind · pace": what the goal is, then how it's actually going, in the
-                    // server's words and one of its three tones.
                     HStack(spacing: 4) {
                         Text(PlanningGoalsText.kindLabel(g))
                             .font(.system(size: 11.5, weight: .semibold))
@@ -333,8 +279,6 @@ struct GoalsStepView: View {
         .accessibilityAddTraits(checked ? [.isSelected] : [])
     }
 
-    /// Not a "clear" button — an OPTION, so choosing it is as much of an answer as choosing
-    /// a goal, and the tab gets its ★ either way.
     private func nothingOption(_ g: WaffledAPI.PlanningGoalGroup, frozen: Bool) -> some View {
         let checked = g.settled && g.focusGoalId == nil
         return Button { pick(listId: g.listId, goalId: nil) } label: {
@@ -367,9 +311,6 @@ struct GoalsStepView: View {
 
     // MARK: - Writes
 
-    /// The read, and the crumb it produces. Set here as well as on the `rev` change: a
-    /// remount whose fetch fails must not leave the shell holding a crumb it will replace
-    /// the step's data with.
     private func reload() async {
         await model.load(sessionId: props.sessionId)
         if let crumb = model.crumb { props.setDecisionData(crumb) }
@@ -379,9 +320,6 @@ struct GoalsStepView: View {
         guard !model.isFrozen(shellBusy: props.busy) else { return }
         Task {
             await model.pick(sessionId: props.sessionId, listId: listId, goalId: goalId)
-            // The flag lives in the goals module, so tell the shell to re-read: the agenda
-            // sheet and the counter should agree with what just happened. (The crumb rides
-            // the `rev` bump above rather than being set here twice.)
             props.refresh()
         }
     }

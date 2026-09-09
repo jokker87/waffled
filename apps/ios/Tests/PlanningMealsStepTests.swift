@@ -2,35 +2,17 @@ import Foundation
 import Testing
 @testable import Waffled
 
-// Weekly Planning · step 7 (Meals).
-//
-// FOUR THINGS HERE ARE WORTH MORE THAN THE REST:
-//
-//  1. THE THREE-WAY `cards`. Absent means "server, draft it"; a real array means "apply
-//     the week we approved"; anything else present means "write nothing". So the body must
-//     OMIT THE KEY — not send a null — and the test has to fail if anybody ever writes
-//     `body["cards"] = cards.map(…) ?? .null`, because that silently turns the one AI
-//     button into a no-op that still reports success.
-//  2. THE UNDO KEEPS A NIGHT DECIDED SINCE. `kept` is not a failure: the night leaves the
-//     undoable set WITHOUT being cleared, keeps whatever somebody put there, and the copy
-//     names it.
-//  3. THE SHOPPER RULE. Handing the trip to somebody else is `chore.manage`; putting it on
-//     yourself or leaving it up for grabs is not. And a refused write must not mutate
-//     anything or refetch.
-//  4. THE FILLED-NIGHT RECEIPT ROUND-TRIPS `mealId`. It is the only dimension that tells a
-//     night filled with the title "BBQ Sunday" from a night since hand-changed to the
-//     PLATE of that name — drop it and the undo clears somebody's decision.
+// Weekly Planning · step 7 (Meals). Four things carry the weight: the THREE-WAY `cards` (the body
+// must OMIT THE KEY, never send a null); the undo KEEPING a night decided since; the shopper rule;
+// and the receipt round-tripping `mealId`, the only dimension separating a filled title from a PLATE.
 
 private enum MealsStepFailure: Error { case rejected }
 
 // MARK: - The week, VERBATIM off the wire
 //
-// Field-for-field what `mealsStepView` returns and what
-// `apps/api/test/weekly-planning-meals.integration.test.ts` drives: the household plans
-// the week of Sunday 2026-09-06; four nights are already decided (a recipe with a real
-// cook, a recipe without one, "Leftovers" and "Eating out") and three are empty; the empty
-// Wednesday carries a real event, while the Sunday's meal-plan MIRROR event is absent
-// because the server filters `origin in ('meal_plan','meal_prep')` out of the context.
+// Field-for-field what `mealsStepView` returns and what the API integration test drives. The
+// Sunday's meal-plan MIRROR event is absent because the server filters
+// `origin in ('meal_plan','meal_prep')` out of the context.
 
 private let weekNights = """
 [
@@ -73,15 +55,11 @@ private let weekJSON = Data("""
 }
 """.utf8)
 
-/// The trip, read back off a REAL one-off chore — which is why it carries a `choreId` the
-/// client hands back on every later read and write.
 private let tripJSON = """
 { "choreId": "c-groceries", "personId": "p-kevin", "personName": "Kevin", "personAvatar": "🧢",
   "personColor": "#EC6049", "dueOn": "2026-09-12", "dueTime": "09:00", "status": "pending" }
 """
 
-/// `PUT /shopper`'s answer: the trip, plus the whole week again — the plan is unchanged, but
-/// the server still re-reads and returns it, so the client never has to merge.
 private let shopperJSON = Data("""
 {
   "weekStart": "2026-09-06",
@@ -97,9 +75,6 @@ private let shopperJSON = Data("""
 }
 """.utf8)
 
-/// The same week after a fill: the three empties now carry drafted dishes, and the grocery
-/// line has moved with the plan (9 → 14, which is what makes "5 items added" MEASURED
-/// rather than claimed).
 private let filledWeekJSON = """
 {
   "weekStart": "2026-09-06",
@@ -127,8 +102,7 @@ private let filledWeekJSON = """
 }
 """
 
-/// What the fill wrote — the receipt, `mealId` null on every claim because a fill writes
-/// recipes and titles, never plates.
+/// The receipt: `mealId` null on every claim because a fill writes recipes and titles, never plates.
 private let fillJSON = Data("""
 {
   "weekStart": "2026-09-06",
@@ -141,8 +115,7 @@ private let fillJSON = Data("""
 }
 """.utf8)
 
-/// The undo that hit a night somebody decided since: two cleared, ONE KEPT — and the kept
-/// night comes back still carrying what they put there ("Grandma's").
+/// The undo that hit a night somebody decided since: two cleared, ONE KEPT, still carrying it.
 private let undoJSON = Data("""
 {
   "weekStart": "2026-09-06",
@@ -167,9 +140,7 @@ private let undoJSON = Data("""
 }
 """.utf8)
 
-/// A night that is a PLATE: recipe-less, carrying a `mealId`, with the plate's NAME as its
-/// title — and the plate is deliberately called something a takeout classifier would bite
-/// on, because that is the bug the plate branch exists to stop.
+/// A night that is a PLATE: recipe-less, carrying a `mealId`, named so a takeout classifier bites.
 private let plateNightJSON = Data("""
 { "date": "2026-09-09", "events": [],
   "dinner": { "entryId": "e-wed", "title": "Takeout Tuesday", "emoji": null, "recipeId": null,
@@ -195,8 +166,6 @@ private final class MealsFeed {
     var undoFails = false
     var shopperForbidden = false
     var shopperFails = false
-    /// Park the fill mid-flight, so "one write at a time" can be asserted deterministically
-    /// rather than by racing two tasks and hoping they interleave.
     var holdFill = false
     var fillGate: CheckedContinuation<Void, Never>?
 
@@ -225,8 +194,6 @@ private func model(_ feed: MealsFeed) -> PlanningMealsModel {
             return feed.view
         },
         fill: { weekStart, cards in
-            // Recorded as the BODY, not as the arguments: the encoding is the thing that
-            // can be wrong, and it is what the server actually reads.
             feed.fillBodies.append(PlanningMealsWire.fillBody(weekStart: weekStart, cards: cards))
             if feed.holdFill {
                 await withCheckedContinuation { feed.fillGate = $0 }
@@ -266,14 +233,11 @@ private func model(_ feed: MealsFeed) -> PlanningMealsModel {
     @Test func omitsTheCardsKeyEntirelyWhenTheServerShouldDraft() throws {
         let body = PlanningMealsWire.fillBody(weekStart: "2026-09-06", cards: nil)
 
-        // THE ASSERTION THAT MATTERS: absent, not null. `body.cards === undefined` is what
-        // makes the server draft; a present null parses as "not a usable list" and writes
-        // NOTHING while still answering 200, so an app that sent one would report a week
-        // it never planned.
+        // THE ASSERTION THAT MATTERS: absent, not null. A present null parses as "not a usable
+        // list" and writes NOTHING while still answering 200.
         #expect(body["cards"] == nil)
         #expect(Array(body.keys) == ["weekStart"])
 
-        // …and it is still absent once encoded, which is the only form the server sees.
         let encoded = String(decoding: try JSONEncoder().encode(body), as: UTF8.self)
         #expect(!encoded.contains("cards"))
     }
@@ -296,8 +260,6 @@ private func model(_ feed: MealsFeed) -> PlanningMealsModel {
             "title": .string("Approved 3"),
             "recipeId": .null,
         ]))
-        // The step plans DINNERS, so every card says so — the server drops any that
-        // doesn't rather than moving somebody's lunch to 6pm.
         #expect(sent[1] == .object([
             "date": .string("2026-09-11"),
             "mealType": .string("dinner"),
@@ -307,10 +269,8 @@ private func model(_ feed: MealsFeed) -> PlanningMealsModel {
     }
 
     @Test func anEmptyApprovedWeekStaysPresentAndEmpty() {
-        // The third case, and the one that is easy to "helpfully" collapse to absent: an
-        // empty list is a caller that approved nothing, and the server writes nothing for
-        // it (`chosen = []` skips the drafting branch, and the fill loop has nothing to
-        // iterate). Turning it into absent would hand the family a week they never saw.
+        // The third case, easy to "helpfully" collapse to absent — which hands the family a week
+        // they never saw.
         let body = PlanningMealsWire.fillBody(weekStart: "2026-09-06", cards: [])
         #expect(body["cards"] == .array([]))
     }
@@ -334,10 +294,8 @@ private func model(_ feed: MealsFeed) -> PlanningMealsModel {
                 "date": .string("2026-09-09"),
                 "entryId": .string("e-wed"),
                 "recipeId": .null,
-                // WITHOUT THIS the undo would clear a decision it never made: a night
-                // filled with the bare title "BBQ Sunday" and a night since hand-changed
-                // to the PLATE "BBQ Sunday" agree on entryId, recipeId and title, because
-                // the upsert keeps the row id.
+                // WITHOUT THIS the undo would clear a decision it never made: a filled title and a
+                // hand-picked PLATE of the same name agree on entryId, recipeId and title.
                 "mealId": .string("m-copy-1"),
                 "title": .string("BBQ Sunday"),
             ]),
@@ -364,8 +322,8 @@ private func model(_ feed: MealsFeed) -> PlanningMealsModel {
 @Suite struct PlanningMealsShopperBodyTests {
 
     @Test func clearingTheTripSendsExplicitNulls() {
-        // `dueOn: null` is "no trip this week" — the chore is REMOVED. A body built with
-        // `if let` would omit the key and the clear would be a silent no-op.
+        // `dueOn: null` is "no trip this week" — the chore is REMOVED. A body built with `if let`
+        // would omit the key and the clear would be a silent no-op.
         let body = PlanningMealsWire.shopperBody(
             weekStart: "2026-09-06", dueOn: nil, personId: nil, dueTime: nil, choreId: "c-1")
         #expect(body["dueOn"] == .null)
@@ -380,9 +338,7 @@ private func model(_ feed: MealsFeed) -> PlanningMealsModel {
 @Suite struct PlanningMealsShopperCapabilityTests {
 
     @Test func handingTheTripToSomebodyElseNeedsChoreManage() {
-        // The server's own rule (`meals.routes.ts`): `personId !== null && personId !==
-        // tenant.personId` requires `chore.manage`. Stated client-side so the picker never
-        // offers a tap that 403s.
+        // The server's own rule, stated client-side so the picker never offers a tap that 403s.
         #expect(!PlanningMealsShopper.mayAssign(
             personId: "p-wally", myPersonId: "p-kevin", canManage: false))
         #expect(PlanningMealsShopper.mayAssign(
@@ -392,15 +348,13 @@ private func model(_ feed: MealsFeed) -> PlanningMealsModel {
     @Test func puttingItOnYourselfOrUpForGrabsNeedsNothing() {
         #expect(PlanningMealsShopper.mayAssign(
             personId: "p-kevin", myPersonId: "p-kevin", canManage: false))
-        // Up for grabs is a real answer, not an assignment.
         #expect(PlanningMealsShopper.mayAssign(
             personId: nil, myPersonId: "p-kevin", canManage: false))
         #expect(PlanningMealsShopper.mayAssign(personId: nil, myPersonId: nil, canManage: false))
     }
 
     @Test func aDeviceWithNoPersonCannotClaimTheTripForItself() {
-        // A kiosk identity has no person of its own, so "that's me" is not available to
-        // it — the capability is the only way through.
+        // A kiosk identity has no person of its own, so "that's me" is not available to it.
         #expect(!PlanningMealsShopper.mayAssign(
             personId: "p-kevin", myPersonId: nil, canManage: false))
     }
@@ -419,11 +373,8 @@ private func model(_ feed: MealsFeed) -> PlanningMealsModel {
         ])
         #expect(view.emptyDates == ["2026-09-09", "2026-09-11", "2026-09-12"])
         #expect(view.nights[0].dinner?.title == "Pasta bake")
-        // A cook is REAL data (`cook_person_id`); every other night reports null and the
-        // tile falls back to what the recipe knows.
         #expect(view.nights[0].dinner?.cookName == "Kevin")
         #expect(view.nights[1].dinner?.cookName == nil)
-        // The seeded recipes carry no times, so minutes is honestly null rather than 0.
         #expect(view.nights[1].dinner?.minutes == nil)
         #expect(view.groceries?.items == 9)
         #expect(view.groceries?.checked == 2)
@@ -440,9 +391,8 @@ private func model(_ feed: MealsFeed) -> PlanningMealsModel {
     }
 
     @Test func aPayloadMissingAnArrayCostsThatArrayAndNotTheWeek() throws {
-        // Swift is stricter than the web here: a missing non-optional array THROWS and
-        // would fail the WHOLE view. A night with no `events` key, and an event with no
-        // `participantIds`, must both still decode.
+        // Swift throws on a missing non-optional array where the web shrugs, so it would fail the
+        // WHOLE view: a night with no `events`, and an event with no `participantIds`, must decode.
         let view = try WaffledAPI.decoder.decode(
             WaffledAPI.PlanningMealsView.self,
             from: Data("""
@@ -456,7 +406,6 @@ private func model(_ feed: MealsFeed) -> PlanningMealsModel {
         #expect(view.nights.count == 2)
         #expect(view.nights[0].events.isEmpty)
         #expect(view.nights[1].events[0].participantIds.isEmpty)
-        // …and the fields that were genuinely absent read as the honest default.
         #expect(view.emptyDates.isEmpty)
         #expect(!view.choresOn)
         #expect(view.groceries == nil)
@@ -465,7 +414,6 @@ private func model(_ feed: MealsFeed) -> PlanningMealsModel {
     @Test func decodesTheFillReceiptWithMealIdNullOnEveryClaim() throws {
         let fill = try WaffledAPI.decoder.decode(WaffledAPI.PlanningMealsFill.self, from: fillJSON)
         #expect(fill.filled.map(\.date) == ["2026-09-09", "2026-09-11", "2026-09-12"])
-        // A fill writes recipes and titles, never plates — so the receipt says so.
         #expect(fill.filled.allSatisfy { $0.mealId == nil })
         #expect(fill.view.emptyDates.isEmpty)
     }
@@ -480,9 +428,8 @@ private func model(_ feed: MealsFeed) -> PlanningMealsModel {
             WaffledAPI.PlanningMealsNight.self, from: plateNightJSON)
         let dinner = try #require(night.dinner)
 
-        // `recipeId == nil && mealId != nil` is the PLATE branch, checked before the
-        // classifier — otherwise a plate somebody called "Takeout Tuesday" would wear the
-        // takeout tile and claim "no cooking" about several dishes cooked from scratch.
+        // `recipeId == nil && mealId != nil` is the PLATE branch, checked BEFORE the classifier, or
+        // a plate called "Takeout Tuesday" wears the takeout tile and claims "no cooking".
         #expect(dinner.mealId == "m-copy-1")
         #expect(!PlanningMealsText.isEatingOut(dinner))
         #expect(PlanningMealsText.attribution(dinner, auto: false, eatingOut: false) == "a whole plate")
@@ -510,7 +457,6 @@ private func model(_ feed: MealsFeed) -> PlanningMealsModel {
     }
 
     @Test func theKeptNoteNamesTheNightsItWalkedPast() {
-        // "Undo the three" that clears two has to SAY so, or it reads as a bug.
         #expect(PlanningMealsText.keptSentence([]) == nil)
         #expect(PlanningMealsText.keptSentence(["2026-09-11"])
             == "one night was left alone — Fri has been decided since.")
@@ -527,7 +473,6 @@ private func model(_ feed: MealsFeed) -> PlanningMealsModel {
             { "choreId": "c-1", "personId": null, "personName": null, "personAvatar": null,
               "personColor": null, "dueOn": "2026-09-12", "dueTime": "09:00", "status": "pending" }
             """.utf8))
-        // Planned but unassigned is a REAL answer, not a blank.
         #expect(PlanningMealsText.tripLabel(unassigned) == "Up for grabs · Sat 09:00")
 
         let assigned = try WaffledAPI.decoder.decode(
@@ -546,10 +491,6 @@ private func model(_ feed: MealsFeed) -> PlanningMealsModel {
     }
 
     @Test func anAllDayEventSaysSoAndAnUnreadableInstantSaysNothing() throws {
-        // The clock itself is deliberately read in the DEVICE's zone — `startsAt` is a
-        // real instant, not a calendar label, and the web's `toLocaleTimeString` does the
-        // same — so it is not asserted here (the answer would depend on the machine).
-        // What IS asserted is the two branches that must never depend on a zone.
         let allDay = try WaffledAPI.decoder.decode(
             WaffledAPI.PlanningNightEvent.self,
             from: Data("""
@@ -563,13 +504,11 @@ private func model(_ feed: MealsFeed) -> PlanningMealsModel {
             from: Data("""
             { "id": "ev-2", "title": "Odd one", "startsAt": "not a timestamp", "allDay": false }
             """.utf8))
-        // Blank rather than a lie, and it must not crash the seven nights either.
         #expect(PlanningMealsText.clock(unreadable) == "")
     }
 
     @Test func dayLabelsAreReadInUTCBecauseADateIsALabel() {
-        // Parsed in a negative-offset zone a bare YYYY-MM-DD hands back the day before,
-        // which would print the whole week shifted by one weekday.
+        // In a negative-offset zone a bare YYYY-MM-DD parses to the day before, shifting the week.
         #expect(PlanningMealsText.dow("2026-09-06") == "Sun")
         #expect(PlanningMealsText.monthDay("2026-09-06") == "Sep 6")
     }
@@ -580,8 +519,7 @@ private func model(_ feed: MealsFeed) -> PlanningMealsModel {
 @Suite struct PlanningMealsCrumbTests {
 
     @Test func readsOnlyRealDaysOutOfWhateverTheSessionKept() {
-        // `step.data` is free-form by the time it comes back, so it is filtered rather
-        // than trusted.
+        // `step.data` is free-form by the time it comes back, so it is filtered rather than trusted.
         let data: [String: JSONValue] = [
             "autoFilled": .array([
                 .string("2026-09-09"), .string("nope"), .int(7), .string("2026-9-9"),
@@ -617,8 +555,7 @@ private func model(_ feed: MealsFeed) -> PlanningMealsModel {
         let model = model(feed)
         await model.load(weekStart: "2026-09-06", seed: [])
 
-        // No ✨ anywhere ⇒ nil, matching the web's `dates.length ? {…} : null`. An empty
-        // list would be a claim rather than an absence.
+        // No ✨ anywhere ⇒ nil, matching the web. An empty list would be a claim, not an absence.
         #expect(model.crumb == nil)
     }
 
@@ -626,8 +563,6 @@ private func model(_ feed: MealsFeed) -> PlanningMealsModel {
         let feed = try MealsFeed()
         let model = model(feed)
 
-        // A previous visit said Sunday and Wednesday were auto-filled. Sunday is still
-        // planned; Wednesday is now empty, so its mark is dropped.
         await model.load(weekStart: "2026-09-06", seed: ["2026-09-06", "2026-09-09"])
 
         #expect(model.autoMarks == ["2026-09-06"])
@@ -635,9 +570,7 @@ private func model(_ feed: MealsFeed) -> PlanningMealsModel {
         #expect(model.rows[0].attribution == "👤 Kevin") // a real cook still outranks ✨
         #expect(model.crumb == ["autoFilled": .array([.string("2026-09-06")])])
 
-        // AND THE UNDO IS NOT LIVE. A claim rebuilt from the view proves nothing — it
-        // would be compared against the very row it was read from — so the footer must
-        // still offer the fill, not "Undo the one".
+        // AND THE UNDO IS NOT LIVE: a rebuilt claim would be compared against its own source row.
         #expect(model.filled.isEmpty)
     }
 
@@ -657,7 +590,6 @@ private func model(_ feed: MealsFeed) -> PlanningMealsModel {
         #expect(model.crumb == ["autoFilled": .array([
             .string("2026-09-09"), .string("2026-09-11"), .string("2026-09-12"),
         ])])
-        // Measured, not claimed: 9 items before, 14 after.
         #expect(model.groceryAdded == 5)
         let wed = try #require(model.rows.first { $0.date == "2026-09-09" })
         #expect(wed.auto)
@@ -674,8 +606,7 @@ private func model(_ feed: MealsFeed) -> PlanningMealsModel {
         let landed = await model.undoTheFill(weekStart: "2026-09-06")
 
         #expect(landed)
-        // The claim went out with all three nights — the SERVER decides which are still
-        // undoable, and it answered "this one isn't".
+        // The claim went out with all three nights — the SERVER decides which are still undoable.
         guard case let .array(sent)? = feed.undoBodies[0]["filled"] else {
             Issue.record("the undo must send its receipt")
             return
@@ -683,18 +614,14 @@ private func model(_ feed: MealsFeed) -> PlanningMealsModel {
         #expect(sent.count == 3)
 
         #expect(model.kept == ["2026-09-11"])
-        // A kept night is no longer an auto-fill: it leaves the undoable set WITHOUT being
-        // cleared, so a second tap can't come back for it.
+        // A kept night leaves the undoable set WITHOUT being cleared, so a second tap can't return.
         #expect(model.filled.isEmpty)
         #expect(model.autoMarks.isEmpty)
-        // …and what somebody put there is still there.
         let fri = try #require(model.rows.first { $0.date == "2026-09-11" })
         #expect(fri.dinner?.title == "Grandma’s")
         #expect(!fri.auto)
-        // The copy has to name it, or "Undo the three" that cleared two reads as a bug.
         #expect(PlanningMealsText.keptSentence(model.kept)
             == "one night was left alone — Fri has been decided since.")
-        // The crumb followed: nothing is marked any more.
         #expect(model.crumb == nil)
     }
 
@@ -709,7 +636,6 @@ private func model(_ feed: MealsFeed) -> PlanningMealsModel {
         #expect(!landed)
         #expect(model.filled.isEmpty)
         #expect(model.errorMessage != nil)
-        // A failed write does not refetch — the week is exactly as it was.
         #expect(feed.fetchCount == 1)
         #expect(model.emptyDates == ["2026-09-09", "2026-09-11", "2026-09-12"])
     }
@@ -733,7 +659,6 @@ private func model(_ feed: MealsFeed) -> PlanningMealsModel {
         await model.planTheRest(weekStart: "2026-09-06")
         #expect(model.filled.count == 3)
 
-        // The picker writes through the meal-plan endpoint the Meals screen uses.
         feed.view = feed.fillResult.view
         let landed = await model.planNight(
             weekStart: "2026-09-06", date: "2026-09-11", recipeId: "r-curry", title: nil)
@@ -741,7 +666,6 @@ private func model(_ feed: MealsFeed) -> PlanningMealsModel {
         #expect(landed)
         #expect(feed.plannedSlots.map { $0.date } == ["2026-09-11"])
         #expect(feed.plannedSlots[0].recipeId == "r-curry")
-        // It left the undoable set AND the marks — a decision is not an auto-fill.
         #expect(model.filled.map(\.date) == ["2026-09-09", "2026-09-12"])
         #expect(model.crumb == ["autoFilled": .array([
             .string("2026-09-09"), .string("2026-09-12"),
@@ -754,11 +678,8 @@ private func model(_ feed: MealsFeed) -> PlanningMealsModel {
         await model.load(weekStart: "2026-09-06", seed: [])
         await model.planTheRest(weekStart: "2026-09-06")
 
-        // The write lands, the re-read after it does not (offline for a second). The
-        // loading contract keeps the previous view — which must NOT mean keeping the ✨:
-        // the tile would still say "the app picked this" about a night somebody just
-        // decided, and the crumb would still name it, so answering the step would record
-        // a night the family chose as auto-filled.
+        // The write lands, the re-read after it does not. The loading contract keeps the previous
+        // view — which must NOT keep the ✨, or the tile claims a night somebody just decided.
         feed.fetchFails = true
         let landed = await model.planNight(
             weekStart: "2026-09-06", date: "2026-09-11", recipeId: "r-curry", title: nil)
@@ -785,7 +706,6 @@ private func model(_ feed: MealsFeed) -> PlanningMealsModel {
         let feed = try MealsFeed()
         let model = model(feed)
         await model.load(weekStart: "2026-09-06", seed: [])
-        // Nothing to hint with yet, so the first write carries no chore id.
         #expect(model.choreHint == nil)
 
         #expect(await model.setShopper(
@@ -797,15 +717,13 @@ private func model(_ feed: MealsFeed) -> PlanningMealsModel {
         // A shopper write must not refetch the week — the answer already carries it.
         #expect(feed.fetchCount == 1)
 
-        // AND THE HINT NOW TRAVELS. It is what keeps a chore renamed on the Tasks board
-        // recognised as this week's trip instead of spawning a second "Groceries".
+        // AND THE HINT NOW TRAVELS: it keeps a renamed chore recognised as this week's trip.
         #expect(model.choreHint == "c-groceries")
         #expect(await model.setShopper(
             weekStart: "2026-09-06", dueOn: "2026-09-11", personId: nil, dueTime: nil))
         #expect(feed.shopperCalls.count == 2)
         #expect(feed.shopperCalls[1].choreId == "c-groceries")
-        // Up for grabs is a real answer, so it goes out as an explicit null rather than as
-        // "leave the assignee alone".
+        // Up for grabs goes out as an explicit null, not as "leave the assignee alone".
         #expect(PlanningMealsWire.shopperBody(
             weekStart: "2026-09-06", dueOn: "2026-09-11", personId: nil,
             dueTime: nil, choreId: "c-groceries")["personId"] == .null)
@@ -821,11 +739,9 @@ private func model(_ feed: MealsFeed) -> PlanningMealsModel {
             weekStart: "2026-09-06", dueOn: "2026-09-12", personId: "p-wally", dueTime: "09:00")
 
         #expect(!landed)
-        // The server's 403 is the authority; the client only avoids OFFERING the tap.
         #expect(model.errorMessage == "Only a parent can hand the shopping to somebody else.")
         #expect(model.view?.shopping == nil)
         #expect(feed.fetchCount == 1)
-        // …and the chore hint travelled, so a renamed chore is still this week's trip.
         #expect(feed.shopperCalls.count == 1)
         #expect(feed.shopperCalls[0].choreId == nil) // no trip yet, so nothing to hint with
     }
@@ -835,9 +751,8 @@ private func model(_ feed: MealsFeed) -> PlanningMealsModel {
         let model = model(feed)
         await model.load(weekStart: "2026-09-06", seed: [])
 
-        // The first fill is parked inside the stub, so the second genuinely arrives while
-        // a write is in flight. A quiet `return` there would report a week that was never
-        // written, because the control that called it has already changed its label.
+        // The first fill is parked inside the stub, so the second genuinely arrives while a write
+        // is in flight. A quiet `return` there would report a week that was never written.
         feed.holdFill = true
         let first = Task { await model.planTheRest(weekStart: "2026-09-06") }
         var spins = 0
@@ -862,9 +777,8 @@ private func model(_ feed: MealsFeed) -> PlanningMealsModel {
 
 // MARK: - The store the body and the footer share
 
-/// `.serialized` because these cases share the process-wide store the body and the footer
-/// meet in. They are all synchronous today, so they cannot interleave — but the first
-/// `await` anybody adds would make them flaky, and the flake would look like a store bug.
+/// `.serialized` because these cases share the process-wide store the body and the footer meet in.
+/// The first `await` anybody adds would make them flaky, and the flake would look like a store bug.
 @MainActor
 @Suite(.serialized) struct PlanningMealsStepStoreTests {
 
@@ -873,8 +787,7 @@ private func model(_ feed: MealsFeed) -> PlanningMealsModel {
         store.reset()
         let feed = try MealsFeed()
 
-        // The body resolves first (it is built first), the footer second. If these were
-        // two models the ✨ the footer's fill writes would never reach the body's nights.
+        // The body resolves first, the footer second. Two models and the footer's ✨ never lands.
         let body = store.model(sessionId: "s-1", weekStart: "2026-09-06", make: { model(feed) })
         let footer = store.model(sessionId: "s-1", weekStart: "2026-09-06", make: { model(feed) })
 
@@ -891,8 +804,7 @@ private func model(_ feed: MealsFeed) -> PlanningMealsModel {
         let next = store.model(sessionId: "s-2", weekStart: "2026-09-13", make: { model(feed) })
 
         #expect(first !== next)
-        // Single-slot: asking for the old key again builds a fresh model rather than
-        // handing back a stale one, so a previous week's undo receipt can never be live.
+        // Single-slot: asking for the old key builds a fresh model, so a stale receipt can't live.
         let again = store.model(sessionId: "s-1", weekStart: "2026-09-06", make: { model(feed) })
         #expect(again !== first)
         store.reset()
@@ -906,15 +818,9 @@ private func model(_ feed: MealsFeed) -> PlanningMealsModel {
 
 // MARK: - "Plan the rest" brings up the planner
 //
-// THE BUG THESE WERE WRITTEN FOR. The web's footer control does exactly one thing —
-// `set({ planner: true })` — and the shared "Plan my week" planner renders from the step
-// BODY, off the same store, because "the button that opens it is in FooterExtra and the
-// planner renders from Body — two sibling trees". The iOS port replaced that click with a
-// direct headless fill, so the step's one AI action had no screen to bring up: "plan the
-// rest AI didn't bring up the screen/work".
-//
-// The presentation flag therefore has to live on the MODEL (the thing both trees share),
-// which is also the only place a test can reach it — a footer button is a View.
+// The web's footer control does exactly one thing — `set({ planner: true })` — and the shared
+// planner renders from the step BODY off the same store, because the two are sibling trees. So the
+// presentation flag has to live on the MODEL, which is also the only place a test can reach it.
 
 @MainActor
 @Suite struct PlanningMealsPlannerTests {
@@ -929,14 +835,11 @@ private func model(_ feed: MealsFeed) -> PlanningMealsModel {
 
         #expect(model.plannerOpen)
         // THE REGRESSION GUARD: tapping the control must not draft a week nobody has seen.
-        // The port fired the fill from here, which is why there was never a screen.
         #expect(feed.fillBodies.isEmpty)
         #expect(model.filled.isEmpty)
     }
 
-    /// Every night planned ⇒ there is nothing for the planner to draft, and the control is
-    /// disabled with a title saying so (the web does the same). Belt on the model, so the
-    /// flag can't be flipped from somewhere that forgot to check.
+    /// Every night planned ⇒ nothing to draft. Belt on the model, not just the disabled control.
     @Test func aFullWeekCannotOpenThePlanner() async throws {
         let feed = try MealsFeed()
         feed.view = try WaffledAPI.decoder.decode(
@@ -952,8 +855,6 @@ private func model(_ feed: MealsFeed) -> PlanningMealsModel {
         #expect(!model.plannerOpen)
     }
 
-    /// The planner is a presentation, so the sheet must be able to close it from the
-    /// inside — `dismiss()` writes back through the binding.
     @Test func theSheetCanCloseItself() async throws {
         let feed = try MealsFeed()
         let model = model(feed)
@@ -964,10 +865,8 @@ private func model(_ feed: MealsFeed) -> PlanningMealsModel {
         #expect(!model.plannerOpen)
     }
 
-    /// The whole point of routing the approved week through the step's OWN fill endpoint:
-    /// it refuses a night somebody already decided and hands back the receipt the undo
-    /// checks. So the cards must travel as a PRESENT ARRAY (the other half of the
-    /// three-way rule asserted above), and the planner must close.
+    /// The point of routing the approved week through the step's OWN fill endpoint: it refuses a
+    /// night somebody already decided and hands back the receipt. So the cards travel as an ARRAY.
     @Test func theApprovedWeekTravelsAsARealArrayAndClosesThePlanner() async throws {
         let feed = try MealsFeed()
         let model = model(feed)
@@ -989,20 +888,17 @@ private func model(_ feed: MealsFeed) -> PlanningMealsModel {
             return
         }
         #expect(sent.count == 3)
-        // …and the receipt from the fill is what makes the undo live.
         #expect(model.filled.map(\.date) == ["2026-09-09", "2026-09-11", "2026-09-12"])
     }
 
-    /// A week that narrows to nothing must NOT be sent. `cards: []` is "present but not a
-    /// usable list", which the server answers 200 to while writing nothing — so firing it
-    /// would report a week that was never planned. Say so instead.
+    /// A week that narrows to nothing must NOT be sent. `cards: []` is "present but not a usable
+    /// list", answered 200 while writing nothing — so firing it would report a week never planned.
     @Test func anApprovedWeekThatNarrowsToNothingIsNeverSent() async throws {
         let feed = try MealsFeed()
         let model = model(feed)
         await model.load(weekStart: "2026-09-06", seed: [])
         model.openPlanner()
 
-        // Sunday and Monday are already decided — nothing here lands on an empty night.
         let landed = await model.applyPlan(
             weekStart: "2026-09-06",
             approved: [planCard("2026-09-06", title: "Nope", recipeId: nil),
@@ -1019,10 +915,8 @@ private func model(_ feed: MealsFeed) -> PlanningMealsModel {
 
 @Suite struct PlanningMealsPlanNarrowingTests {
 
-    /// "The only day chips are the EMPTY nights" — and they must round-trip through the
-    /// planner's own key, which is `yyyy-MM-dd` in the HOUSEHOLD's zone. Get the zone (or
-    /// the hour) wrong and no chip is selected, so "✨ Plan my week" is disabled and the
-    /// control is a silent no-op all over again.
+    /// The day chips are the EMPTY nights, and they must round-trip through the planner's own key,
+    /// `yyyy-MM-dd` in the HOUSEHOLD's zone — get the zone wrong and no chip is selected.
     @Test func theEmptyNightsBecomeDatesThatRoundTripInTheHouseholdZone() {
         let tz = TimeZone(identifier: "America/Los_Angeles")!
         let days = PlanningMealsPlan.plannerDays(["2026-09-09", "2026-09-11", "2026-09-12"], tz: tz)
@@ -1047,9 +941,7 @@ private func model(_ feed: MealsFeed) -> PlanningMealsModel {
         #expect(PlanningMealsPlan.plannerDays(["not-a-day", ""], tz: tz).isEmpty)
     }
 
-    /// The approved cards, narrowed to what this step promised: DINNERS, on the nights
-    /// that are still empty. The server enforces both, but a client that sent more would
-    /// report a count nobody wrote.
+    /// The approved cards, narrowed to what this step promised: DINNERS, on the nights still empty.
     @Test func onlyDinnersOnStillEmptyNightsTravel() {
         let cards = PlanningMealsPlan.cards(
             from: [
@@ -1064,7 +956,6 @@ private func model(_ feed: MealsFeed) -> PlanningMealsModel {
         #expect(cards.allSatisfy { $0.mealType == "dinner" })
         #expect(cards[0].recipeId == "r-sheet")
         #expect(cards[0].title == "Sheet-pan chicken")
-        // A recipe-less card keeps its title — that is how "Leftovers" gets planned.
         let bare = PlanningMealsPlan.cards(
             from: [planCard("2026-09-11", title: "Chili", recipeId: nil)],
             emptyDates: ["2026-09-11"])
@@ -1073,8 +964,6 @@ private func model(_ feed: MealsFeed) -> PlanningMealsModel {
         #expect(bare[0].title == "Chili")
     }
 
-    /// A card with neither a recipe nor a title is nothing at all: the fill would skip it
-    /// server-side, and counting it here would overstate what was planned.
     @Test func aCardWithNothingOnItIsDropped() {
         let cards = PlanningMealsPlan.cards(
             from: [planCard("2026-09-09", title: "   ", recipeId: nil)],
@@ -1082,8 +971,6 @@ private func model(_ feed: MealsFeed) -> PlanningMealsModel {
         #expect(cards.isEmpty)
     }
 
-    /// The one-line note the step puts above the planner's guardrails, so the narrowing is
-    /// stated rather than merely implied by which chips are there.
     @Test func theNoteNamesHowManyNightsAreInPlayAndWhatIsLeftAlone() {
         #expect(PlanningMealsText.plannerNote(3)
             == "Planning the three empty nights — the rest stay as they are.")

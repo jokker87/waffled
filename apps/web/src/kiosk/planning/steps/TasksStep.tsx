@@ -17,39 +17,16 @@ import '../../../styles/planning-tasks.css'
 
 // Step 8 · Tasks — "Who's doing what?"
 //
-// Laid out by person, in the same columns the kiosk Chores screen uses, because that is
-// where the family already reads this. Everything nobody has taken sits in one strip
-// across the top with the member faces under it: tap a face and the chore moves to that
-// column; tap nobody and it stays up for grabs, which is a real answer and not an error
-// state. Each column's footer names the recurring load that person already carries, so
-// fairness is visible without anyone computing a score.
-//
-// EVERY MOVE IS REVERSIBLE. A card in a column carries the same faces as one in the
-// strip, plus a 🙌 that puts it back up for grabs — handing a chore over is a decision,
-// and a decision you can't take back is a trap. Both directions move the chore
-// definition AND every open day of it already sitting on a kiosk board, so the two
-// screens can never end up disagreeing about who has it.
-//
-// Dragging does the same thing as tapping, with the kiosk Chores board's own mechanism
-// (pointer events, not HTML5 draggable, so a mouse and the kiosk touchscreen behave the
-// same): grip → move over a column → drop. Tapping a face is not replaced by it — one
-// gesture for the person who reaches for drag, one for the person who doesn't.
-//
-// A COLUMN IS THE WEEK, NOT THE SITTING. Its contents come from the server read — what
-// that person is carrying for the week being planned — never from local "what I just
-// moved" state, so a refresh, a remount or the iPad picking up where the phone left off
-// all show the same board. Handing a chore out therefore re-reads rather than
-// bookkeeping in the component.
-//
-// The unit is the chore DEFINITION, not the day's instance: the session plans a week,
-// and an instance is one day. Handing one out is `PATCH /api/chores/:id` (plus an
-// assign of every open day already sitting on a board), and setting a one-off's day is
-// the same endpoint's `dueOn` — all existing chores endpoints, so this step writes
-// nothing of its own.
+// Laid out by person, in the kiosk Chores screen's own columns. Everything nobody has
+// taken sits in one strip with the member faces under it; tap nobody and it stays up for
+// grabs, a real answer and not an error state. EVERY MOVE IS REVERSIBLE, and both
+// directions move the chore DEFINITION and every open day of it already on a kiosk
+// board, so the two screens can never disagree. A COLUMN IS THE WEEK, NOT THE SITTING:
+// its contents come from the server read, so handing a chore out re-reads rather than
+// bookkeeping locally. Every write goes through existing chores endpoints.
 
 const SHORT_DAY = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
-// "9am", "9:30am" — the day chip is a glance, not a schedule.
 function shortTime(hhmm: string | null): string {
   if (!hhmm) return ''
   const [h, m] = hhmm.split(':').map(Number)
@@ -63,25 +40,20 @@ const weekdayOf = (iso: string) => SHORT_DAY[new Date(`${iso}T00:00:00Z`).getUTC
 const monthDay = (iso: string) =>
   new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
 
-// When this chore lands, in as few words as the chip can hold. Every branch is a fact
-// the server handed us — nothing here guesses a day.
 export function dayChip(c: PlanningTasksChore): string {
   const time = shortTime(c.dueTime)
   const withTime = (s: string) => (time ? `${s} ${time}` : s)
   if (c.carriedOver) return withTime('Carried over')
   if (c.days.length >= 7) return withTime('Every day')
   if (c.days.length > 0) return withTime(c.days.map(weekdayOf).join(', '))
-  // A one-off whose date is outside the week still says which day it is for.
   if (c.dueOn) return withTime(monthDay(c.dueOn))
   return 'No day set'
 }
 
 // A one-off's day can be moved (it lives on the single instance the chores module
-// materialized); a recurring chore's days come from its rrule and belong to the chore
-// editor, not to a chip on a board.
+// materialized); a recurring chore's days come from its rrule and belong to the editor.
 const dayIsSettable = (c: PlanningTasksChore) => c.cadence === 'once'
 
-// Where a card came from, as far as the chores module can honestly say.
 function provenance(c: PlanningTasksChore): string {
   if (c.carriedOver) return 'Left over from before this week'
   return c.cadence === 'once' ? 'One-off task' : 'Recurring chore'
@@ -92,18 +64,11 @@ function carriesLabel(n: number): string {
   return `Carries ${n} recurring chore${n === 1 ? '' : 's'}`
 }
 
-// One card, and FOUR regions that must never be mistaken for each other:
-//
-//   the grip (right)   pointer-down starts a drag — and only a drag: it preventDefaults,
-//                      so the browser fires no click behind it
-//   the day chip       opens the day picker, the fast path for the one field a board
-//                      like this changes most
-//   the faces          hand it over / take it back
-//   the title block    opens the app's own chore editor — the part of the card that
-//                      was inert, made into the affordance for everything else
-//
-// They are SIBLINGS, not nested: the editor's tap target is its own button around the
-// title and provenance line rather than the whole card body, so no click has to be
+// One card, and FOUR regions that must never be mistaken for each other: the grip starts a
+// drag and only a drag (it preventDefaults, so no click fires behind it); the day chip
+// opens the day picker; the faces hand it over or take it back; the title block opens the
+// app's own chore editor. They are SIBLINGS, not nested — the editor's tap target is its
+// own button around the title rather than the whole card body, so no click has to be
 // stopped from reaching a parent and no region can swallow another's tap.
 function ChoreCard({
   chore,
@@ -122,7 +87,6 @@ function ChoreCard({
   canAssign: boolean
   frozen: boolean
   onGive: (personId: string | null) => void
-  // Absent when this viewer can't save an edit anyway (see canAssign).
   onEdit?: () => void
   onDragStart: (e: React.PointerEvent) => void
   symbol: (currency: string | null) => string
@@ -130,7 +94,7 @@ function ChoreCard({
   const settable = canAssign && dayIsSettable(chore)
   const unset = chore.days.length === 0 && !chore.dueOn && !chore.carriedOver
   // Unset AND settable reads as an invitation; unset with nothing you can do about it
-  // stays the calm statement of fact it was.
+  // stays a calm statement of fact.
   const chipText = unset && settable ? 'Set a day' : dayChip(chore)
   return (
     <div className="chore wpt-card">
@@ -234,36 +198,31 @@ function ChoreCard({
 function Body({ weekStart, setDecisionData, refresh, busy }: StepBodyProps) {
   const [board, setBoard] = useState<PlanningTasksBoard | null>(null)
   const [error, setError] = useState(false)
-  // A hand-over that failed, which is NOT the same as the board failing to load: the board
-  // is fine and still shown, one write may be half-applied.
+  // A hand-over that failed, which is NOT the board failing to load: the board is fine,
+  // one write may be half-applied.
   const [giveError, setGiveError] = useState<string | null>(null)
   const [saving, setSaving] = useState<string | null>(null)
-  // Whose column's "+ Add for …" is open. `''` is the strip's own "Add a task" (nobody
-  // prefilled); null is closed.
+  // `''` is the strip's own "Add a task" (nobody prefilled); null is closed.
   const [adding, setAdding] = useState<string | null>(null)
-  // A parked note being turned INTO a task: its words seed the title, so nobody retypes
-  // what they already wrote down. Null whenever the modal was opened the ordinary way.
+  // A parked note turned INTO a task: its words seed the title. Null when opened normally.
   const [fromNote, setFromNote] = useState<string | null>(null)
 
-  // The verb this step lends the shell's parked-note banner. "Make a task" opens the
-  // very same `ChoreModal` the strip's own "Add a task" opens — the banner grows no
-  // composer of its own, which is what keeps one way to add a chore in this app.
+  // "Make a task" opens the very same `ChoreModal` the strip's own "Add a task" opens — the
+  // banner grows no composer of its own, so there is one way to add a chore.
   const finishHandoff = useHandoffAction('Make a task', (note) => {
     setFromNote(note)
     setAdding('')
   })
-  // The card whose chore is open in the EDITOR, with the column it sits in (a chore's
-  // "Who" isn't on the card payload — the column it's in is that fact).
+  // A chore's "Who" isn't on the card payload — the column it sits in is that fact.
   const [editing, setEditing] = useState<{ chore: PlanningTasksChore; owner: string | null } | null>(null)
-  // The net number of chores this sitting handed over — the only thing worth
-  // remembering locally, because the board itself can no longer tell you what moved
-  // today. A take-back undoes its own tally, or the recap would over-report.
+  // The net number handed over this sitting: the only thing worth remembering locally, and
+  // a take-back undoes its own tally or the recap would over-report.
   const [assigned, setAssigned] = useState(0)
 
   const { person } = useHousehold()
   const cur = useCurrencies()
-  // Moving a chore between people is chore.manage (the server enforces it, and the
-  // kiosk board hides its drag grip the same way) — so don't offer a tap that 403s.
+  // Moving a chore between people is chore.manage (the server enforces it), so don't offer
+  // a tap that 403s.
   const canAssign = can(person, 'chore.manage')
 
   const load = useCallback(() => {
@@ -277,16 +236,14 @@ function Body({ weekStart, setDecisionData, refresh, busy }: StepBodyProps) {
   }, [weekStart])
   useEffect(load, [load])
 
-  // The crumb kept on the session record: counts only. The recap reads through to
-  // chores for the detail, so copying chore rows here would just let the two disagree.
   const open = board?.unassigned.length ?? 0
   useEffect(() => {
     if (!board) return
     setDecisionData({ assigned, leftUpForGrabs: open })
   }, [board, assigned, open, setDecisionData])
 
-  // Move a chore to a person, or (personId null) back up for grabs. One path for the
-  // face row, the 🙌 and the drop — so a drag can never do something a tap can't undo.
+  // One path for the face row, the 🙌 and the drop — so a drag can never do something a
+  // tap can't undo.
   const give = useCallback(
     async (chore: PlanningTasksChore, personId: string | null) => {
       if (saving || busy) return
@@ -295,17 +252,12 @@ function Body({ weekStart, setDecisionData, refresh, busy }: StepBodyProps) {
         await planningTasksApi.handOut(chore, personId)
         setGiveError(null)
         setAssigned((n) => (personId ? n + 1 : Math.max(0, n - 1)))
-        // Re-read rather than bookkeeping: the column is the week, and the server owns it.
         load()
         refresh()
       } catch {
-        // HANDING A CHORE OVER IS TWO WRITES — the chore DEFINITION, then each pending
-        // so a failure here does not mean nothing moved. It must not claim otherwise, and must
-        // still re-read: skipping that leaves the card in its old column and the tally wrong
-        // until something else happens to refetch.
-        //
-        // We cannot know which half landed, so we ask the server instead of guessing, and
-        // say plainly that it may be half-done.
+        // HANDING A CHORE OVER IS TWO WRITES — the definition, then each pending instance —
+        // so a failure here does not mean nothing moved. It must not claim otherwise, and
+        // must still re-read: we cannot know which half landed, so we ask the server.
         setGiveError('That may not have gone through fully — the board has been re-read, so what you see is what’s saved.')
         load()
         refresh()
@@ -317,18 +269,16 @@ function Body({ weekStart, setDecisionData, refresh, busy }: StepBodyProps) {
   )
 
   // ── Drag-and-drop, the kiosk Chores board's mechanism ──────────────────────────
-  // Pointer events (not HTML5 draggable) so a mouse and the kiosk touchscreen behave
-  // identically. `drag` is set once per drag so the move/up listeners subscribe only
-  // once; `pos` drives the floating ghost and `overCol` the drop highlight, read live
-  // through a ref inside the up handler. A column's data-colkey is the person id;
-  // the strip's is 'unassigned' — the same two-way vocabulary the kiosk board uses.
+  // `drag` is set once per drag so the move/up listeners subscribe only once; `overCol` is
+  // read live through a ref inside the up handler. A column's data-colkey is the person
+  // id and the strip's is 'unassigned' — the kiosk board's own two-way vocabulary.
   const [drag, setDrag] = useState<{ chore: PlanningTasksChore; from: string | null } | null>(null)
   const [pos, setPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
   const [overCol, setOverCol] = useState<string | null>(null)
   const overColRef = useRef<string | null>(null)
   overColRef.current = overCol
-  // The drop lands after this render, so reach the live `give` through a ref rather
-  // than re-subscribing the window listeners on every keystroke of state.
+  // The drop lands after this render, so reach the live `give` through a ref rather than
+  // re-subscribing the window listeners on every keystroke of state.
   const giveRef = useRef(give)
   giveRef.current = give
 
@@ -378,8 +328,6 @@ function Body({ weekStart, setDecisionData, refresh, busy }: StepBodyProps) {
   const frozen = busy || saving !== null
   const isDropTarget = (colKey: string) => !!drag && overCol === colKey && colKey !== (drag.from ?? 'unassigned')
 
-  // Everything a card needs that isn't the card itself. One place, so a card in the
-  // strip and a card in a column can only differ by who owns it.
   const cardProps = (chore: PlanningTasksChore, owner: string | null) => ({
     chore,
     owner,
@@ -387,11 +335,9 @@ function Body({ weekStart, setDecisionData, refresh, busy }: StepBodyProps) {
     canAssign,
     frozen,
     onGive: (personId: string | null) => give(chore, personId),
-    // Editing a chore is PATCH /api/chores/:id, which the chores module gates on
-    // chore.manage — the same rule the kiosk board applies when it decides whether a
-    // card opens the editor. No looser rule here: a modal that 403s on Save is worse
-    // than no modal. BOTH the title and the day chip open this: one card, one editor,
-    // so a title change and a day change can't race each other on the same chore.
+    // chore.manage, the same rule the kiosk board applies: a modal that 403s on Save is
+    // worse than no modal. BOTH the title and the day chip open this one editor, so a
+    // title change and a day change can't race each other on the same chore.
     onEdit: canAssign ? () => setEditing({ chore, owner }) : undefined,
     onDragStart: (e: React.PointerEvent) => startDrag(e, chore, owner),
     symbol,
@@ -469,10 +415,9 @@ function Body({ weekStart, setDecisionData, refresh, busy }: StepBodyProps) {
 
       {/* The app's existing New chore modal, with Who already prefilled — never a
           second chore form of this step's own. '' prefills nobody (up for grabs).
-          Planning a week is mostly one-offs ("book the sitter", "return the books"),
-          so this surface defaults the modal to Just once, dated to the week being
-          planned rather than to whatever day this browser thinks it is. The Chores
-          screen, where a new chore is usually a standing one due today, keeps its own
+          Planning a week is mostly one-offs, so this surface defaults the modal to Just
+          once, dated to the week being planned rather than to whatever day this browser
+          thinks it is. The Chores screen keeps its own
           defaults — both of these are props, not a change to the modal. */}
       {adding !== null && (
         <ChoreModal
@@ -484,11 +429,9 @@ function Body({ weekStart, setDecisionData, refresh, busy }: StepBodyProps) {
           selfPersonId={person?.id ?? null}
           onClose={() => {
             setAdding(null)
-            // Closed without saving: the note stays on the banner, still needing doing.
             if (fromNote !== null) { setFromNote(null); finishHandoff(false) }
           }}
           onSaved={() => {
-            // Something was really created, so a note that opened this is settled.
             if (fromNote !== null) { setFromNote(null); finishHandoff(true) }
             savedChore()
           }}
@@ -496,16 +439,11 @@ function Body({ weekStart, setDecisionData, refresh, busy }: StepBodyProps) {
       )}
 
       {/* The same modal in its OTHER half: editing the chore this card stands for, so a
-          typo, the wrong stars or "actually this repeats weekly" is fixed here instead
-          of sending someone to the Chores screen mid-session.
-
-          The day IS in it: ChoreModal offers "On" for a one-off on edit as well as on
-          create, and the chip beside the title is the second door into this same modal.
-
-          DELETE IS OFF (canDelete={false}). The step asks who does what, not which
-          chores should exist: removing one here would reach far outside the week being
-          planned, and the Meals step's shopping trip is a real chore on this very board
-          whose identity other steps resolve by id. "Up for grabs" — one tap on 🙌 — is
+          typo or "actually this repeats weekly" is fixed here instead of sending someone to
+          the Chores screen mid-session. The day IS in it, and the chip beside the title is
+          the second door into this same modal. DELETE IS OFF (canDelete={false}): the step
+          asks who does what, not which chores should exist, and the Meals step's shopping
+          trip is a real chore on this board whose id other steps resolve. "Up for grabs" is
           the answer to "not this person", and the Chores screen still deletes. */}
       {editing && (
         <ChoreModal
@@ -513,13 +451,12 @@ function Body({ weekStart, setDecisionData, refresh, busy }: StepBodyProps) {
             id: editing.chore.id,
             title: editing.chore.title,
             emoji: editing.chore.emoji,
-            // The column IS the assignee; the strip means nobody.
             personId: editing.owner,
             rewardAmount: editing.chore.rewardAmount,
             rewardCurrency: editing.chore.rewardCurrency,
             rrule: editing.chore.rrule,
-            // The day the editor opens on, so tapping the chip lands on the day the
-            // card was showing. Omitting it would silently move the chore to today.
+            // The day the editor opens on, so tapping the chip lands on the day the card was
+            // showing. Omitting it would silently move the chore to today.
             dueOn: editing.chore.dueOn,
             dueTime: editing.chore.dueTime,
             requiresApproval: editing.chore.requiresApproval,

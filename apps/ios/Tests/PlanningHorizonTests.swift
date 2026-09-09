@@ -6,12 +6,9 @@ import Testing
 // and the month arithmetic.
 //
 // The decoding payloads are VERBATIM shapes from
-// `apps/api/test/weekly-planning-horizon.integration.test.ts`: the five tags a full
-// household is offered in session order (`connection, goals, meals, tasks, kids`), exactly
-// one of them primary, and the board of notes with their `stepLabel` composed server-side.
-// The case that matters most is the one that test asserts explicitly — with Tasks switched
-// off, NO tag carries `primary`, and the bar must then open on "No tag" rather than on
-// whatever happens to be first.
+// `apps/api/test/weekly-planning-horizon.integration.test.ts`. The case that matters most
+// is the one that test asserts explicitly — with Tasks switched off NO tag carries
+// `primary`, and the bar must then open on "No tag" rather than on whatever is first.
 
 private enum HorizonFailure: Error { case refused }
 
@@ -42,23 +39,17 @@ private let parkedNoteId = "44444444-4444-4444-8444-444444444444"
         """
         let view = try WaffledAPI.decoder.decode(WaffledAPI.HorizonView.self, from: Data(json.utf8))
 
-        // In the order they will come up in the session — the list is derived from the step
-        // catalog server-side, and the chips read down the session.
         #expect(view.tags.map(\.stepKey) == ["connection", "goals", "meals", "tasks", "kids"])
         // `primary` is OPTIONAL and absent on four of the five.
         #expect(view.tags.filter { $0.primary == true }.map(\.stepKey) == ["tasks"])
         #expect(view.tags[0].primary == nil)
-        // The label is the catalog's own title for that step.
         #expect(view.tags.first { $0.stepKey == "tasks" }?.label == "Tasks")
         #expect(view.parked.count == 2)
         #expect(view.parked[0].stepLabel == "Tasks")
-        // An untagged note is a real answer, and reads as one.
         #expect(view.parked[1].stepKey == nil)
         #expect(view.parked[1].stepLabel == nil)
     }
 
-    /// With the step a tag names switched off it is dropped — and with Tasks gone there is
-    /// NO primary at all.
     @Test func decodesTagsWithNoPrimary() throws {
         let json = """
         {"tags":[
@@ -74,7 +65,6 @@ private let parkedNoteId = "44444444-4444-4444-8444-444444444444"
         #expect(view.parked.isEmpty)
     }
 
-    /// A payload missing a list costs that list, never the step.
     @Test func decodesAViewWithNeitherKey() throws {
         let view = try WaffledAPI.decoder.decode(
             WaffledAPI.HorizonView.self, from: Data("{}".utf8))
@@ -89,13 +79,11 @@ private let parkedNoteId = "44444444-4444-4444-8444-444444444444"
 @Suite struct PlanningMonthTests {
 
     /// The month is read off the week-start STRING. A device in a negative offset parsing
-    /// "2026-09-01" as a local instant gets August back — which is the whole reason this
-    /// never goes near a `Date`.
+    /// "2026-09-01" as a local instant gets August back — hence no `Date` anywhere near it.
     @Test func readsTheMonthOffTheWeekStartString() {
         #expect(PlanningMonth.month(of: "2026-09-06")?.year == 2026)
         #expect(PlanningMonth.month(of: "2026-09-06")?.month == 9)
         #expect(PlanningMonth.month(of: "2027-01-01")?.month == 1)
-        // Garbage in, nil out — the caller falls back to the device's month.
         #expect(PlanningMonth.month(of: "") == nil)
         #expect(PlanningMonth.month(of: "not-a-date") == nil)
         #expect(PlanningMonth.month(of: "2026-13-01") == nil)
@@ -122,8 +110,8 @@ private let parkedNoteId = "44444444-4444-4444-8444-444444444444"
         #expect(PlanningMonth.label(year: 2026, month: 1) == "January 2026")
     }
 
-    /// 42 cells, six full weeks, cut on the HOUSEHOLD's first day — and the days outside
-    /// the month are marked so they can be dimmed rather than dropped.
+    /// 42 cells, six full weeks, cut on the HOUSEHOLD's first day; days outside the month
+    /// are marked so they can be dimmed rather than dropped.
     @Test func buildsFortyTwoCellsCutOnTheHouseholdsFirstDay() {
         let tz = TimeZone(identifier: "America/Chicago")!
         let sunday = PlanningMonth.cells(
@@ -135,8 +123,7 @@ private let parkedNoteId = "44444444-4444-4444-8444-444444444444"
 
         #expect(sunday.count == 42)
         #expect(monday.count == 42)
-        // September 2026 starts on a Tuesday: a Sunday-cut grid leads with Aug 30, a
-        // Monday-cut one with Aug 31.
+        // September 2026 starts on a Tuesday: a Sunday-cut grid leads with Aug 30.
         #expect(sunday.first?.key == "2026-08-30")
         #expect(monday.first?.key == "2026-08-31")
         #expect(sunday.first?.inMonth == false)
@@ -145,8 +132,6 @@ private let parkedNoteId = "44444444-4444-4444-8444-444444444444"
         #expect(sunday.filter(\.inMonth).count == 30)
     }
 
-    /// A day's dots are DISTINCT colours, capped at three, and a countdown replaces them
-    /// with its badge — the same rule the calendar's own month cell follows.
     @Test func resolvesDotsAndTheCountdownBadge() {
         let tz = TimeZone(identifier: "America/Chicago")!
         let day = "2026-09-08"
@@ -174,7 +159,6 @@ private let parkedNoteId = "44444444-4444-4444-8444-444444444444"
         #expect(badged?.countdownEmoji == "🎂")
         #expect(badged?.countdownLabel == "5d")
         #expect(badged?.extraCountdowns == 1)
-        // A day with nothing on it carries neither.
         let empty = cells.first { $0.key == "2026-09-09" }
         #expect(empty?.dotHexes.isEmpty == true)
         #expect(empty?.countdownLabel == nil)
@@ -204,8 +188,7 @@ private final class HorizonFeed {
     var fetchCount = 0
     var parkCalls: [(note: String, stepKey: String?, sessionId: String)] = []
     /// `stepKey` is DOUBLY optional on the way out: absent leaves the tag alone, and
-    /// `.some(nil)` is the real answer "No tag". Recording it flat would lose the
-    /// distinction the whole route is built on.
+    /// `.some(nil)` is the real answer "No tag".
     var updateCalls: [(id: String, note: String?, stepKey: String??, sessionId: String)] = []
 
     init(snapshot: WaffledAPI.HorizonView) { self.snapshot = snapshot }
@@ -242,8 +225,7 @@ private func model(_ feed: HorizonFeed) -> PlanningHorizonModel {
             feed.updateCalls.append((id, note, stepKey, sessionId))
             if feed.updateFails { throw HorizonFailure.refused }
             // The row the SERVER wrote: it echoes the whole note back, so an omitted field
-            // comes back unchanged rather than nil. The double optional is unwrapped once
-            // for "was the tag touched" and once for the value it was set to.
+            // comes back unchanged rather than nil.
             let existing = feed.snapshot.parked.first { $0.id == id }
             return WaffledAPI.PlanningParkedItem(
                 id: id, note: note ?? existing?.note ?? "",
@@ -256,8 +238,7 @@ private func model(_ feed: HorizonFeed) -> PlanningHorizonModel {
 @Suite struct PlanningHorizonModelTests {
 
     /// THREE STATES, NOT TWO. `unset` is "nobody has chosen" and resolves to the server's
-    /// primary; `noTag` is the deliberate answer. Collapsing them would make the default
-    /// unrepresentable.
+    /// primary; `noTag` is the deliberate answer. Collapsing them loses the default.
     @Test func theTagStartsOnTheServersPrimary() async {
         let feed = HorizonFeed(snapshot: WaffledAPI.HorizonView(tags: fullTags, parked: []))
         let m = model(feed)
@@ -276,8 +257,6 @@ private func model(_ feed: HorizonFeed) -> PlanningHorizonModel {
         #expect(m.chosenLabel == nil)
     }
 
-    /// With Tasks switched off nothing is primary, so the bar opens on NO TAG rather than
-    /// on whatever happens to be first in the list.
     @Test func withNoPrimaryTheBarOpensOnNoTag() async {
         let feed = HorizonFeed(
             snapshot: WaffledAPI.HorizonView(
@@ -289,8 +268,6 @@ private func model(_ feed: HorizonFeed) -> PlanningHorizonModel {
         #expect(m.chosenLabel == nil)
     }
 
-    /// A tagged note carries the DESTINATION step — the same thing step 1 writes when it
-    /// routes one — and the board shows the row the server actually stored.
     @Test func parksWithATag() async {
         let feed = HorizonFeed(snapshot: WaffledAPI.HorizonView(tags: fullTags, parked: []))
         let m = model(feed)
@@ -312,8 +289,6 @@ private func model(_ feed: HorizonFeed) -> PlanningHorizonModel {
         #expect(m.decisionData["parked"] == .int(1))
     }
 
-    /// "No tag" sends NO `stepKey` at all — the absence of a tag, not a tag called
-    /// nothing — and the board says so.
     @Test func parksWithoutATag() async {
         let feed = HorizonFeed(snapshot: WaffledAPI.HorizonView(tags: fullTags, parked: []))
         let m = model(feed)
@@ -349,7 +324,6 @@ private func model(_ feed: HorizonFeed) -> PlanningHorizonModel {
         #expect(m.parked.map(\.note) == ["Already here"])
         #expect(m.errorMessage == LooseEndCopy.writeFailed)
         #expect(m.parking == false)
-        // The tag it was going to carry is still chosen, so a retry doesn't lose it.
         #expect(m.tagChoice == .step("kids"))
         #expect(m.decisionData["parked"] == .int(1))
     }
@@ -365,8 +339,7 @@ private func model(_ feed: HorizonFeed) -> PlanningHorizonModel {
         #expect(m.errorMessage == nil)
     }
 
-    /// A failed refresh keeps the tags and the board it already had, and still counts as
-    /// loaded — the shared REST loading contract.
+    /// A failed refresh still counts as loaded — the shared REST loading contract.
     @Test func aFailedRefreshKeepsTheTagsAndTheBoard() async {
         let feed = HorizonFeed(snapshot: WaffledAPI.HorizonView(tags: fullTags, parked: []))
         let m = model(feed)
@@ -380,8 +353,7 @@ private func model(_ feed: HorizonFeed) -> PlanningHorizonModel {
         #expect(feed.fetchCount == 2)
     }
 
-    /// The crumb is COUNTS ONLY. Nothing here has to survive a second visit: the board is
-    /// read back from the table that owns it, and the recap reads the calendar itself.
+    /// The crumb is COUNTS ONLY: the board is read back from the table that owns it.
     @Test func theCrumbIsCountsOnly() async {
         let feed = HorizonFeed(snapshot: WaffledAPI.HorizonView(tags: fullTags, parked: []))
         let m = model(feed)
@@ -414,10 +386,8 @@ private func model(_ feed: HorizonFeed) -> PlanningHorizonModel {
                 ]))
     }
 
-    /// "Parked in this session — I have no way to edit the item or change the category and
-    /// I should." Fixing the words sends ONLY the words: `stepKey` absent means "leave the
-    /// tag alone", and sending it unchanged would rewrite this note's route entry for
-    /// nothing.
+    /// Fixing the words sends ONLY the words: `stepKey` absent means "leave the tag alone",
+    /// and sending it unchanged would rewrite this note's route entry for nothing.
     @Test func rewritesTheWordsAndSendsNothingElse() async {
         let feed = board()
         let m = model(feed)
@@ -435,16 +405,14 @@ private func model(_ feed: HorizonFeed) -> PlanningHorizonModel {
         #expect(feed.updateCalls[0].sessionId == horizonSession)
 
         #expect(m.parked[0].note == "buy the poster board")
-        // The tag it already had survives the edit — and so does its label.
         #expect(m.parked[0].stepKey == "tasks")
         #expect(m.parked[0].stepLabel == "Tasks")
-        // Untouched rows stay put, in order.
         #expect(m.parked.map(\.id) == [parkedNoteId, "55555555-5555-4555-8555-555555555555"])
         #expect(m.errorMessage == nil)
     }
 
-    /// Changing the category re-joins the label from the CATALOG, never storing one — the
-    /// same rule the server's own read follows, so retitling a step renames every badge.
+    /// The label is re-joined from the CATALOG, never stored — so retitling a step renames
+    /// every badge.
     @Test func movesTheTagAndRelabelsFromTheCatalog() async {
         let feed = board()
         let m = model(feed)
@@ -457,13 +425,10 @@ private func model(_ feed: HorizonFeed) -> PlanningHorizonModel {
         #expect(feed.updateCalls[0].stepKey == .some(.some("meals")))
         #expect(m.parked[0].stepKey == "meals")
         #expect(m.parked[0].stepLabel == "Meals")
-        // The words are the ones the server echoed, not a local guess.
         #expect(m.parked[0].note == "by the poster bored")
     }
 
-    /// "No tag" is an answer an EDIT can give, not only a park: `.some(nil)` sends `null`,
-    /// which is the deliberate absence of a tag. No step raises the note after that — it
-    /// stays on the board.
+    /// "No tag" is an answer an EDIT can give, not only a park: `.some(nil)` sends `null`.
     @Test func takingTheTagOffSendsAnExplicitNull() async {
         let feed = board()
         let m = model(feed)
@@ -479,9 +444,7 @@ private func model(_ feed: HorizonFeed) -> PlanningHorizonModel {
         #expect(m.parked[0].stepLabel == nil)
     }
 
-    /// A REFUSED EDIT LEAVES THE BOARD ALONE and keeps the server's sentence — the note is
-    /// capped at 500 characters and a tag naming a step the household turned off is
-    /// refused, so a refusal is reachable rather than theoretical.
+    /// A REFUSED EDIT LEAVES THE BOARD ALONE and keeps the server's sentence.
     @Test func aRefusedEditChangesNothing() async {
         let feed = board()
         feed.updateFails = true
@@ -498,8 +461,8 @@ private func model(_ feed: HorizonFeed) -> PlanningHorizonModel {
         #expect(m.parking == false)
     }
 
-    /// An id the board doesn't hold cannot corrupt it. (The gold box shows notes that are
-    /// not session-scoped, so a stale row is a real possibility.)
+    /// An id the board doesn't hold cannot corrupt it — the gold box shows notes that are
+    /// not session-scoped, so a stale row is a real possibility.
     @Test func anUnknownIdLeavesTheBoardUntouched() async {
         let feed = board()
         let m = model(feed)

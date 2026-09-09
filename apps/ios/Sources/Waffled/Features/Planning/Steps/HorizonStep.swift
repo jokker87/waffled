@@ -1,60 +1,34 @@
 import SwiftUI
 
-/// Weekly Planning · step 3 "Horizon scan" — "Anything further out you should see now?"
+/// Weekly Planning · step 3 "Horizon scan" — the month view plus one bar that parks a
+/// NOTE (never a calendar entry) tagged for a step still ahead of you. Ported from
+/// `apps/web/src/kiosk/planning/steps/HorizonStep.tsx`; nothing here is a second calendar.
 ///
-/// The month view plus one bar that parks a note — never a calendar entry — tagged for a step still ahead of you.
-///
-/// Ported from `apps/web/src/kiosk/planning/steps/HorizonStep.tsx`. THE MONTH YOU ALREADY
-/// SHIP, PLUS ONE BAR: the grid is the calendar's own (`PlanningMonthGrid`, copied cell for
-/// cell from `CalendarView` — see that file's header for why it is a copy), the day panel
-/// underneath reuses `EventCard` / `CountdownCard`, and adding an event is the app's own
-/// `EventEditSheet`. Nothing here is a second calendar.
-///
-/// Three rules this file must not break:
-///
-///  1. THE ＋ AND THE BAR ARE DIFFERENT THINGS. "Add an event" writes a REAL EVENT through
-///     `EventEditSheet` (which already owns the time, the duration, repeats, who it's for
-///     and the offline-first write). The bar parks a NOTE, which is never written onto the
-///     calendar — it is the thought the month provokes, and it carries an optional tag
-///     naming the step that will look at it.
-///  2. NOTHING NAVIGATES. Opening an event opens the same shared sheet in edit mode; a
-///     day's fuller list is the panel under the grid. The shell owns where the session is.
-///  3. THE SERVER OWNS THE WEEK. `props.weekStart` decides which month opens; nothing here
-///     asks the device what week it is.
-///
-/// The body is content-sized: the SHELL owns the scroll view, so there is no `ScrollView`
-/// and no `WF.tabBarClearance` here.
+/// Three rules: the ＋ writes a real event while the bar only parks a note; NOTHING
+/// NAVIGATES (the shell owns where the session is); and `props.weekStart` decides which
+/// month opens. Content-sized — the SHELL owns the scroll view.
 struct HorizonStepView: View {
     let props: PlanningStepProps
 
     @Environment(SyncManager.self) private var sync
     @State private var model = PlanningHorizonModel()
-    /// The countdown badges — all four sources, keyed by day, exactly as Calendar builds
-    /// them. They are the anticipation markers a horizon scan exists to notice.
     @State private var countdowns = CountdownsModel()
-    /// Months ahead of the planned week's own month. A horizon is what is AHEAD, so there
-    /// is nowhere useful to page back to and the floor is 0.
     @State private var ahead = 0
     @State private var selectedDay = ""
     @State private var note = ""
-    /// Which board row is being corrected, if any. One at a time — the board is a receipt,
-    /// not a form.
     @State private var editing: String?
     @FocusState private var noteFocused: Bool
     @State private var composer: HorizonComposer?
     @State private var pending: PendingComposer?
-    /// Set by `EventEditSheet.onSaved`, read on dismiss — see `composerDismissed`.
     @State private var saved = false
 
     private var tz: TimeZone { sync.householdTz }
-    /// Which day starts the week, so the grid is cut the way THIS HOUSEHOLD cuts one — the
-    /// three-argument overload, never the device-region one.
+    /// Cuts the grid the way THIS HOUSEHOLD cuts a week — the three-argument overload,
+    /// never the device-region one.
     private var firstDay: HouseholdWeekStart { sync.householdWeekStart ?? .sunday }
     private var disabled: Bool { props.busy || model.parking }
     private var trimmedNote: String { note.trimmingCharacters(in: .whitespacesAndNewlines) }
 
-    /// The month the planned week falls in — read off the week-start STRING, so no device
-    /// timezone can move it.
     private var floorMonth: (year: Int, month: Int) {
         if let m = PlanningMonth.month(of: props.weekStart) { return m }
         let c = Cal.gregorian(tz).dateComponents([.year, .month], from: Date())
@@ -66,8 +40,8 @@ struct HorizonStepView: View {
     }
 
     var body: some View {
-        // The 42 cells, resolved ONCE per render above the grid rather than per cell (and
-        // via `SyncManager.eventsByDay`, which is already indexed by day).
+        // Resolved ONCE per render rather than per cell, via the day-indexed
+        // `SyncManager.eventsByDay`.
         let cells = PlanningMonth.cells(
             year: anchor.year, month: anchor.month, tz: tz, firstDay: firstDay,
             eventsByDay: sync.eventsByDay, countdownsByDate: countdowns.byDate,
@@ -84,16 +58,15 @@ struct HorizonStepView: View {
 
             parkBar
 
-            // BELOW the pill, not inside it. Five-to-seven chips plus a button turned the
-            // capture line into a cramped scroll; out here they get a row of their own —
-            // and, more to the point, room for the sentence under them.
+            // BELOW the pill, not inside it: five-to-seven chips plus a button make the
+            // capture line a cramped scroll, and the sentence under them needs room.
             if !trimmedNote.isEmpty {
                 tagRow
                 saysLine
             }
 
-            // Not while a board row is open: the editor shows the refusal directly under
-            // what you typed, and the same sentence in two places reads as two failures.
+            // Not while a board row is open: the editor already shows the refusal, and the
+            // same sentence twice reads as two failures.
             if let message = model.errorMessage, editing == nil {
                 DismissibleErrorBanner(message: message) { model.clearError() }
             }
@@ -104,9 +77,6 @@ struct HorizonStepView: View {
         }
         .task(id: props.sessionId) {
             await model.load(sessionId: props.sessionId)
-            // Headless keyboard verification — see `DemoHooks.focusPark`. Step 1's capture
-            // bar is the other field it focuses; this one is always on screen, so it needs
-            // no mode switch.
             if DemoHooks.focusPark {
                 try? await Task.sleep(for: .seconds(1))
                 noteFocused = true
@@ -115,16 +85,12 @@ struct HorizonStepView: View {
         .task { await countdowns.load() }
         .onAppear {
             if selectedDay.isEmpty { selectedDay = props.weekStart }
-            // A step WITH a composer lends the shell's parked-note banner its own verb.
             props.lendVerb(PlanningHandoffVerb(label: "Make an event") { text, done in
                 openComposer(
                     event: nil, day: dayDate(selectedDay), prefillTitle: text, done: done)
             })
         }
         .onDisappear { props.lendVerb(nil) }
-        // The panel focuses the first day of the week being planned while we are on its
-        // month (that is where the family's attention already is), and the 1st of any month
-        // scanned beyond it.
         .onChange(of: ahead) { _, _ in selectedDay = focusDay }
         .onChange(of: props.weekStart) { _, _ in
             ahead = 0
@@ -132,9 +98,8 @@ struct HorizonStepView: View {
         }
         .onChange(of: model.revision) { _, _ in props.setDecisionData(model.decisionData) }
         .sheet(item: $composer, onDismiss: composerDismissed) { c in
-            // The app's own event sheet — NOT a second event form. `prefillTitle` carries
-            // the note somebody already wrote: retyping their own words back at them is
-            // what makes an affordance feel pointless.
+            // The app's own event sheet, NOT a second event form. `prefillTitle` carries
+            // the note somebody already wrote.
             EventEditSheet(event: c.event, initialDate: c.day, prefillTitle: c.prefillTitle,
                            onSaved: { saved = true })
         }
@@ -191,9 +156,9 @@ struct HorizonStepView: View {
             }
             ForEach(dayCountdowns) { c in
                 CountdownCard(countdown: c, sleeps: countdowns.sleeps) {
-                    // An event-backed countdown opens its event, in place. A standalone or
-                    // birthday one is managed where it lives (the Calendar tab, a person's
-                    // profile) — the session does not navigate away from itself.
+                    // An event-backed countdown opens its event in place; a standalone or
+                    // birthday one is managed where it lives, and the session never
+                    // navigates away from itself.
                     if c.source == "event", let ev = sync.events.first(where: { $0.id == c.id }) {
                         openComposer(event: ev, day: ev.startsAt ?? dayDate(selectedDay))
                     }
@@ -225,8 +190,8 @@ struct HorizonStepView: View {
                 .focused($noteFocused)
                 .submitLabel(.done)
                 .onSubmit { park() }
-                // The server's own cap (`parkItem`'s MAX_NOTE), so an ordinary long note is
-                // stopped here rather than by a 400.
+                // The server's own cap (`parkItem`'s MAX_NOTE), so a long note is stopped
+                // here rather than by a 400.
                 .onChange(of: note) { _, next in
                     if next.count > 500 { note = String(next.prefix(500)) }
                 }
@@ -243,16 +208,11 @@ struct HorizonStepView: View {
         }
         .padding(.horizontal, 12).padding(.vertical, 10)
         .wfField()
-        // NO `.wfKeyboardDoneToolbar` HERE, deliberately — see the note in
-        // PlanningShellView.sessionScreen. That accessory bar measured ~79pt on an
-        // iPhone 17 Pro for a single button, stacked directly on top of the session's
-        // fixed footer: "why is there so much extra space?" The shell dismisses the
-        // keyboard on scroll instead, and this field's keyboard has a return key.
+        // NO `.wfKeyboardDoneToolbar` here, deliberately — see PlanningShellView.sessionScreen.
     }
 
-    /// The tags, plus "No tag" — which is the ABSENCE of a tag and so is never a row the
-    /// server sends. Only steps still ahead of this one are offered; the server already
-    /// filtered, and we render what it sends.
+    /// The tags, plus "No tag" — the ABSENCE of a tag, so never a row the server sends.
+    /// The server has already filtered to the steps still ahead.
     private var tagRow: some View {
         ChipFlow(spacing: 6, lineSpacing: 6) {
             ForEach(model.tags, id: \.stepKey) { tag in
@@ -268,23 +228,19 @@ struct HorizonStepView: View {
         .accessibilityLabel("Which step should look at this?")
     }
 
-    /// `.buttonStyle(.plain)` and an explicit foreground on purpose: the default button
-    /// style dims and re-tints its label while pressed, and a chosen chip that loses its
-    /// colours under a finger was reported as the chip "unselecting itself".
+    /// `.buttonStyle(.plain)` and an explicit foreground on purpose: the default style dims
+    /// and re-tints its label while pressed, which reads as the chip unselecting itself.
     private func tagChip(
         label: String, selected: Bool, hint: String?, action: @escaping () -> Void
     ) -> some View {
-        // `PlanningTagChip` IS this chip, lifted out so the note editor's tag row and this
-        // bar's cannot drift: re-tagging a note and tagging it in the first place are the
-        // same choice, and they must look like it.
+        // `PlanningTagChip` is lifted out so the note editor's tag row and this one cannot
+        // drift — re-tagging and tagging are the same choice.
         PlanningTagChip(
             label: label, selected: selected, hint: hint, disabled: disabled, action: action)
     }
 
-    /// "What does no tag do? where does it put it?" — a question a tooltip was never going
-    /// to answer. Both outcomes are stated, and both are true: a tag is a DESTINATION, so
-    /// the note is raised by that step's handoff banner when the session gets there; with
-    /// no tag no step raises it at all, and it simply stays on the board.
+    /// States both outcomes: a tag is a DESTINATION, so that step's handoff banner raises
+    /// the note when the session gets there; with no tag it simply stays on the board.
     @ViewBuilder private var saysLine: some View {
         if let label = model.chosenLabel {
             (Text("Comes back at ") + Text(label).bold() + Text(", later in this session."))
@@ -307,9 +263,8 @@ struct HorizonStepView: View {
             .fixedSize(horizontal: false, vertical: true)
     }
 
-    /// Named, because the read deliberately returns every note parked during this session
-    /// whichever bar wrote it — a note written at step 1 turning up here unlabelled would
-    /// look like something the month put there.
+    /// Named, because the read returns every note parked this session whichever bar wrote
+    /// it — an unlabelled step-1 note would look like something the month put here.
     @ViewBuilder private var board: some View {
         if !model.parked.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
@@ -317,11 +272,6 @@ struct HorizonStepView: View {
                 ForEach(model.parked) { n in
                     Group {
                         if editing == n.id {
-                            // "I have no way to edit the item or change the category and I
-                            // should." The same editor the shell's gold box uses, so a
-                            // correction reads identically wherever you catch the mistake
-                            // — and offered the SAME tags the bar above offers, because
-                            // re-tagging here and tagging here are one choice.
                             PlanningParkedNoteEditor(
                                 note: n.note,
                                 stepKey: n.stepKey,
@@ -338,8 +288,6 @@ struct HorizonStepView: View {
                                     let took = await model.update(
                                         id: n.id, note: note, stepKey: stepKey,
                                         sessionId: props.sessionId)
-                                    // The gold box further down the session quotes this
-                                    // note; only the shell can refetch it.
                                     if took { props.refresh() }
                                     return took
                                 })
@@ -353,8 +301,6 @@ struct HorizonStepView: View {
                                 } else {
                                     WaffledStatusBadge(text: "No tag", color: WF.ink3)
                                 }
-                                // Quiet, and last: the row is a receipt, so the repair is
-                                // the exception rather than the offer.
                                 Button("Edit") {
                                     model.clearError()
                                     editing = n.id
@@ -383,15 +329,13 @@ struct HorizonStepView: View {
         Task {
             if await model.park(text, sessionId: props.sessionId) {
                 note = ""
-                // Parking is a BURST — somebody reads the month and empties their head into
-                // the bar — so the cursor goes back rather than making you re-aim at it.
+                // Parking is a BURST, so the cursor goes back rather than making you re-aim.
                 noteFocused = true
                 props.refresh()
             }
         }
     }
 
-    /// Open the shared event sheet.
     private func openComposer(
         event: SyncedEvent?, day: Date, prefillTitle: String? = nil, done: ((Bool) -> Void)? = nil
     ) {
@@ -400,17 +344,10 @@ struct HorizonStepView: View {
         composer = HorizonComposer(event: event, day: day, prefillTitle: prefillTitle)
     }
 
-    /// Did the composer actually create something?
-    ///
-    /// `EventEditSheet` reports its own save through `onSaved`, which fires after the write
-    /// and before the dismiss — so this is now a flag rather than a guess.
-    ///
-    /// It used to watch the local mirror for an id that was not there when the sheet
-    /// opened, polling for ~1.5s, because the sheet had no completion. That was the honest
-    /// answer available at the time and it was still wrong in one direction: a sync landing
-    /// in the poll window reads as a save that never happened. The rule it exists to serve
-    /// is why that mattered — A CANCELLED COMPOSER MUST REPORT FALSE, or a parked note gets
-    /// settled on the strength of somebody having opened a box and closed it again.
+    /// Did the composer actually create something? `EventEditSheet` reports its own save
+    /// through `onSaved`, which fires after the write and before the dismiss, so this is a
+    /// flag rather than a guess — and A CANCELLED COMPOSER MUST REPORT FALSE, or a parked
+    /// note is settled on the strength of a box opened and closed again.
     private func composerDismissed() {
         guard let p = pending else { return }
         pending = nil
@@ -418,7 +355,6 @@ struct HorizonStepView: View {
         saved = false
         if created {
             model.recordEventAdded()
-            // The shell's counter and its agenda sheet should agree with what just happened.
             props.refresh()
         }
         p.done?(created)
@@ -426,8 +362,6 @@ struct HorizonStepView: View {
 
     // MARK: - Small formatting
 
-    /// The day the panel should focus: the planned week's first day while we are on its
-    /// month, else the 1st of the month being scanned.
     private var focusDay: String {
         ahead == 0 ? props.weekStart : String(format: "%04d-%02d-01", anchor.year, anchor.month)
     }
@@ -452,20 +386,17 @@ struct HorizonStepView: View {
     }
 }
 
-/// What the shared event sheet is opening on.
 private struct HorizonComposer: Identifiable {
     let id = UUID().uuidString
-    /// nil creates on `day`; an event edits it in place.
     let event: SyncedEvent?
     let day: Date
     let prefillTitle: String?
 }
 
-/// What we need remembered ACROSS the sheet's lifetime, so it survives the item being
-/// cleared on dismissal.
+/// Remembered ACROSS the sheet's lifetime, so it survives the item being cleared on
+/// dismissal.
 private struct PendingComposer {
-    /// Editing reports `false`: this step's banner verb only ever offers to MAKE an event,
-    /// so an edit is not the thing a parked note was waiting for.
+    /// Editing reports `false`: the banner verb only offers to MAKE an event.
     let isCreate: Bool
     let done: ((Bool) -> Void)?
 }

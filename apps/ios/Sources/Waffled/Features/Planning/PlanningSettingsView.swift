@@ -1,20 +1,11 @@
 import SwiftUI
 
-/// Settings → Weekly Planning — when the session happens, which of its steps this
-/// household runs, and which of its lists the first step is even about. Mirrors the web
-/// `WeeklyPlanningSettings` panel.
+/// Settings → Weekly Planning — when the session happens, which steps this household runs,
+/// and which lists the first step is about. Mirrors the web `WeeklyPlanningSettings`.
 ///
-/// **A step whose module is off is NOT shown as a choice**, because it isn't one. Turning
-/// chores back on is what brings the Tasks step back, and offering a toggle that cannot
-/// do anything would imply otherwise — so those steps are named in a line of prose at the
-/// bottom instead. The catalog (order, titles, what each step reads) comes from the
-/// server, so nothing here hardcodes the list.
-///
-/// Every control saves on change, and each save sends ONLY the field that changed:
-/// `steps` is a sparse opt-out map merged server-side, so posting a whole map built from
-/// this screen's snapshot would clobber a step another device had just turned off.
-///
-/// Non-admins see it read-only, like Family Night.
+/// A step whose module is off is NOT shown as a choice, because it isn't one; those are named
+/// in prose instead. Every control sends ONLY the field that changed: `steps` is a sparse
+/// opt-out map merged server-side, so a whole map would clobber another device's change.
 struct PlanningSettingsView: View {
     @Environment(SyncManager.self) private var sync
     @State private var model = PlanningModel()
@@ -56,9 +47,7 @@ struct PlanningSettingsView: View {
         .navigationTitle("Weekly Planning").navigationBarTitleDisplayMode(.inline)
         .task(id: sync.refreshRev) {
             await model.load()
-            // A second read, for the list NAMES only — see `loadListCandidates`. After
-            // `load()`, so the panel draws as soon as the config lands rather than
-            // waiting on a card that may not even appear.
+            // A second read, for the list NAMES only — after `load()`, so the panel draws first.
             await model.loadListCandidates()
         }
     }
@@ -106,10 +95,9 @@ struct PlanningSettingsView: View {
         }
     }
 
-    /// A `Binding<Date>` straight onto the saved `"HH:MM"` — no mirrored `@State`, so
-    /// there is no seed-then-save loop when the fetch lands. The equality guard is what
-    /// makes that safe: `DatePicker` reports a set on every appearance, and without it
-    /// merely opening this screen would PUT the config back.
+    /// A `Binding<Date>` straight onto the saved `"HH:MM"`, with no mirrored `@State`. The
+    /// equality guard is load-bearing: `DatePicker` reports a set on every appearance, so
+    /// without it merely opening this screen would PUT the config back.
     private func timeBinding(_ config: WaffledAPI.WeeklyPlanningConfig) -> Binding<Date> {
         Binding(
             get: { DateFmt.date(config.time, "HH:mm", .current) ?? Self.fallbackTime },
@@ -120,8 +108,7 @@ struct PlanningSettingsView: View {
             })
     }
 
-    /// 17:00 — the server's own default, and only ever reached if a stored time somehow
-    /// fails to parse.
+    /// 17:00 — the server's own default, reached only if a stored time fails to parse.
     private static let fallbackTime = DateFmt.date("17:00", "HH:mm", .current) ?? Date()
 
     // MARK: - Today card
@@ -132,10 +119,8 @@ struct PlanningSettingsView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Show on the family display’s Today")
                         .font(.system(size: 15, weight: .semibold)).foregroundStyle(WF.ink)
-                    // NAMED FOR THE SURFACE IT ACTUALLY AFFECTS. `PlanningTodayCard` is
-                    // rendered by `KioskDashboard` only — this iPhone's `TodayView` has no
-                    // planning card — so "the Today page" promised something the phone in
-                    // your hand does not do.
+                    // NAMED FOR THE SURFACE IT AFFECTS: `PlanningTodayCard` is rendered by
+                    // `KioskDashboard` only, so "the Today page" promised what the phone can't.
                     Text("A card on the session day on the family display, and a way back into a week that’s part-planned. The phone reaches the session from the Family tab.")
                         .font(.system(size: 12)).foregroundStyle(WF.ink3)
                         .fixedSize(horizontal: false, vertical: true)
@@ -183,17 +168,9 @@ struct PlanningSettingsView: View {
 
     // MARK: - Which lists the first step is about
 
-    /// Only LISTS get this choice, and the asymmetry is the point. An overdue chore and a
-    /// late rhythm are late by definition, and a habit is short or it isn't — but an
-    /// unchecked row on a long-lived list is that list working exactly as intended, and
-    /// it came back every single session: "I have lists on there that are more
-    /// longer-lived and I don't want the same items to keep coming up every time."
-    ///
-    /// Absent from the map ⇒ relevant (`config.asksAbout`), so a household that never
-    /// opens this screen sees precisely what it saw before.
-    ///
-    /// Hidden entirely when there is nothing to choose between — a household with no
-    /// custom lists gets no empty card.
+    /// Only LISTS get this choice, and the asymmetry is the point: an overdue chore is late by
+    /// definition, but an unchecked row on a long-lived list is that list working as intended.
+    /// Absent from the map ⇒ relevant, and the card hides when there is nothing to choose.
     @ViewBuilder private func listsCard(_ config: WaffledAPI.WeeklyPlanningConfig) -> some View {
         if !model.listCandidates.isEmpty {
             WaffledCard(padding: 4) {
@@ -236,16 +213,13 @@ struct PlanningSettingsView: View {
         }
     }
 
-    /// The steps this household can actually choose about: everything with no module
-    /// behind it, everything whose module is on, and — importantly — anything the
-    /// household has already switched off by hand, so the toggle that turned it off can
-    /// turn it back on.
+    /// Everything with no module behind it, module on, or already switched off by hand — so
+    /// the toggle that turned it off can turn it back on.
     private func choosable(_ config: WaffledAPI.WeeklyPlanningConfig) -> [WaffledAPI.PlanningStep] {
         model.steps.filter { $0.requiresModule == nil || $0.available || config.steps[$0.key] == false }
     }
 
-    /// Unavailable purely because its module is off — named in prose rather than shown as
-    /// a dead toggle.
+    /// Unavailable purely because its module is off — named in prose, not a dead toggle.
     private func offForModule(_ config: WaffledAPI.WeeklyPlanningConfig) -> [WaffledAPI.PlanningStep] {
         model.steps.filter { $0.requiresModule != nil && config.steps[$0.key] != false && !$0.available }
     }

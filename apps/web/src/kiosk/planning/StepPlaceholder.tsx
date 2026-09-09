@@ -1,8 +1,7 @@
 import type { PlanningStep } from '../../lib/api'
 
-// What a step shows before it is built. Every step file starts by rendering this and
-// stops the moment its real body exists — so the session is walkable end to end at any
-// point, and an unbuilt step still records a real answer.
+// What a step shows before it is built, so the session is walkable end to end at any
+// point and an unbuilt step still records a real answer.
 export function StepPlaceholder({ step }: { step: PlanningStep }) {
   return (
     <div className="wp-placeholder">

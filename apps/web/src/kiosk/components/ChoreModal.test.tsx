@@ -62,7 +62,6 @@ describe('ChoreModal', () => {
   it('canAssignOthers=false restricts the assignee picker to self + up-for-grabs', async () => {
     mockApi({})
     render(<ChoreModal canAssignOthers={false} selfPersonId="p1" onClose={vi.fn()} onSaved={vi.fn()} />)
-    // Wait for the person list to load (self appears), then assert Lottie is absent.
     expect(await screen.findByRole('option', { name: /Wally/ })).toBeInTheDocument()
     expect(screen.getByRole('option', { name: /up for grabs/ })).toBeInTheDocument()
     expect(screen.queryByRole('option', { name: /Lottie/ })).not.toBeInTheDocument()
@@ -140,8 +139,6 @@ describe('ChoreModal', () => {
     expect(patched).toHaveLength(2)
   })
   // ── What the surface that OPENED the modal gets to decide ────────────────────
-  // Weekly Planning's Tasks step passes these; leave them off and the Chores screen
-  // gets exactly what it always got.
   it('a new chore still defaults to Every day, dated by the modal itself', async () => {
     const created: unknown[] = []
     mockApi({ created })
@@ -177,14 +174,12 @@ describe('ChoreModal', () => {
   it('hides Delete where removal isn’t on offer', async () => {
     const deleted: unknown[] = []
     mockApi({ deleted })
-    // A step asking who does what this week has no business removing the chore itself.
     render(<ChoreModal chore={chore} canDelete={false} onClose={vi.fn()} onSaved={vi.fn()} />)
     expect(screen.queryByRole('button', { name: 'Delete' })).toBeNull()
     expect(screen.getByRole('button', { name: 'Save' })).toBeTruthy()
   })
 
   // ── The one-off day is editable, not only settable at birth ──────────────────
-  // The day chip on a Tasks card is the only way in, so an existing one-off must move.
   it('a one-off shows its own day when edited, and moves it', async () => {
     const patched: unknown[] = []
     mockApi({ patched })
@@ -197,10 +192,9 @@ describe('ChoreModal', () => {
     expect(patched[0]).toMatchObject({ dueOn: '2099-03-06' })
   })
 
-  // A carried-over chore is dated in the PAST and is the likeliest thing anyone opens
-  // here. Save lives inside a <form>, so a `min` of today would let the browser refuse
-  // the submit and make Save look dead. jsdom skips constraint validation, so the
-  // attribute assertion is what actually holds this down.
+  // A carried-over chore is dated in the PAST. Save lives inside a <form>, so a `min` of today
+  // would let the browser refuse the submit and make Save look dead; jsdom skips constraint
+  // validation, so the attribute assertion is what holds this down.
   it('an already-dated one-off is not floored at today', async () => {
     const patched: unknown[] = []
     mockApi({ patched })
@@ -219,8 +213,8 @@ describe('ChoreModal', () => {
     expect((screen.getByLabelText('On') as HTMLInputElement).hasAttribute('min')).toBe(true)
   })
 
-  // A recurring chore's days come from its rrule: there is no single day to move, and
-  // the server ignores dueOn for one. Offering the field would be a lie.
+  // A recurring chore's days come from its rrule: there is no single day to move, and the server
+  // ignores dueOn for one.
   it('a recurring chore offers no day, and sends none', async () => {
     const patched: unknown[] = []
     mockApi({ patched })

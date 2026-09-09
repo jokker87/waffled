@@ -1,7 +1,5 @@
-// Weekly Planning — the module shell: gating, the server-owned step catalog, config,
-// and the session record (start/resume, per-step decisions, completion), against a real
-// Postgres (Testcontainers). The ten steps' own content lands one commit at a time; this
-// file covers the chrome they all hang off.
+// Weekly Planning — the module shell: gating, the server-owned step catalog, config and
+// the session record, against a real Postgres (Testcontainers).
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from './helpers/pg'
 import jwt from 'jsonwebtoken'
@@ -19,9 +17,7 @@ function mint(sub: string): string {
   return jwt.sign({}, SECRET, { algorithm: 'HS256', subject: sub, issuer: 'waffled-local', audience: 'waffled-api', expiresIn: '1h' })
 }
 
-// lambda-api reads the query off `queryStringParameters`, NOT off the path — a `?x=y`
-// left in `path` is silently invisible to the handler. Split it here, as
-// chores/meals.integration.test.ts do.
+// lambda-api reads the query off `queryStringParameters`, NOT off the path.
 function call(method: string, path: string, token?: string, body?: unknown) {
   const headers: Record<string, string> = {}
   if (token) headers.authorization = `Bearer ${token}`
@@ -83,19 +79,16 @@ describe('weekly planning · the step catalog', () => {
       'looseEnds', 'calendar', 'horizon', 'familyNight', 'connection', 'goals', 'meals', 'tasks', 'kids', 'recap',
     ])
     const calendar = view.steps.find((s: { key: string }) => s.key === 'calendar')
-    // The question is server-owned so web and iOS can't drift on it.
     expect(calendar).toMatchObject({ number: 2, title: 'Calendar', act: 'Frame the week' })
     expect(typeof calendar.ask).toBe('string')
     expect(calendar.ask.length).toBeGreaterThan(0)
   })
 
   it('marks a step unavailable when the module it reads is off', async () => {
-    // familyNight is defaultOn:false, so step 4 has nothing to show.
     const view = json(await call('GET', '/api/weekly-planning', kevin))
     const fn = view.steps.find((s: { key: string }) => s.key === 'familyNight')
     expect(fn.requiresModule).toBe('familyNight')
     expect(fn.available).toBe(false)
-    // …and one with no module requirement is always available.
     expect(view.steps.find((s: { key: string }) => s.key === 'calendar').available).toBe(true)
   })
 
@@ -119,7 +112,6 @@ describe('weekly planning · config', () => {
     expect(put.statusCode).toBe(200)
     expect(json(put).config).toMatchObject({ dayOfWeek: 4, time: '18:30' })
 
-    // Persisted, and other settings keys survive the merge.
     const after = json(await call('GET', '/api/weekly-planning', kevin))
     expect(after.config).toMatchObject({ dayOfWeek: 4, time: '18:30' })
     const mods = json(await call('GET', '/api/household', kevin))
@@ -135,15 +127,8 @@ describe('weekly planning · config', () => {
   })
 })
 
-// WHO MAY RULE A LIST IN OR OUT.
-//
-// "it shouldn't be admin gated, maybe adult gated but any adult can run weekly planning
-// and choose what lists should matter vs not." Which is right: running the session is not
-// an admin act, and the person driving it on a Sunday evening is whoever sat down.
-//
-// So `lists` is gated by a CAPABILITY (`planning.manage`, adult-by-default) while the rest
-// of the config — when the session happens, which steps run — stays admin-only. Same
-// route, two gates, because it is one settings object and one merge.
+// `lists` is gated by a CAPABILITY (`planning.manage`, adult-by-default) while the rest of
+// the config stays admin-only — same route, two gates, one settings object and one merge.
 describe('weekly planning · who may rule a list in or out', () => {
   let adultT = ''
   let kidT = ''
@@ -178,7 +163,6 @@ describe('weekly planning · who may rule a list in or out', () => {
     const r = await put(adultT, { lists: { [listId]: false } })
     expect(r.statusCode).toBe(200)
     expect((await config()).config.lists[listId]).toBe(false)
-    // …and back in, because a one-way switch is a trap.
     expect((await put(adultT, { lists: { [listId]: true } })).statusCode).toBe(200)
     expect((await config()).config.lists[listId]).toBe(true)
   })
@@ -196,8 +180,7 @@ describe('weekly planning · who may rule a list in or out', () => {
     expect(c.steps.calendar).toBeUndefined()
   })
 
-  // A body that mixes the two is refused WHOLE. Applying the half they are allowed and
-  // dropping the rest would be a silent lie about what was saved.
+  // A mixed body is refused WHOLE: applying half would be a silent lie about the save.
   it('refuses a mixed body outright rather than applying half of it', async () => {
     const before = (await config()).config
     const r = await put(adultT, { lists: { [listId]: false }, dayOfWeek: 4 })
@@ -213,12 +196,10 @@ describe('weekly planning · who may rule a list in or out', () => {
     const c = (await config()).config
     expect(c.lists[listId]).toBe(false)
     expect(c.dayOfWeek).toBe(2)
-    // Put the household back for the tests after this one.
     await put(kevin, { lists: { [listId]: true }, dayOfWeek: 0 })
   })
 
-  // The capability is new, so every existing household has to keep working: nothing is
-  // stored against it, and `getPermissions` starts from the defaults.
+  // The capability is new: nothing is stored against it, so defaults must keep working.
   it('grants it to adults by default, and shows up as something an admin can grant', async () => {
     const perms = JSON.parse((await call('GET', '/api/permissions', kevin)).body)
     expect(perms.capabilities).toContain('planning.manage')
@@ -241,11 +222,9 @@ describe('weekly planning · the session record', () => {
     sessionId = s.id
     expect(s.status).toBe('active')
     expect(s.weekStart).toMatch(/^\d{4}-\d{2}-\d{2}$/)
-    // A session plans a week that hasn't finished yet, and never a past one.
     const todayish = new Date().toISOString().slice(0, 10)
     expect(s.weekStart >= todayish || todayish <= new Date(new Date(s.weekStart + 'T00:00:00Z').getTime() + 6 * 864e5).toISOString().slice(0, 10)).toBe(true)
     expect(s.currentStep).toBe('looseEnds')
-    // Single driver now; the seam for multi-device later.
     expect(s.driverPersonId).toBeTruthy()
   })
 
@@ -297,8 +276,7 @@ describe('weekly planning · the session record', () => {
     // Decisions survive completion — the recap is a pointer, not a copy.
     expect(view.steps.find((s: { key: string }) => s.key === 'calendar').status).toBe('done')
 
-    // Starting again on the same week hands back the finished record rather than a
-    // second one; reopening is an explicit act.
+    // Starting again on the same week hands back the finished record; reopening is explicit.
     expect(json(await call('POST', '/api/weekly-planning/session', kevin)).session.id).toBe(sessionId)
     await call('PATCH', `/api/weekly-planning/session/${sessionId}`, kevin, { status: 'active' })
     view = json(await call('GET', '/api/weekly-planning', kevin))
@@ -313,8 +291,6 @@ describe('weekly planning · the session record', () => {
   })
 })
 
-// Starting a session must not be a one-way door: a week started by mistake, or one the
-// family wants to run again from the top, has to be discardable.
 describe('weekly planning · starting over', () => {
   it('discards the session and its decisions, putting the week back to its lobby', async () => {
     const s = json(await call('POST', '/api/weekly-planning/session', kevin)).session
@@ -325,10 +301,8 @@ describe('weekly planning · starting over', () => {
 
     const after = json(await call('GET', '/api/weekly-planning', kevin))
     expect(after.session).toBe(null)
-    // The step decisions went with it — nothing is left claiming the week was decided.
     expect(after.steps.every((x: { status: string }) => x.status === 'pending')).toBe(true)
 
-    // …and starting again is a genuinely fresh session, not the old one resurrected.
     const again = json(await call('POST', '/api/weekly-planning/session', kevin)).session
     expect(again.id).not.toBe(s.id)
     expect(again.status).toBe('active')
@@ -339,9 +313,7 @@ describe('weekly planning · starting over', () => {
   })
 })
 
-// Planning further than one week out. The default is the week ahead, but a family that
-// wants to get in front of a trip must be able to say so — and the SERVER still owns
-// which seven days any given week key means.
+// Planning further than one week out: the SERVER still owns which seven days a key means.
 describe('weekly planning · planning a week other than the default', () => {
   const addDays = (iso: string, n: number) => {
     const d = new Date(`${iso}T00:00:00Z`)
@@ -353,8 +325,7 @@ describe('weekly planning · planning a week other than the default', () => {
     const view = json(await call('GET', '/api/weekly-planning', kevin))
     expect(view.defaultWeekStart).toMatch(/^\d{4}-\d{2}-\d{2}$/)
     expect(view.minWeekStart).toMatch(/^\d{4}-\d{2}-\d{2}$/)
-    // The floor is the household's CURRENT week — a session never plans a week that has
-    // already finished — and the default is that week or a later one.
+    // The floor is the household's CURRENT week; the default is that week or a later one.
     expect(view.defaultWeekStart >= view.minWeekStart).toBe(true)
     expect(view.weekStart).toBe(view.defaultWeekStart)
   })
@@ -365,22 +336,18 @@ describe('weekly planning · planning a week other than the default', () => {
 
     const view = json(await call('GET', `/api/weekly-planning?weekStart=${later}`, kevin))
     expect(view.weekStart).toBe(later)
-    // A week nobody has planned yet has no session, even though the default week does.
     expect(view.session).toBe(null)
 
     const started = json(await call('POST', '/api/weekly-planning/session', kevin, { weekStart: later })).session
     expect(started.weekStart).toBe(later)
 
-    // …and it did not disturb the default week's session.
     const dflt = json(await call('GET', '/api/weekly-planning', kevin))
     expect(dflt.session.id).not.toBe(started.id)
     expect(dflt.weekStart).toBe(base.defaultWeekStart)
 
-    // Decisions are per-week, not per-household.
     await call('POST', `/api/weekly-planning/session/${started.id}/step`, kevin, { stepKey: 'meals', status: 'done' })
     const laterAgain = json(await call('GET', `/api/weekly-planning?weekStart=${later}`, kevin))
     expect(laterAgain.steps.find((s: { key: string }) => s.key === 'meals').status).toBe('done')
-    // The default week's own meals answer is untouched.
     expect(json(await call('GET', '/api/weekly-planning', kevin)).steps.find((s: { key: string }) => s.key === 'meals').status).toBe('pending')
   })
 
@@ -408,20 +375,9 @@ describe('weekly planning · planning a week other than the default', () => {
 })
 
 describe('planning · a parked note reaches the step it was tagged for', () => {
-  // "I added a bunch to the park it thing, expecting to go over them in the appropriate
-  // step but I never saw them again, where did they go?"
-  //
-  // They went into `planning_parked_items` with a `step_key`, and nothing ever read it.
-  // The column is a DESTINATION — "which step is going to look at this" — written both by
-  // step 1's triage and by step 3's park bar. But only three steps ever read the table:
-  // step 1 (its own board), step 3 (what this session parked) and step 10 (the last
-  // call). Tag a note for Meals, Tasks, Calendar, Goals, Family night or Connection and
-  // that step never mentioned it — so a note tagged in one step vanished until the recap.
-  //
-  // The handoff belongs on the SESSION VIEW rather than in each step: it is the same
-  // banner for all of them, the shell already refetches this read after every write, and
-  // a step's own affordances are what actually act on the note. One implementation, ten
-  // steps, and nothing for the iOS pass to build ten times.
+  // A note tagged for a step nobody read vanished until the recap: `step_key` is a
+  // DESTINATION written by steps 1 and 3, but only 1, 3 and 10 read the table. So the
+  // handoff lives on the SESSION VIEW — one banner, one implementation, ten steps.
   it('hands a tagged note to its destination step, and only to that step', async () => {
     const s = json(await call('POST', '/api/weekly-planning/session', kevin)).session
     const park = async (note: string, stepKey?: string) =>
@@ -436,11 +392,9 @@ describe('planning · a parked note reaches the step it was tagged for', () => {
 
     expect(on('tasks')).toEqual(['buy poster board'])
     expect(on('meals')).toEqual(['no meal on friday'])
-    // An UNTAGGED note is nobody's yet — it is the recap's last call, not every step's
-    // problem. Handing it to all ten would make the banner noise on every screen.
+    // An UNTAGGED note is nobody's yet — handing it to all ten would be noise everywhere.
     expect(on('calendar')).toEqual([])
     expect(on('goals')).toEqual([])
-    // And step 1 does not get its own notes handed back to it: it already draws the board.
     expect(on('looseEnds')).toEqual([])
   })
 
@@ -462,8 +416,7 @@ describe('planning · a parked note reaches the step it was tagged for', () => {
   })
 
   it('carries a note routed by step 1’s triage, not just one parked with a tag', async () => {
-    // The two producers write the SAME column, which is the whole reason one consumer is
-    // enough. Routing an already-parked note has to arrive the same way.
+    // Both producers write the SAME column, which is why one consumer is enough.
     const s = json(await call('POST', '/api/weekly-planning/session', kevin)).session
     const made = await call('POST', '/api/weekly-planning/loose-ends/parked', kevin, { note: 'fix the gate', sessionId: s.id })
     const id = json(made).item.id
@@ -472,8 +425,7 @@ describe('planning · a parked note reaches the step it was tagged for', () => {
     expect(steps0.find((x) => x.key === 'tasks')!.parked.map((n) => n.note)).not.toContain('fix the gate')
 
     expect((await call('POST', '/api/weekly-planning/loose-ends/route', kevin, {
-      // `title` is required: a route records the words it was routed under, so step 1's
-      // own board can show what went where without re-reading the note.
+      // `title` is required: a route records the words it was routed under.
       sessionId: s.id, kind: 'parked', id, to: 'tasks', title: 'fix the gate',
     })).statusCode).toBe(200)
 
@@ -483,20 +435,9 @@ describe('planning · a parked note reaches the step it was tagged for', () => {
 })
 
 describe('planning · editing a note after it has been parked', () => {
-  // "parked in this session - I have no way to edit the item or change the category and
-  // I should."
-  //
-  // A note was written once and then only answered: a typo, or the wrong destination
-  // chosen in the bar, could be fixed only by dropping it and re-typing. (0101's own
-  // comment says as much — "editing a parked note is not a thing the step offers" — and
-  // that sentence is what this route retires.)
-  //
-  // THE HARD PART IS NOT THE COLUMN, IT IS THE ROUTE. Routing a note in step 1 stamps
-  // `planning_parked_items.step_key` AND writes a `{ kind:'parked', id, title, to }`
-  // entry on the looseEnds step's own `data.routes`. So a tag change has to move BOTH,
-  // or the note's badge says one step while the trail under step 1's card says another.
-  // A note parked with a tag from step 3 has no route entry at all, and must not grow
-  // one — that is a state parking itself can never produce.
+  // Retagging has to move BOTH halves: routing in step 1 stamps `step_key` AND writes a
+  // `{ kind:'parked', id, title, to }` entry on the looseEnds step's `data.routes`, or the
+  // badge and the trail disagree. A note parked from step 3 has no entry and must not grow one.
   const routesOf = (view: { steps: { key: string; data?: { routes?: unknown } }[] }) =>
     (view.steps.find((s) => s.key === 'looseEnds')?.data?.routes ?? []) as
       { kind: string; id: string; title: string; to: string }[]
@@ -523,10 +464,8 @@ describe('planning · editing a note after it has been parked', () => {
     expect(json(res).item.note).toBe('buy the poster board')
 
     const view = json(await call('GET', '/api/weekly-planning', kevin))
-    // The gold box on step 8 says the new words…
     expect(parkedOn(view, 'tasks')).toContain('buy the poster board')
     expect(parkedOn(view, 'tasks')).not.toContain('by the poster bored')
-    // …and so does step 1's own trail, which quoted the old ones.
     const route = routesOf(view).find((r) => r.id === id)!
     expect(route.title).toBe('buy the poster board')
   })
@@ -561,15 +500,13 @@ describe('planning · editing a note after it has been parked', () => {
 
     const view = json(await call('GET', '/api/weekly-planning', kevin))
     expect(parkedOn(view, 'tasks')).not.toContain('the shed door')
-    // A note with no tag is nobody's — and a trail entry saying it went to Tasks would be
-    // the exact disagreement this route exists to prevent.
+    // A note with no tag is nobody's; a trail entry saying Tasks is the disagreement this prevents.
     expect(routesOf(view).find((r) => r.id === id)).toBeUndefined()
   })
 
   it('does not invent a route for a note that was never routed', async () => {
     const s = json(await call('POST', '/api/weekly-planning/session', kevin)).session
-    // Parked from step 3's bar WITH a tag: `step_key` set, no route entry — and retagging
-    // it must not manufacture one, because parking itself never can.
+    // Parked from step 3's bar WITH a tag: no route entry, and retagging must not make one.
     const id = json(await park(s.id, 'pack for camping', 'tasks')).item.id
     expect(routesOf(json(await call('GET', '/api/weekly-planning', kevin))).find((r) => r.id === id)).toBeUndefined()
 
@@ -583,10 +520,8 @@ describe('planning · editing a note after it has been parked', () => {
   })
 
   it('keeps the trail honest even when the caller sends no session', async () => {
-    // `parkedByStep` is not session-scoped, so a surface showing a note (the gold box)
-    // need not know which session is running. The trail still must not be left saying
-    // something the note no longer says — so with no `sessionId` the server repairs the
-    // household's ACTIVE session, which is the only one that could disagree.
+    // `parkedByStep` is not session-scoped, so with no `sessionId` the server repairs the
+    // household's ACTIVE session — the only trail that could disagree.
     const s = json(await call('POST', '/api/weekly-planning/session', kevin)).session
     const id = json(await park(s.id, 'reglue the chair')).item.id
     await call('POST', '/api/weekly-planning/loose-ends/route', kevin, {
@@ -611,7 +546,6 @@ describe('planning · editing a note after it has been parked', () => {
       call('PATCH', `/api/weekly-planning/loose-ends/parked/${id}`, kevin, body)
 
     expect((await patch({ stepKey: 'nonsense' })).statusCode).toBe(400)
-    // A note addressed to the step that triages notes is a circle.
     expect((await patch({ stepKey: 'looseEnds' })).statusCode).toBe(400)
     expect((await patch({ note: '   ' })).statusCode).toBe(400)
     expect((await patch({ note: 'x'.repeat(501) })).statusCode).toBe(400)

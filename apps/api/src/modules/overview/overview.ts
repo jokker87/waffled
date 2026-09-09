@@ -1,6 +1,5 @@
-// Per-person + whole-family overview — the "how is everyone doing" rollups behind
-// the person profile (the "Person / Wally" mock) and the family dashboard. Pure
-// aggregation over goals + the stars ledger + reward redemptions; no new tables.
+// Per-person + whole-family "how is everyone doing" rollups behind the person profile and
+// the family dashboard. Pure aggregation over goals + the stars ledger + redemptions.
 import createAPI, { type Request, type Response } from 'lambda-api'
 import { query } from '../../platform/db'
 import { tenantRoute } from '../../platform/route-guards'
@@ -14,7 +13,6 @@ import { moduleEnabled } from '../../platform/modules'
 type Api = ReturnType<typeof createAPI>
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-// The five life categories on a goal (goals.category).
 export const CATEGORIES = ['physical', 'intellectual', 'spiritual', 'creative', 'social'] as const
 const CATEGORY_META: Record<string, { emoji: string; label: string }> = {
   physical: { emoji: '🏃', label: 'Physical' },
@@ -52,16 +50,14 @@ function ageFrom(birthday: string | null): number | null {
   return age >= 0 && age < 130 ? age : null
 }
 
-// A person's goals with *their* progress (per-person when each_tracks, the pooled
-// total when shared_total).
+// A person's goals with *their* progress (pooled total when shared_total).
 function personGoals(allGoals: Awaited<ReturnType<typeof listGoals>>, personId: string) {
   return allGoals
     .filter((g) => g.participants.some((p: { personId: string }) => p.personId === personId))
     .map((g) => {
       const mine = g.participants.find((p: { personId: string }) => p.personId === personId)
-      // Each type measures on its own axis — match the Goals page so the mini rows
-      // stay honest: habits show completions THIS PERIOD, checklists show steps
-      // done / total, the rest show cumulative (per-person when each_tracks).
+      // Each type measures on its own axis, matching the Goals page: habits show
+      // completions THIS PERIOD, checklists steps done / total, the rest cumulative.
       const isHabit = g.goalType === 'habit'
       const isChecklist = g.goalType === 'checklist'
       const progress = isHabit
@@ -126,10 +122,9 @@ function buildInsight(balance: ReturnType<typeof categoryBalance>, name: string 
 const DAY_MS = 86400000
 const WEEK_LABELS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'] // Mon-first
 
-// A unified activity streak across chores + goals: a day "counts" if the person
-// completed a chore OR logged a goal that day (household timezone). Returns the
-// consecutive-day count (ending today or yesterday) plus the current Mon–Sun
-// week as fire cells for the kiosk display.
+// A day "counts" if the person completed a chore OR logged a goal that day (household
+// timezone). Returns the consecutive-day count plus the current Mon–Sun week as fire
+// cells.
 function buildStreak(activeDates: string[], today: string) {
   const active = new Set(activeDates)
   const t = new Date(today + 'T00:00:00Z').getTime()
@@ -143,7 +138,6 @@ function buildStreak(activeDates: string[], today: string) {
     cursor -= DAY_MS
   }
 
-  // Current week, Monday-first.
   const dow = new Date(t).getUTCDay() // 0=Sun..6=Sat
   const monday = t - ((dow + 6) % 7) * DAY_MS
   const week = WEEK_LABELS.map((label, i) => {
@@ -191,8 +185,7 @@ export async function personOverview(householdId: string, personId: string) {
     [householdId, personId]
   )
 
-  // The reward shop, scored against THIS kid's balance: "X to go" = cost minus
-  // what they have in that currency (0 when they can already afford it).
+  // Scored against THIS kid's balance: "X to go" = cost minus what they hold.
   const shop = await query<{ id: string; title: string; emoji: string | null; cost: number; currency: string }>(
     `select id, title, emoji, cost, currency from rewards
        where household_id=$1 and deleted_at is null order by sort_order, cost`,
@@ -231,11 +224,9 @@ export async function personOverview(householdId: string, personId: string) {
   )
   const streak = buildStreak(act.rows.map((r) => r.day), today)
 
-  // "This week's one thing", said on planning night. Read from the session record rather
-  // than copied onto anything here, so the profile and the Kids step can never disagree.
-  // Null whenever the module is off, no session covers today, or nobody answered for
-  // this person — three different reasons the profile renders nothing, all of which mean
-  // the same thing to a reader.
+  // "This week's one thing", read from the session record rather than copied, so the
+  // profile and the Kids step can never disagree. Null when the module is off, no session
+  // covers today, or nobody answered for this person.
   const settings = await query<{ settings: unknown }>(`select settings from households where id = $1`, [householdId])
     .then((r) => r.rows[0]?.settings)
   const planningFocus = moduleEnabled(settings, 'weeklyPlanning')

@@ -1,11 +1,8 @@
 // Weekly Planning · step 3 · Horizon scan — against a real Postgres (Testcontainers).
 //
-// Almost everything the step renders comes off endpoints tested elsewhere (the month
-// grid is `GET /api/events`, ＋ is `POST /api/events`, parking is step 1's route). What
-// is new, and what this file drives out:
+// Most of what the step renders comes off endpoints tested elsewhere. What is new here:
 //   · `GET /api/weekly-planning/horizon` — which tags a note may carry (only steps this
-//     household runs) and what this session has parked so far, since `setDecisionData`
-//     is not storage;
+//     household runs) and what this session has parked, since `setDecisionData` is not storage;
 //   · THE CENTRAL CLAIM: a parked note is NOT an event. Parking writes to
 //     planning_parked_items and nothing at all to the calendar;
 //   · the tag is the DESTINATION step, the same shape step 1 writes when it routes.
@@ -54,7 +51,7 @@ const park = (body: Record<string, unknown>) =>
   call('POST', '/api/weekly-planning/loose-ends/parked', kevin, body)
 
 // Pure date arithmetic on a YYYY-MM-DD — UTC on purpose, because nothing here is
-// rendered; it only ever adds days.
+// rendered.
 const addDays = (iso: string, n: number): string =>
   new Date(new Date(`${iso}T00:00:00Z`).getTime() + n * 86400000).toISOString().slice(0, 10)
 
@@ -127,25 +124,20 @@ describe('horizon · the tags a note can carry', () => {
     // A tag names the step that will LOOK at this note, so a step the session has
     // already walked past cannot be one: tagging Calendar from the Horizon scan
     // addresses the note to step 2 while you are standing on step 3, and it would only
-    // ever resurface in a LATER session. Reported exactly that way — "I think its weird
-    // that I can add a parking lot note here and it would show on the previous step I
-    // already did? ... It could be a task, meal, goal, connection, or kid item but no
-    // previous/current step."
+    // ever resurface in a LATER session.
     expect(keys(view.tags)).toEqual(['connection', 'goals', 'meals', 'tasks', 'kids'])
     expect(view.tags.every((t: Tag) => t.label && t.hint)).toBe(true)
     // The label is the catalog's own title for that step, so the bar and the agenda
     // sheet can never call the same step two different things.
     expect(view.tags.find((t: Tag) => t.stepKey === 'tasks')!.label).toBe('Tasks')
-    // Exactly one primary — the one the bar opens on. Tasks, for the same reason step 1's
-    // `DESTINATIONS.parked` marks it primary: most of what a month provokes is something
-    // somebody has to DO before the date arrives.
+    // Exactly one primary — the one the bar opens on. Tasks, for the same reason step
+    // 1's `DESTINATIONS.parked` marks it primary.
     expect(view.tags.filter((t: Tag) => t.primary).map((t: Tag) => t.stepKey)).toEqual(['tasks'])
   })
 
   it('never offers a step at or before the bar, whatever is switched on', async () => {
     // The three that are structurally impossible as destinations: the two steps behind
-    // this one, and this one. `recap` is excluded too — it REPORTS what the session
-    // decided and settles nothing, so a note addressed there is a note nobody acts on.
+    // this one, and this one. `recap` is excluded too — it REPORTS and settles nothing.
     const ks = keys(json(await horizon(sessionId)).tags)
     for (const behind of ['looseEnds', 'calendar', 'horizon', 'recap']) {
       expect(ks).not.toContain(behind)
@@ -155,7 +147,7 @@ describe('horizon · the tags a note can carry', () => {
   it('picks the destinations up from the step order, so a switched-on module joins them', async () => {
     // Family night is off by default; turning it on puts it in the list WHERE IT FALLS
     // in the session, not at the end. The list is derived from the step catalog rather
-    // than hand-kept, so a step added to the catalog needs nothing done here.
+    // than hand-kept.
     await setModules({ familyNight: true })
     expect(keys(json(await horizon(sessionId)).tags)).toEqual(['familyNight', 'connection', 'goals', 'meals', 'tasks', 'kids'])
     await setModules({ familyNight: false })
@@ -169,8 +161,6 @@ describe('horizon · the tags a note can carry', () => {
     await setModules({ chores: false })
     const noTasks = json(await horizon(sessionId)).tags
     expect(keys(noTasks)).toEqual(['connection', 'goals', 'kids'])
-    // …and with Tasks gone there is no primary to fall back on, so the bar opens on no
-    // tag rather than on whatever happens to be first.
     expect(noTasks.filter((t: Tag) => t.primary)).toEqual([])
     await setModules({ meals: true, chores: true })
     expect(keys(json(await horizon(sessionId)).tags)).toEqual(['connection', 'goals', 'meals', 'tasks', 'kids'])
@@ -186,9 +176,8 @@ describe('horizon · parking a note', () => {
     const parked: Note[] = view.parked
     const mine = parked.find((n) => n.note === 'Camping — we need to pack')!
     expect(mine).toBeTruthy()
-    // 'tasks', not 'horizon': the tag names the step that will LOOK at the note ("it
-    // turns up at step 8 for an owner and a day"), which is the same thing step 1
-    // writes when somebody routes a note there.
+    // 'tasks', not 'horizon': the tag names the step that will LOOK at the note, which
+    // is the same thing step 1 writes when somebody routes a note there.
     expect(mine.stepKey).toBe('tasks')
     expect(mine.stepLabel).toBe('Tasks')
   })
@@ -237,7 +226,6 @@ describe('horizon · parking a note', () => {
     const mine = notes(json(await horizon(sessionId)).parked)
     expect(mine).not.toContain('Parked in another session')
     expect(mine).not.toContain('Parked outside any session')
-    // Chronological — the order they were written, which is what step 1's own read uses.
     expect(mine.indexOf('Camping — we need to pack')).toBeLessThan(
       mine.indexOf('Two nights away — sort the sleeping bags')
     )
@@ -249,13 +237,10 @@ describe('horizon · parking a note', () => {
   it('answers with an empty board when no session is named', async () => {
     const view = json(await horizon())
     expect(view.parked).toEqual([])
-    // The tags still come back: the bar is renderable before a session exists.
     expect(keys(view.tags)).toEqual(['connection', 'goals', 'meals', 'tasks', 'kids'])
   })
 
   it('drops a note off the board once step 1 settles it', async () => {
-    // The board is the OPEN notes. One dropped in a later step-1 pass has been answered
-    // and should stop coming back as something still to think about.
     const id = json(await park({ note: 'It was never really a thing', sessionId })).item.id
     expect(notes(json(await horizon(sessionId)).parked)).toContain('It was never really a thing')
     expect(

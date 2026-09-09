@@ -1,6 +1,6 @@
 // Family Night — a recurring family gathering with a small, customizable agenda of
-// "parts" (roles) that auto-rotate among members and can be overridden per week.
-// Config lives in households.settings.familyNight; family_night_occurrences +
+// "parts" (roles) that auto-rotate among members and can be overridden per week. Config
+// lives in households.settings.familyNight; family_night_occurrences +
 // family_night_assignments record each actual gathering and who did what.
 import { getPool, query } from '../../platform/db'
 import { createEvent, softDeleteEvent } from '../events/events'
@@ -10,8 +10,8 @@ export interface FamilyNightPart {
   id: string // stable slug (matches family_night_assignments.part_id)
   label: string
   emoji: string
-  // Auto-rotate this part among members. Off ⇒ it's shown but never auto-assigned
-  // (e.g. a fixed host); a person can still be set manually.
+  // Auto-rotate this part among members. Off ⇒ shown but never auto-assigned (a fixed
+  // host); a person can still be set manually.
   rotates: boolean
 }
 
@@ -21,11 +21,10 @@ export interface FamilyNightConfig {
   time: string // 'HH:MM' local — used only when a calendar event is linked
   // Explicit rotation order (personIds). null ⇒ all members in their sort order.
   rotationOrder: string[] | null
-  // Linked recurring calendar event (so Family Night shows on the calendar). null
-  // ⇒ not on the calendar.
+  // Linked recurring calendar event. null ⇒ not on the calendar.
   eventId: string | null
-  // Show the Family Night card on the Today dashboard (independent of the module
-  // being enabled). Defaults to true.
+  // Show the Family Night card on Today (independent of the module being enabled).
+  // Default true.
   showOnToday: boolean
 }
 
@@ -56,9 +55,9 @@ export interface ResolvedAssignment {
   label: string
   emoji: string
   /**
-   * What this part IS this week ("the good ice cream", "charades"), independent of who
-   * has it. Null = nobody has said. A detail is NOT a pin: writing what the check-in is
-   * says nothing about whose turn it is, so the rotation's suggestion still stands.
+   * What this part IS this week ("the good ice cream"), independent of who has it. A
+   * detail is NOT a pin: writing what the check-in is says nothing about whose turn it
+   * is.
    */
   detail: string | null
   personId: string | null
@@ -82,8 +81,8 @@ export interface FamilyNightView {
   }
 }
 
-// Read the resolved config, filling defaults. Sanitizes stored parts so a bad
-// write can't strip required fields.
+// Read the resolved config, filling defaults. Sanitizes stored parts so a bad write
+// can't strip required fields.
 export async function getConfig(householdId: string): Promise<FamilyNightConfig> {
   const { rows } = await query<{ settings: { familyNight?: Partial<FamilyNightConfig> } | null }>(
     `select settings from households where id = $1`,
@@ -150,8 +149,8 @@ export function nextFamilyNightDate(today: string, dayOfWeek: number): string {
   return base.toISOString().slice(0, 10)
 }
 
-// How many gatherings have happened before `date` — used to stagger rotation so a
-// new person takes each part the following week.
+// How many gatherings have happened before `date` — used to stagger rotation so a new
+// person takes each part the following week.
 async function rotationIndex(householdId: string, date: string): Promise<number> {
   const { rows } = await query<{ n: string }>(
     `select count(*)::text as n from family_night_occurrences where household_id = $1 and deleted_at is null and date < $2`,
@@ -191,8 +190,8 @@ interface OccRow {
 /**
  * What one part has stored for a gathering. TWO independent statements, which is why
  * this is a record rather than a person id: `personSet` false means the row exists only
- * to hold a detail and WHO still comes from the rotation. (`personId` null cannot carry
- * that — it already means "pinned to nobody", the result of taking a pin back off.)
+ * to hold a detail and WHO still comes from the rotation. (`personId` null already
+ * means "pinned to nobody".)
  */
 export interface StoredAssignment {
   personId: string | null
@@ -228,8 +227,7 @@ function resolveAssignments(
   return config.parts.map((part) => {
     const row = stored?.get(part.id) ?? null
     // `personSet`, not "a row exists": a row written to hold a DETAIL makes no claim
-    // about who, so the rotation's suggestion has to survive it. Naming the treat is not
-    // the same act as saying whose turn it is.
+    // about who, so the rotation's suggestion has to survive it.
     const claimed = !!row?.personSet
     const personId = claimed ? row!.personId : suggested.get(part.id) ?? null
     return {
@@ -276,19 +274,17 @@ export interface UpsertOccurrenceInput {
   status?: string
   /**
    * The calendar event for THIS dated gathering — an event that already exists, adopted
-   * by id. Distinct from `config.eventId`, which is the standing recurring series set in
-   * Settings: one field for every week, and `scheduleEvent()` always creates a fresh
-   * series rather than adopting anything. "This week it's the movie night already on
-   * Friday" is a fact about one gathering, which is where a pinned person lives too.
+   * by id. Distinct from `config.eventId`, the standing recurring series set in
+   * Settings, which `scheduleEvent()` always creates fresh rather than adopting.
    *
    * `null` UNLINKS and leaves the event on the calendar. ABSENT leaves the link alone.
    * There is deliberately no create-an-event path here: an event is made through the
    * app's own event endpoint and then adopted, so there stays one way to make an event.
    */
   eventId?: string | null
-  // Partial overrides: only the parts present are written; the rest stay on rotation.
-  // `personId`/`detail` are independent — sending one leaves the other as it was, so
-  // naming the treat doesn't un-assign whoever had it.
+  // Partial overrides: only the parts present are written. `personId`/`detail` are
+  // independent — sending one leaves the other as it was, so naming the treat doesn't
+  // un-assign anybody.
   assignments?: { partId: string; personId?: string | null; detail?: string | null }[]
 }
 
@@ -303,7 +299,7 @@ export async function upsertOccurrence(tenant: Tenant, input: UpsertOccurrenceIn
     await client.query('begin')
     // `event_id`: ABSENT means leave the link alone, so it needs a flag rather than a
     // coalesce — `null` is the meaningful "unlink" and coalesce cannot tell the two
-    // apart. (The same trap the theme line works around by clearing with '' instead.)
+    // apart.
     const setsEvent = 'eventId' in input
     const occ = await client.query<{ id: string }>(
       `insert into family_night_occurrences (household_id, date, theme, notes, status, event_id)
@@ -320,12 +316,13 @@ export async function upsertOccurrence(tenant: Tenant, input: UpsertOccurrenceIn
     )
     const occurrenceId = occ.rows[0].id
     for (const a of input.assignments ?? []) {
-      // Two independent columns, each with its own "was it sent?" flag: naming the treat
-      // must not un-assign whoever had it, and pinning a face must not wipe what it is.
+      // Two independent columns, each with its own "was it sent?" flag: naming the
+      // treat must not un-assign whoever had it, and pinning a face must not wipe what
+      // it is.
       const setsPerson = 'personId' in a
       const setsDetail = 'detail' in a
-      // Empty string clears — the theme line's rule, for the same reason: a null already
-      // means "leave it alone", so there has to be another way to say "nothing".
+      // Empty string clears: a null already means "leave it alone", so there has to be
+      // another way to say "nothing".
       const detail = setsDetail ? (a.detail?.trim() ? a.detail.trim() : null) : null
       await client.query(
         `insert into family_night_assignments (household_id, occurrence_id, part_id, person_id, detail, person_set)
@@ -350,8 +347,8 @@ export async function upsertOccurrence(tenant: Tenant, input: UpsertOccurrenceIn
   }
 }
 
-// Create/refresh the linked recurring calendar event from the current day/time.
-// Replaces any previously-linked event so day/time edits take effect.
+// Create/refresh the linked recurring calendar event from the current day/time,
+// replacing any linked event so day/time edits take effect.
 export async function scheduleEvent(tenant: Tenant): Promise<string> {
   const config = await getConfig(tenant.householdId)
   if (config.eventId) await softDeleteEvent(tenant.householdId, config.eventId).catch(() => {})
@@ -365,8 +362,8 @@ export async function scheduleEvent(tenant: Tenant): Promise<string> {
     startsAt: `${date}T${config.time}:00`,
     timezone: tz,
     // Omit calendarId → auto-route to the household owner's ★ default calendar, so a
-    // recurring family event lands on Google (and everyone's phones) when connected,
-    // and stays Waffled-local otherwise.
+    // recurring family event lands on Google when connected and stays Waffled-local
+    // otherwise.
     rrule: `FREQ=WEEKLY;BYDAY=${DAY}`,
   })
   await setConfig(tenant.householdId, { eventId: event.id })
@@ -376,15 +373,14 @@ export async function scheduleEvent(tenant: Tenant): Promise<string> {
 /**
  * Put ONE dated gathering on the calendar, and link it.
  *
- * The sibling of `scheduleEvent()` above, and deliberately not the same thing: that one
- * creates the STANDING weekly series from the configured day and time, replacing whatever
- * was linked in `config`. This creates a single event for one date and links it to that
- * date's occurrence — which is what a planning session can decide, and what a household
- * without a standing series needs in order to get this week onto the calendar at all.
+ * Deliberately not `scheduleEvent()` above, which creates the STANDING weekly series
+ * from the configured day and time. This creates a single event for one date and links
+ * it to that date's occurrence — what a planning session can decide, and what a
+ * household without a standing series needs to get this week onto the calendar at all.
  *
  * Server-side because the alternative cannot be made safe: the web app writes events
- * LOCALLY first (PowerSync uploads afterwards), so an id handed back to the client may
- * not exist server-side yet and the link would 404 on a race nobody could reproduce.
+ * LOCALLY first, so an id handed back to the client may not exist server-side yet and
+ * the link would 404 on a race nobody could reproduce.
  *
  * Returns the existing link untouched if the gathering already has one, so a double tap
  * cannot leave a stray event on the calendar.
@@ -404,8 +400,7 @@ export async function createOccurrenceEvent(tenant: Tenant, date: string): Promi
     title: theme ? `🏡 ${theme}` : '🏡 Family Night',
     startsAt: `${date}T${config.time}:00`,
     timezone: tz,
-    // No rrule: this is THIS week. Omit calendarId → the household owner's ★ default,
-    // the same routing the recurring series uses.
+    // No rrule: this is THIS week. Omit calendarId → the household owner's ★ default.
   })
   await upsertOccurrence(tenant, { date, eventId: event.id })
   return { eventId: event.id }

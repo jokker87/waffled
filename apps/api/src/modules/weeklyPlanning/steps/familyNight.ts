@@ -1,19 +1,12 @@
 // Weekly Planning · step 4 (Family night) — "Accept the rotation, or change it?"
 //
-// Three rows and a theme line. The whole step is ONE READ over the familyNight module:
-// its `config.parts` (emoji, label, and a `rotates` flag), the rotation's suggestion for
-// each part, and the occurrence's theme and status. Every WRITE — pinning a face, naming
-// the theme, calling the week off — goes through the module's own
-// POST /api/family-night/occurrence, so this step owns no write route and no table.
+// ONE READ over the familyNight module; every WRITE goes through the module's own POST
+// /api/family-night/occurrence, so this step owns no write route and no table.
 //
-// WHY THIS FILE EXISTS AT ALL, given the module already has a view: `getView()` answers
-// "the next gathering on or after today", and a session usually plans NEXT week. Run a
-// session on a Saturday and the module's view is about a gathering that already belongs
-// to the week you just finished. The board below is scoped to the week the SERVER handed
-// the step instead, which is the only week this session is allowed to decide.
-//
-// A pin is therefore scoped to an occurrence (a date), never to households.settings —
-// which is exactly what makes "pinned for this week only" true rather than aspirational.
+// WHY THIS FILE EXISTS: `getView()` answers "the next gathering on or after today", and
+// a session usually plans NEXT week. The board is scoped to the week the SERVER handed
+// the step, so a pin is scoped to an occurrence (a date), never to households.settings —
+// which is what makes "pinned for this week only" true rather than aspirational.
 import { DateTime } from 'luxon'
 import { query } from '../../../platform/db'
 import { householdTz } from '../../chores/chores.service'
@@ -40,18 +33,15 @@ export interface PlanningFamilyNightPart {
   // a pin — "nobody suggested" is not "nobody allowed".
   rotates: boolean
   /**
-   * What this part IS this week ("the good ice cream", "charades") — the answer to a
-   * different question from `personId`, which is whose turn it is. Null = nobody has
-   * said. Writing one does NOT pin the person: the rotation's suggestion stands until
-   * somebody actually names a face.
+   * What this part IS this week ("the good ice cream") — a different question from
+   * `personId`, which is whose turn it is. Writing one does NOT pin the person.
    */
   detail: string | null
   personId: string | null
   personName: string | null
-  // True ⇒ somebody chose this, for this week, and it is stored on the occurrence.
-  // False ⇒ it is the rotation's suggestion and nothing is written down yet. The
-  // module calls the same distinction `suggested`; this is its inverse, in the design's
-  // own word, because the screen's whole job is telling the two apart.
+  // True ⇒ somebody chose this, for this week, and it is stored on the occurrence. False
+  // ⇒ it is the rotation's suggestion and nothing is written down yet. The module calls
+  // the same distinction `suggested`; this is its inverse, in the design's own word.
   pinned: boolean
 }
 
@@ -63,20 +53,17 @@ export interface PlanningFamilyNightBoard {
   date: string
   dayOfWeek: number
   time: string // 'HH:MM' local
-  // Null until somebody touches the week: the board is a pure read, so opening the step
-  // and moving on writes nothing.
+  // Null until somebody touches the week: the board is a pure read.
   occurrenceId: string | null
   theme: string | null
   status: 'planned' | 'done' | 'skipped'
   // The gathering is on the calendar as a recurring event. Carried so the step can
-  // promise, truthfully, that calling one week off leaves that event alone — a promise
-  // that would be a lie in a household that never put it on the calendar.
+  // promise, truthfully, that calling one week off leaves that event alone.
   onCalendar: boolean
   /**
    * THIS week's own calendar event, if the gathering has adopted one. Distinct from
    * `onCalendar`, which reports the STANDING recurring series set in Settings: a
-   * household can have the series and no answer for this week, or an answer for this
-   * week ("it's the movie night already on Friday") and no series at all.
+   * household can have one without the other, in either direction.
    */
   eventId: string | null
   /** The adopted event's title, so the step can name it without a second fetch. */
@@ -87,29 +74,22 @@ export interface PlanningFamilyNightBoard {
   parts: PlanningFamilyNightPart[]
 }
 
-// ---------------------------------------------------------------------------
-// The rotation, mirrored
-// ---------------------------------------------------------------------------
+// ─── The rotation, mirrored ────────────────────────────────────────────────
 // MIRRORS `rotationIndex()` and `suggest()` in modules/familyNight/familyNight.ts, which
-// are private there. They can't be reused as they stand because the module always asks
-// them about "the next gathering on or after today" and this step asks about the week
-// being planned. CHANGE BOTH TOGETHER — if these two drift, the planning step and the
-// Today card will name different people for the same night, which is the one bug nobody
-// would think to look for. (Exporting them from the module is the real fix; it is a
-// one-word change in a file this step does not own.)
+// are private there and always ask about "the next gathering on or after today" while
+// this step asks about the week being planned. CHANGE BOTH TOGETHER — if they drift, the
+// planning step and the Today card name different people for the same night. (Exporting
+// them from the module is the real fix; it is a one-word change in a file this step does
+// not own.)
 
 // How many gatherings have happened before `date`. The occurrence COUNT is the whole of
 // the rotation's memory — it never reads who actually did what — so the rotation only
-// moves when a week is written down, and a week is only written down when somebody
-// touches it.
+// moves when a week is written down.
 //
 // SKIPPED WEEKS COUNT, deliberately: a called-off week takes its turn, so the next
-// person is up next week. Excluding them would mean the same person is up again every
-// week for as long as the family keeps skipping. Raised once as a bug and settled as the
-// intended rule — do not add `and status <> 'skipped'` here.
-//
-// That is precisely why "tap a face and it's pinned for this week only,
-// which is what shifts next week's turn" is a true sentence.
+// person is up next week. Excluding them would leave the same person up every week for
+// as long as the family keeps skipping. This is the intended rule — do not add `and
+// status <> 'skipped'`.
 async function rotationIndex(householdId: string, date: string): Promise<number> {
   const { rows } = await query<{ n: string }>(
     `select count(*)::text as n from family_night_occurrences where household_id = $1 and deleted_at is null and date < $2`,
@@ -151,8 +131,7 @@ const STATUSES = new Set(['planned', 'done', 'skipped'])
 export async function getFamilyNightBoard(householdId: string, weekStart: string): Promise<PlanningFamilyNightBoard> {
   const [config, members] = await Promise.all([getConfig(householdId), listMembers(householdId)])
   // `nextFamilyNightDate` walks 0–6 days forward from a date, so starting it at the
-  // household's own week start always lands inside that week — including day 0, when
-  // family night IS the first day of the week.
+  // household's own week start always lands inside that week — including day 0.
   const date = nextFamilyNightDate(weekStart, config.dayOfWeek)
 
   const [idx, occ] = await Promise.all([
@@ -166,8 +145,7 @@ export async function getFamilyNightBoard(householdId: string, weekStart: string
 
   // `person_set`, not "a row exists": a row written to hold only a DETAIL makes no claim
   // about whose turn it is, so the rotation's suggestion has to survive it. Mirrors
-  // `resolveAssignments` in the module — see the header note about keeping the two in
-  // step.
+  // `resolveAssignments` in the module.
   const stored = new Map<string, { personId: string | null; personSet: boolean; detail: string | null }>()
   if (occ) {
     const { rows } = await query<{ part_id: string; person_id: string | null; person_set: boolean; detail: string | null }>(
@@ -178,8 +156,8 @@ export async function getFamilyNightBoard(householdId: string, weekStart: string
   }
 
   // The adopted event, named so the step can say WHICH event this week points at without
-  // a second round trip. Read through the events module's own presenter rather than a
-  // bare select, so a recurring master and a one-off read the same way.
+  // a second round trip. Read through the events module's own presenter, so a recurring
+  // master and a one-off read the same way.
   const linked = occ?.event_id
     ? await query<{ title: string; starts_at: Date; all_day: boolean }>(
         `select title, starts_at, all_day from events

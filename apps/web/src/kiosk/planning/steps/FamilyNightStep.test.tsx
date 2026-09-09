@@ -5,23 +5,13 @@ import type { StepBodyProps } from '../registry'
 
 // Step 4 · Family night — "Accept the rotation, or change it?"
 //
-// Three rows and a theme line, and the fast path is reading them and moving on. So what
-// this file guards is mostly that the step stays SMALL and that the three sentences the
-// design calls requirements are true of the calls it actually makes:
-//
-//   · a pin goes to the OCCURRENCE (a date), never to the household config — so the
-//     test watches for a config PUT that must never happen;
-//   · every write is the familyNight module's own endpoint, because a second write path
-//     would be a second place for "who's on the treat" to be true;
-//   · calling the week off is a status on the occurrence and touches no event.
-//
-// The fetch double is stateful for the same reason the Tasks step's is: what the screen
-// shows after a pin has to be the RE-READ, not component bookkeeping, or the step would
-// look right in a test and disagree with the Today card in the house.
+// What this file guards: a pin goes to the OCCURRENCE, never to the household config (so it
+// watches for a config PUT that must never happen); every write is the familyNight module's
+// own endpoint; and calling the week off touches no event. The fetch double is stateful
+// because what the screen shows after a pin has to be the RE-READ.
 
 const { Body } = mod
-// The footer control is this step's, so the tests render it beside the body exactly as
-// the shell does — two sibling trees over one store.
+// The footer control is this step's, so the tests render it beside the body as the shell does.
 const FooterExtra = mod.FooterExtra!
 
 const step: PlanningStep = {
@@ -36,8 +26,7 @@ const step: PlanningStep = {
   status: 'pending',
   data: {},
   decidedAt: null,
-  // The shell renders the parked-note handoff, not the step — see Handoff in
-  // WeeklyPlanning.tsx. A step test mounts `Body` alone, so there is never one here.
+  // The shell renders the parked-note handoff, not the step, and a step test mounts `Body`.
   parked: [],
 }
 
@@ -99,9 +88,8 @@ function mockApi(over: Partial<Board> = {}) {
     if (u.includes('/api/weekly-planning/familyNight')) {
       return { ok: true, json: async () => JSON.parse(JSON.stringify(state)) }
     }
-    // The module's own upsert — the ONLY write this step makes. Modelled the way the
-    // server actually behaves: a partial assignment list writes only the parts named,
-    // a null theme means "leave it alone" (only '' clears), and a status is a status.
+    // The module's own upsert — the ONLY write this step makes, modelled the way the server
+    // behaves: a partial assignment list writes only the parts named, and only '' clears a theme.
     if (u.includes('/api/family-night/occurrence') && method === 'POST') {
       const b = (body ?? {}) as {
         date?: string; theme?: string | null; status?: string
@@ -111,9 +99,8 @@ function mockApi(over: Partial<Board> = {}) {
       state.occurrenceId = state.occurrenceId ?? 'occ1'
       if (typeof b.theme === 'string') state.theme = b.theme || null
       if (b.status) state.status = b.status
-      // PRESENCE, exactly as the server reads it: a key that wasn't sent isn't written.
-      // The mock has to model this or the tests can't catch the bug it exists to prevent
-      // — a detail-only write that silently un-assigns whoever had the part.
+      // PRESENCE, exactly as the server reads it: a key that wasn't sent isn't written. The
+      // mock has to model it, or a detail-only write that un-assigns somebody goes unseen.
       if ('eventId' in b) {
         state.eventId = b.eventId ?? null
         state.eventTitle = b.eventId ? '🍿 Movie night' : null
@@ -135,15 +122,13 @@ function mockApi(over: Partial<Board> = {}) {
       }
       return { ok: true, json: async () => ({ id: state.occurrenceId }) }
     }
-    // Only reached once somebody opens the picker — the step itself must not touch an
-    // event endpoint, which the skip test asserts.
+    // Only reached once somebody opens the picker; the step itself touches no event endpoint.
     if (u.includes('/api/events')) {
       return {
         ok: true,
         json: async () => ({
           events: [
             { id: 'ev-movie', title: '🍿 Movie night', startsAt: `${DATE}T19:00:00Z`, endsAt: null, allDay: false, origin: 'manual', personId: null, personColor: null, participants: [] },
-            // A meal mirror, which must NOT be offered as a family night.
             { id: 'ev-dinner', title: 'Spaghetti', startsAt: `${DATE}T18:00:00Z`, endsAt: null, allDay: false, origin: 'meal_plan', personId: null, personColor: null, participants: [] },
           ],
         }),
@@ -154,9 +139,7 @@ function mockApi(over: Partial<Board> = {}) {
   return state
 }
 
-// The step's store is module-scoped (Body and FooterExtra are sibling trees), so it
-// outlives a render. A fresh session id per test is what makes each one start clean —
-// the same thing that makes stepping to another week reload the board in the app.
+// The store is module-scoped and outlives a render, so a fresh session id starts each clean.
 let seq = 0
 const props = (over: Partial<StepBodyProps> = {}): StepBodyProps => ({
   step,
@@ -178,17 +161,14 @@ describe('FamilyNightStep', () => {
     render(<Body {...props()} />)
     await waitFor(() => expect(screen.getByText(/Activity/)).toBeTruthy())
 
-    // The header answers "when", from the household's own config — no second calendar.
     expect(screen.getByText(/every Wednesday/i)).toBeTruthy()
     expect(screen.getByText(/Wednesday, Sep 9/)).toBeTruthy()
     expect(screen.getByText(/5:00 PM/)).toBeTruthy()
 
-    // Three rows, each naming its part and the person the rotation is offering.
     expect(within(row('Activity')).getByText(/suggested/i).textContent).toMatch(/Wally/)
     expect(within(row('Treat')).getByText(/suggested/i).textContent).toMatch(/Lottie/)
     expect(within(row('Check-in')).getByText(/suggested/i).textContent).toMatch(/Kelly/)
 
-    // Reading it and moving on writes NOTHING. The affirmative is an acknowledgement.
     expect(wrote('/api/family-night')).toHaveLength(0)
   })
 
@@ -216,8 +196,8 @@ describe('FamilyNightStep', () => {
     await waitFor(() => expect(within(row('Activity')).getByText(/pinned for this week/i)).toBeTruthy())
     expect(within(row('Activity')).getByText(/pinned for this week/i).textContent).toMatch(/Lottie/)
 
-    // ONE write, and it is the familyNight module's own occurrence endpoint, keyed by
-    // the DATE — which is the whole of "pinned for this week only".
+    // ONE write, the module's own occurrence endpoint keyed by the DATE — the whole of
+    // "pinned for this week only".
     const posts = wrote('/api/family-night/occurrence')
     expect(posts).toHaveLength(1)
     expect(posts[0].body).toEqual({ date: DATE, assignments: [{ partId: 'activity', personId: 'p4' }] })
@@ -226,7 +206,6 @@ describe('FamilyNightStep', () => {
     expect(calls.some((c) => c.url.includes('/api/family-night/config'))).toBe(false)
     expect(calls.every((c) => c.method !== 'PUT')).toBe(true)
 
-    // The other two rows stay on rotation — pinning one part decides one part.
     expect(within(row('Treat')).getByText(/suggested/i)).toBeTruthy()
     expect(within(row('Check-in')).getByText(/suggested/i)).toBeTruthy()
   })
@@ -241,7 +220,6 @@ describe('FamilyNightStep', () => {
     fireEvent.click(face('Treat', 'Kevin'))
     await waitFor(() => expect(within(row('Treat')).getByText(/pinned/i)).toBeTruthy())
     expect(calls.filter((c) => c.url.includes('/api/weekly-planning/familyNight')).length).toBeGreaterThan(readsBefore)
-    // …and the session view, so the agenda sheet agrees with what just happened.
     expect(refresh).toHaveBeenCalled()
   })
 
@@ -256,8 +234,7 @@ describe('FamilyNightStep', () => {
     await waitFor(() => expect(wrote('/api/family-night/occurrence')).toHaveLength(1))
     expect(wrote('/api/family-night/occurrence')[0].body).toEqual({ date: DATE, theme: 'Pizza and the new Lego set' })
 
-    // Clearing sends '' rather than null: the server reads a null theme as "leave it
-    // alone", so null would silently keep the old one.
+    // Clearing sends '' rather than null: the server reads a null theme as "leave it alone".
     fireEvent.change(theme, { target: { value: '' } })
     fireEvent.blur(theme)
     await waitFor(() => expect(wrote('/api/family-night/occurrence')).toHaveLength(2))
@@ -283,12 +260,9 @@ describe('FamilyNightStep', () => {
     await waitFor(() => expect(screen.getByText(/Skipped this week/i)).toBeTruthy())
 
     expect(wrote('/api/family-night/occurrence')[0].body).toEqual({ date: DATE, status: 'skipped' })
-    // (3) The recurring calendar event is left alone — no event call of any kind.
     expect(calls.some((c) => c.url.includes('/api/events'))).toBe(false)
-    // And the module's schedule endpoints, which are what would unpick it.
     expect(calls.some((c) => c.url.includes('/api/family-night/schedule'))).toBe(false)
 
-    // Undo lives on the skip bar, not in the footer — the footer's extra is gone.
     expect(screen.queryByRole('button', { name: /Skip this week/i })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: /Undo/i }))
     await waitFor(() => expect(screen.queryByText(/Skipped this week/i)).toBeNull())
@@ -324,8 +298,6 @@ describe('FamilyNightStep', () => {
 })
 
 describe('FamilyNightStep · what each part actually is', () => {
-  // "for the activity or treat or check-in, I think we need to be able to add fields to
-  // that so that I can write out what the activity is or what the treat's going to be."
   it('saves a part’s detail on blur WITHOUT touching who has it', async () => {
     mockApi()
     render(<Body {...props()} />)
@@ -351,8 +323,7 @@ describe('FamilyNightStep · what each part actually is', () => {
     fireEvent.blur(box)
 
     await waitFor(() => expect(wrote('/api/family-night/occurrence')).toHaveLength(1))
-    // Still suggested, still Wally: naming the activity said nothing about whose turn
-    // it is, so nothing about the row above may change.
+    // Naming the activity said nothing about whose turn it is, so the row above may not move.
     const row = await screen.findByTestId('wpfn-row-Activity')
     await waitFor(() => expect(row.textContent).toMatch(/suggested/i))
     expect(row.textContent).toMatch(/Wally/)
@@ -369,8 +340,6 @@ describe('FamilyNightStep · what each part actually is', () => {
 })
 
 describe('FamilyNightStep · this week on the calendar', () => {
-  // "I'd love to be able to have it create a calendar event and/or link to a calendar
-  // event that's already on the calendar."
   it('adds this week to the calendar in one call, without an event form', async () => {
     mockApi()
     render(<Body {...props()} />)
@@ -378,9 +347,8 @@ describe('FamilyNightStep · this week on the calendar', () => {
 
     await waitFor(() => expect(wrote('/api/family-night/occurrence')).toHaveLength(1))
     expect(wrote('/api/family-night/occurrence')[0].body).toEqual({ date: DATE, createEvent: true })
-    // The event is created SERVER-side and linked in the same call. A create-then-adopt
-    // round trip can't be made safe here: the web app writes events locally first, so an
-    // id from the client may not exist server-side yet.
+    // Created SERVER-side and linked in the same call: the web writes events locally first,
+    // so a client id may not exist server-side yet.
     await waitFor(() => expect(screen.getByTestId('wpfn-cal').textContent).toMatch(/on the calendar for this week/i))
   })
 
@@ -391,8 +359,7 @@ describe('FamilyNightStep · this week on the calendar', () => {
 
     const list = await screen.findByLabelText(/events on this week/i)
     expect(list.textContent).toMatch(/Movie night/)
-    // A planned dinner is not a family night, and offering one would put a meal where an
-    // evening should be.
+    // A planned dinner is not a family night — offering one puts a meal where an evening goes.
     expect(list.textContent).not.toMatch(/Spaghetti/)
 
     fireEvent.click(screen.getByRole('button', { name: /Movie night/ }))
@@ -407,15 +374,13 @@ describe('FamilyNightStep · this week on the calendar', () => {
 
     await waitFor(() => expect(wrote('/api/family-night/occurrence')).toHaveLength(1))
     expect(wrote('/api/family-night/occurrence')[0].body).toEqual({ date: DATE, eventId: null })
-    // No DELETE anywhere near the calendar: "this isn't family night" must not delete
-    // Friday.
+    // No DELETE near the calendar: "this isn't family night" must not delete Friday.
     expect(calls.some((c) => c.method === 'DELETE')).toBe(false)
   })
 
   it('keeps the standing weekly series and this week’s event apart', async () => {
-    // `onCalendar` true, `eventId` null — the household has the recurring event but has
-    // not said anything about THIS week. Reading the two as one thing is the only way to
-    // get this screen wrong.
+    // `onCalendar` true, `eventId` null — the recurring event exists but nothing was said
+    // about THIS week. Reading the two as one thing is how this screen goes wrong.
     mockApi({ onCalendar: true, eventId: null })
     render(<Body {...props()} />)
     const cal = await screen.findByTestId('wpfn-cal')

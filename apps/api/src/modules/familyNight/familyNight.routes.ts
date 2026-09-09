@@ -23,13 +23,11 @@ const { tenantRoute, adminRoute } = moduleRoutes('familyNight')
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export function registerFamilyNightRoutes(api: Api): void {
-  // The card/settings read: config + members + the upcoming gathering with
-  // resolved (suggested-or-overridden) assignments.
   api.get('/api/family-night', tenantRoute(async (tenant) => {
     return getView(tenant.householdId)
   }))
 
-  // Update the agenda structure (parts, day, time, rotation order). Admin-only.
+  // Update the agenda structure (parts, day, time, rotation order).
   api.put('/api/family-night/config', adminRoute(async (tenant, req: Request, res: Response) => {
     const body = (req.body ?? {}) as Partial<FamilyNightConfig>
     const patch: Partial<FamilyNightConfig> = {}
@@ -53,14 +51,12 @@ export function registerFamilyNightRoutes(api: Api): void {
     return { config }
   }))
 
-  // Materialize / update the gathering for a date and persist assignments.
   api.post('/api/family-night/occurrence', tenantRoute(async (tenant, req: Request, res: Response) => {
     const body = (req.body ?? {}) as Partial<UpsertOccurrenceInput> & { createEvent?: unknown }
     if (!body.date) return res.status(400).json({ error: 'BadRequest', message: 'date is required' })
     // PRESENCE IS THE MESSAGE, so each field is copied only when the caller sent it.
-    // `{ partId, personId: a.personId ?? null }` — which is what this did — turns "I only
-    // named the treat" into "…and nobody has it", un-assigning whoever did. `personId`
-    // and `detail` answer different questions and are carried independently.
+    // `personId: a.personId ?? null` would turn "I only named the treat" into "…and nobody
+    // has it". `personId` and `detail` answer different questions and travel independently.
     const assignments = Array.isArray(body.assignments)
       ? body.assignments
           .filter((a) => a && typeof a.partId === 'string')
@@ -71,9 +67,8 @@ export function registerFamilyNightRoutes(api: Api): void {
           }))
       : undefined
 
-    // The event this week's gathering points at. Checked against the household before it
-    // is stored: the column is a real FK, so a bad id would 500 rather than 400, and an
-    // id from ANOTHER household would otherwise link across the tenant boundary.
+    // Checked against the household before it is stored: the column is a real FK, so a bad
+    // id would 500 rather than 400, and another household's id would link across tenants.
     let eventId: string | null | undefined
     if ('eventId' in body) {
       if (body.eventId === null) eventId = null
@@ -98,10 +93,9 @@ export function registerFamilyNightRoutes(api: Api): void {
       assignments,
     })
 
-    // "Add this week to the calendar" — creates a one-off event for the date and links
-    // it, server-side (see createOccurrenceEvent for why it cannot be a client round
-    // trip). Runs AFTER the upsert so a theme sent in the same call names the event.
-    // Ignored when the caller also named an event explicitly: they already said which.
+    // "Add this week to the calendar" — see createOccurrenceEvent for why it cannot be a
+    // client round trip. Runs AFTER the upsert so a theme sent in the same call names the
+    // event, and is ignored when the caller also named an event explicitly.
     if (body.createEvent === true && eventId === undefined) {
       const made = await createOccurrenceEvent(tenant, body.date)
       return { ...result, eventId: made.eventId }
@@ -109,13 +103,11 @@ export function registerFamilyNightRoutes(api: Api): void {
     return result
   }))
 
-  // Put Family Night on the calendar (create/refresh the recurring event). Admin-only.
   api.post('/api/family-night/schedule', adminRoute(async (tenant) => {
     const eventId = await scheduleEvent(tenant)
     return { eventId }
   }))
 
-  // Remove it from the calendar. Admin-only.
   api.delete('/api/family-night/schedule', adminRoute(async (tenant) => {
     await unscheduleEvent(tenant)
     return { ok: true }

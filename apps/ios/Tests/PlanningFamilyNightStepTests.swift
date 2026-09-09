@@ -4,31 +4,25 @@ import Testing
 
 // Weekly Planning · step 4 (Family night).
 //
-// THE PRESENCE TESTS ARE THE POINT OF THIS FILE. The familyNight occurrence endpoint
-// reads whether a KEY WAS SENT, not its value, so "clear the theme" and "leave the theme
-// alone" are two different bodies for the same field — and a detail-only write that also
-// carries `personId` un-assigns whoever had that part. `assertKeys` asserts the exact key
-// SET rather than one key's absence, so a later tidy-up that adds `personId: null` "for
-// symmetry" fails here instead of in front of a family on a Wednesday evening.
-//
-// The rest mirrors `FamilyNightModelTests`: a fake feed, and the loading contract
-// (a failed fetch keeps the last board; a failed write neither refetches nor mutates).
+// THE PRESENCE TESTS ARE THE POINT OF THIS FILE. The occurrence endpoint reads whether a
+// KEY WAS SENT, not its value, so "clear the theme" and "leave the theme alone" are two
+// different bodies — and a detail-only write carrying `personId` un-assigns whoever had
+// that part. `assertKeys` asserts the exact key SET, so a later tidy-up that adds
+// `personId: null` "for symmetry" fails here.
 
 private enum PlanningFamilyNightFailure: Error { case rejected }
 
 // MARK: - Reading a body
 
-/// The object inside `assignments[i]`. EMPTY when the body isn't shaped like that at all
-/// — which fails the key-set assertion below, and keeps every lookup a SINGLE optional.
-/// (Returning `[String: JSONValue]?` would make `fields?["personId"] == nil` compare the
-/// OUTER optional, so the presence test would pass for entirely the wrong reason.)
+/// The object inside `assignments[i]`, EMPTY when the body isn't shaped that way, so every
+/// lookup is a SINGLE optional: with `[String: JSONValue]?`, `fields?["personId"] == nil`
+/// compares the OUTER optional and the presence test passes for the wrong reason.
 private func assignment(_ body: [String: JSONValue], _ index: Int = 0) -> [String: JSONValue] {
     guard case let .array(items)? = body["assignments"], index < items.count,
           case let .object(fields) = items[index] else { return [:] }
     return fields
 }
 
-/// Assert a dictionary's key set EXACTLY. The whole contract is which keys are present.
 private func assertKeys(_ fields: [String: JSONValue], _ expected: Set<String>,
                         _ what: String, sourceLocation: SourceLocation = #_sourceLocation) {
     #expect(Set(fields.keys) == expected, "\(what) sent \(Set(fields.keys).sorted())",
@@ -38,9 +32,7 @@ private func assertKeys(_ fields: [String: JSONValue], _ expected: Set<String>,
 // MARK: - The board, VERBATIM off the wire
 //
 // Field-for-field what `getFamilyNightBoard` returns and what
-// `apps/api/test/weekly-planning-familyNight.integration.test.ts` asserts against: the
-// fixture household ([Kevin, Kelly, Wally, Lottie], the three default parts), with the
-// treat pinned and holding a detail, and the check-in on rotation.
+// `apps/api/test/weekly-planning-familyNight.integration.test.ts` asserts against.
 private let boardJSON = Data("""
 {
   "weekStart": "2026-09-06",
@@ -108,15 +100,13 @@ private func model(_ feed: FamilyNightBoardFeed) -> PlanningFamilyNightModel {
 @MainActor
 @Suite struct PlanningFamilyNightStepTests {
 
-    // ── The presence rules ───────────────────────────────────────────────────────
 
     @Test func detailWriteCarriesNoPersonKey() {
         let body = PlanningFamilyNightBody.setDetail(date: "2026-09-09", partId: "treat",
                                                      detail: "the good ice cream")
         assertKeys(body, ["date", "assignments"], "the detail body")
-        // THE ONE THAT MATTERS. The server reads presence, so `personId: null` here would
-        // mean "…and nobody has the treat" and would un-pin whoever does. Not "personId
-        // is null" — personId must not be in the dictionary AT ALL.
+        // The server reads presence, so `personId: null` would mean "and nobody has the
+        // treat". It must not be in the dictionary AT ALL.
         assertKeys(assignment(body), ["partId", "detail"], "the detail assignment")
         #expect(!assignment(body).keys.contains("personId"),
                 "personId must not be in a detail body AT ALL — not even as null")
@@ -125,8 +115,7 @@ private func model(_ feed: FamilyNightBoardFeed) -> PlanningFamilyNightModel {
 
     @Test func detailWriteClearsWithAnEmptyStringRatherThanAMissingKey() {
         let body = PlanningFamilyNightBody.setDetail(date: "2026-09-09", partId: "treat", detail: "")
-        // '' CLEARS. An absent `detail` key would mean "leave whatever is there", which is
-        // how a cleared box quietly keeps its old text.
+        // '' CLEARS; an absent `detail` key means "leave whatever is there".
         assertKeys(assignment(body), ["partId", "detail"], "the cleared detail assignment")
         #expect(assignment(body)["detail"] == JSONValue.string(""))
     }
@@ -135,15 +124,14 @@ private func model(_ feed: FamilyNightBoardFeed) -> PlanningFamilyNightModel {
         let body = PlanningFamilyNightBody.pin(date: "2026-09-09", partId: "treat", personId: "p-wally")
         assertKeys(assignment(body), ["partId", "personId"], "the pin assignment")
         #expect(assignment(body)["personId"] == JSONValue.string("p-wally"))
-        // Never carries `detail`: pinning a face must not wipe what the part is.
         #expect(!assignment(body).keys.contains("detail"))
     }
 
     @Test func pinningNobodyWritesARealNobodyYetRatherThanOmittingTheKey() {
         let body = PlanningFamilyNightBody.pin(date: "2026-09-09", partId: "treat", personId: nil)
         assertKeys(assignment(body), ["partId", "personId"], "the nobody-yet assignment")
-        // There is deliberately no un-pin: the module's upsert can write an assignment but
-        // never delete one, so this is "nobody yet", not "back on rotation".
+        // The module's upsert can write an assignment but never delete one, so this is
+        // "nobody yet", not "back on rotation".
         #expect(assignment(body)["personId"] == JSONValue.null)
     }
 
@@ -173,14 +161,12 @@ private func model(_ feed: FamilyNightBoardFeed) -> PlanningFamilyNightModel {
 
     @Test func addToCalendarAsksTheSERVERToMakeTheEvent() {
         let body = PlanningFamilyNightBody.addEvent(date: "2026-09-09")
-        // Not a create-then-adopt round trip: a client-made event may have no server id
-        // yet, so the link would 404 on an unreproducible race.
+        // Not create-then-adopt: a client-made event may have no server id yet.
         assertKeys(body, ["date", "createEvent"], "the add-to-calendar body")
         #expect(body["createEvent"] == JSONValue.bool(true))
         #expect(body["eventId"] == nil)
     }
 
-    // ── Decoding ────────────────────────────────────────────────────────────────
 
     @Test func decodesTheBoardVerbatimOffTheWire() throws {
         let board = try decodedBoard()
@@ -190,8 +176,6 @@ private func model(_ feed: FamilyNightBoardFeed) -> PlanningFamilyNightModel {
         #expect(board.time == "17:00")
         #expect(board.status == "planned")
         #expect(!board.isSkipped)
-        // `onCalendar` (the standing series) and `eventId` (this week's own event) are
-        // different facts, and the step has to keep them apart.
         #expect(board.onCalendar)
         #expect(board.eventTitle == "Family Night")
         #expect(board.eventWhen == "Wednesday 5:00 PM")
@@ -199,16 +183,13 @@ private func model(_ feed: FamilyNightBoardFeed) -> PlanningFamilyNightModel {
         #expect(board.members[0].avatarEmoji == nil)
         #expect(board.members[1].colorHex == "#E0653F")
         #expect(board.parts.map(\.partId) == ["activity", "treat", "checkin"])
-        // Pinned vs suggested is the screen's whole job.
         #expect(board.parts[0].pinned == false)
         #expect(board.parts[1].pinned == true)
         #expect(board.parts[1].detail == "the good ice cream")
-        // A detail with no person on a non-rotating part still reads as nobody yet.
         #expect(board.parts[2].rotates == false)
         #expect(board.parts[2].personName == nil)
     }
 
-    // ── The lines the rows read ─────────────────────────────────────────────────
 
     @Test func theSublineTellsASuggestionApartFromADecision() throws {
         let board = try decodedBoard()
@@ -221,18 +202,12 @@ private func model(_ feed: FamilyNightBoardFeed) -> PlanningFamilyNightModel {
 
     @Test func detailHintsFallBackToThePartsOwnLabel() throws {
         let board = try decodedBoard()
-        // THE THREE STOCK PARTS GET A CONCRETE EXAMPLE. "optional — what's the treat?"
-        // asks the question back at you; "the good ice cream" shows what an answer looks
-        // like, which is the whole job of a placeholder.
         #expect(PlanningFamilyNightFormat.detailHint(board.parts[0]).contains("charades"))
         #expect(PlanningFamilyNightFormat.detailHint(board.parts[1]).contains("good ice cream"))
         #expect(PlanningFamilyNightFormat.detailHint(board.parts[2]).contains("how was school"))
 
-        // A part this build has never heard of — a household that renames its parts, or a
-        // server that grows a fourth — gets a question built from its OWN label rather
-        // than one of the three canned examples or an empty box. (This assertion used to
-        // name `parts[2]`, which is `checkin` and therefore stock: it was asserting the
-        // fallback against a part that never reaches it.)
+        // A part this build has never heard of gets a question built from its OWN label.
+        // Must NOT be asserted against a stock part — the fallback never reaches those.
         let custom = try #require(try? WaffledAPI.decoder.decode(
             WaffledAPI.PlanningFamilyNightPart.self,
             from: Data(#"{"partId":"service","label":"Service","emoji":"🤝","rotates":true,"detail":null,"personId":null,"personName":null,"pinned":false}"#.utf8)))
@@ -241,11 +216,9 @@ private func model(_ feed: FamilyNightBoardFeed) -> PlanningFamilyNightModel {
 
     @Test func theEventPickersWeekIsSteppedInWholeDaysOffTheServersBoundary() {
         #expect(PlanningFamilyNightFormat.plusDays("2026-09-06", 6) == "2026-09-12")
-        // Across a US DST boundary (2026-11-01): a date is a label, not an instant.
         #expect(PlanningFamilyNightFormat.plusDays("2026-10-29", 6) == "2026-11-04")
     }
 
-    // ── The loading contract ────────────────────────────────────────────────────
 
     @Test func aFailedReadKeepsTheBoardThatWasAlreadyOnScreen() async throws {
         let feed = FamilyNightBoardFeed(try decodedBoard())
@@ -288,24 +261,18 @@ private func model(_ feed: FamilyNightBoardFeed) -> PlanningFamilyNightModel {
             weekStart: "2026-09-06")
 
         #expect(ok)
-        // The SERVER owns which parts are on rotation, so the board comes back from it.
         #expect(feed.fetchCount == 2)
         #expect(feed.bodies.count == 1)
         #expect(model.rows.count == 3)
         #expect(model.recurrence == "every Wednesday")
     }
 
-    // ── The crumb ───────────────────────────────────────────────────────────────
 
     @Test func theCrumbRecordsWhatWasDecidedAndNotACopyOfTheModule() throws {
         let crumb = PlanningFamilyNightDecision.crumb(try decodedBoard())
-        // Web parity, verbatim: both platforms write the same session-step record and the
-        // recap reads back whatever either one wrote.
         #expect(Set(crumb.keys) == ["pinned", "skipped"])
         #expect(crumb["pinned"] == JSONValue.array([.string("treat")]))
         #expect(crumb["skipped"] == JSONValue.bool(false))
-        // No theme, no person names, no dates — the recap reads those through to the
-        // familyNight module itself.
     }
 
     @Test func theCrumbIsEmptyButWellFormedBeforeAnythingIsRead() {

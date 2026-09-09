@@ -83,9 +83,8 @@ describe('Tasks screen', () => {
     expect(screen.queryByText(/overdue/)).not.toBeInTheDocument()
   })
 
-  // The Chores screen gained the same thing Weekly Planning did: a one-off's day is
-  // editable, not just settable at birth. The prefill is the part worth pinning — a
-  // draft that forgets `dueOn` opens on TODAY and silently moves the chore on save.
+  // A one-off's day is editable, not just settable at birth. The prefill is the part worth
+  // pinning — a draft that forgets `dueOn` opens on TODAY and silently moves the chore.
   it('opens the editor on a one-off’s own day, not today', async () => {
     const future = new Date(Date.now() + 3 * 86_400_000).toISOString().slice(0, 10)
     mockInstances([
@@ -98,7 +97,6 @@ describe('Tasks screen', () => {
   })
 
   it('always shows Up-for-grabs and every person — even with no chores', async () => {
-    // Wally has a chore; Lottie and Kevin have none. All three (+ Up for grabs) should appear.
     mockInstances(
       [{ id: '1', choreTitle: 'Feed dog', emoji: '🐶', personId: 'p1', personName: 'Wally', status: 'pending', rewardAmount: 2 }],
       [
@@ -114,7 +112,7 @@ describe('Tasks screen', () => {
     expect(screen.getByText('Kevin')).toBeInTheDocument()
     expect(screen.getByText(/Nothing for Lottie/)).toBeInTheDocument()
 
-    // Stable order: Up for grabs, then persons in list order (Wally, Lottie, Kevin).
+    // Stable order: Up for grabs, then persons in list order.
     const heads = screen
       .getAllByText(/Up for grabs|Wally|Lottie|Kevin/, { selector: '.chore-head .nm' })
       .map((e) => (e.textContent || '').replace(/[^A-Za-z ]/g, '').trim())
@@ -180,11 +178,9 @@ describe('Tasks screen', () => {
     }) as unknown as typeof fetch
 
     renderTasks(<Tasks />)
-    // No raw-image link — the thumbnail is a button that opens an in-app review modal.
     const thumb = (await screen.findAllByAltText('Proof for Wash car'))[0].closest('button')!
     fireEvent.click(thumb)
 
-    // The modal shows the large photo (distinct alt) and an Approve action.
     expect(await screen.findByAltText('Photo proof for Wash car')).toBeInTheDocument()
     const modal = document.querySelector('.chore-proof-modal') as HTMLElement
     fireEvent.click(within(modal).getByRole('button', { name: 'Approve' }))

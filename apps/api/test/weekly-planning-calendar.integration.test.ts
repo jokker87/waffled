@@ -1,12 +1,9 @@
 // Weekly Planning · step 2 · Calendar — against a real Postgres (Testcontainers).
 //
-// The step adds no endpoint of its own (the week is `GET /api/events`, adding is
-// `POST /api/events`), so this is RETROFITTED coverage of an existing read — the
-// red-green for step 2 is in `planning/steps/CalendarStep.test.tsx`. What it pins:
-// the window is exactly weekStart…weekStart+6 (an off-by-one silently empties a day
-// row); an event keeps the HOUR AND LENGTH it was created with, so a client that
-// re-rounds a start stays a client-only regression; a created event comes back
-// owner-coloured; and the step's answer round-trips as a COUNT, not a copy.
+// The step adds no endpoint of its own, so this is RETROFITTED coverage of an existing
+// read (the red-green is in `planning/steps/CalendarStep.test.tsx`). It pins the exact
+// weekStart…weekStart+6 window, that an event keeps the hour and length it was created
+// with, the owner colour, and that the step's answer round-trips as a COUNT.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from './helpers/pg'
 import jwt from 'jsonwebtoken'
@@ -42,14 +39,12 @@ function call(method: string, path: string, token?: string, body?: unknown) {
 const kevin = mint('dev|kevin')
 const json = (r: { body: string }) => JSON.parse(r.body)
 
-// Pure date arithmetic on a YYYY-MM-DD — UTC on purpose, because nothing here is
-// rendered; it only ever adds days and re-slices.
+// Pure date arithmetic on a YYYY-MM-DD — UTC on purpose; nothing here is rendered.
 const addDays = (iso: string, n: number): string =>
   new Date(new Date(`${iso}T00:00:00Z`).getTime() + n * 86400000).toISOString().slice(0, 10)
 
-// The household is America/Chicago and every date below is in September (CDT, -05:00).
-// Spelling the offset out keeps the fixtures on the day they say they're on however the
-// test machine is set.
+// The household is America/Chicago; spelling the offset out keeps a fixture on the day it
+// says it is on however the test machine is set.
 const at = (day: string, time: string) => `${day}T${time}:00-05:00`
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -102,7 +97,6 @@ describe('weekly planning · step 2 · calendar', () => {
   it('shows the planned week — and only it — from the first hour of day 1 to the last of day 7', async () => {
     const last = addDays(weekStart, 6)
 
-    // One on each edge of the week, one in each of the weeks on either side.
     const made = [
       { title: 'First thing Monday', startsAt: at(weekStart, '00:15') },
       { title: 'Late on the last night', startsAt: at(last, '23:30') },
@@ -130,24 +124,20 @@ describe('weekly planning · step 2 · calendar', () => {
       allDay: false,
       participantIds: [ownerId],
     })).event
-    // The composer sends participants and the owner is DERIVED from them — the step
-    // never says who an event belongs to twice. Note the create response carries the
-    // owner id but not their name/colour (it doesn't join persons); the colour arrives
-    // on the week read, which is the read the columns are painted from anyway.
+    // The owner is DERIVED from the participants. The create response carries the owner
+    // id but not their colour (it doesn't join persons) — that arrives on the week read.
     expect(created).toMatchObject({ personId: ownerId })
 
     const week = json(await call('GET', `/api/events?from=${weekStart}&to=${addDays(weekStart, 6)}`, kevin))
     const onWeek = week.events.find((e: { title: string }) => e.title === 'Soccer practice')
     expect(onWeek).toBeTruthy()
     expect(onWeek).toMatchObject({ personId: ownerId, personName: 'Kevin', personColor: '#2F7FED' })
-    // Added on the day it was asked for, not a neighbouring one.
     expect(onWeek.startsAt.slice(0, 10) >= addDays(weekStart, 3)).toBe(true)
   })
 
   it('keeps the hour and the length an addition was given — not a default one', async () => {
-    // The modal asks for a time AND a duration; both have to survive the round trip.
-    // 8:30am for two hours is deliberately neither the 5pm default the old composer
-    // was stuck on nor the one-hour end it hardcoded.
+    // Time AND duration both have to survive the round trip; 8:30 for two hours is
+    // deliberately neither the default start nor a one-hour end.
     const day = addDays(weekStart, 2)
     const created = json(await call('POST', '/api/events', kevin, {
       title: 'Swim lesson',
@@ -165,14 +155,11 @@ describe('weekly planning · step 2 · calendar', () => {
     // is America/Chicago (CDT, -05:00) — so 08:30 local is 13:30Z on the same date.
     expect(new Date(onWeek.startsAt).toISOString()).toBe(new Date(at(day, '08:30')).toISOString())
     expect(new Date(onWeek.endsAt).toISOString()).toBe(new Date(at(day, '10:30')).toISOString())
-    // …and it is still on the day it was asked for, not pushed into the next one.
     expect(onWeek.startsAt.slice(0, 10)).toBe(day)
   })
 
   it('puts one addition on more than one person', async () => {
-    // The composer's "who it's for" row is multi-select — an event for both parents is
-    // the ordinary case, so the week read has to carry every participant back, not just
-    // the derived owner.
+    // The week read has to carry every participant back, not just the derived owner.
     const nora = json(await call('POST', '/api/persons', kevin, { name: 'Nora', memberType: 'adult', colorHex: '#25A368' })).person
     const res = await call('POST', '/api/events', kevin, {
       title: 'Parent-teacher night',

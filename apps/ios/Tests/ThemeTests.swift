@@ -5,9 +5,8 @@ import Testing
 @testable import Waffled
 
 // Dark mode: the WF token table must resolve to the source-of-truth hex under BOTH
-// appearances (values mirror apps/web/src/styles/waffled.css :root + [data-theme=dark]),
-// brand hues stay fixed with the lights off, elevation inverts, and the theme preference
-// persists + maps to a SwiftUI ColorScheme. See apps/ios/DARK_MODE.md.
+// appearances (mirroring apps/web/src/styles/waffled.css), brand hues stay fixed and
+// elevation inverts. See apps/ios/DARK_MODE.md.
 @Suite struct ThemeTests {
 
     /// Resolve a dynamic SwiftUI Color to 8-bit RGB under a specific interface style.
@@ -45,7 +44,6 @@ import Testing
         // A raised surface catches light: in dark, card must be lighter than canvas.
         let card = rgb(WF.card, .dark), canvas = rgb(WF.canvas, .dark)
         #expect(card.r > canvas.r && card.g > canvas.g && card.b > canvas.b)
-        // In light it's the reverse — canvas is warm-white, card is pure white above it.
         #expect(rgb(WF.card, .light).r >= rgb(WF.canvas, .light).r)
     }
 
@@ -68,8 +66,8 @@ import Testing
     }
 
     @Test func aiAccentIsLighterInLightRicherInDark() {
-        // waffled.css late swap: --ai is #8C74E8 (light) / #6E56CF (dark). An old table
-        // reproduced the "AI purple backwards" bug — lock the corrected direction.
+        // waffled.css late swap: --ai is #8C74E8 (light) / #6E56CF (dark), locked because an
+        // old table had it backwards.
         #expect(rgb(WF.ai, .light) == (0x8C, 0x74, 0xE8))
         #expect(rgb(WF.ai, .dark) == (0x6E, 0x56, 0xCF))
     }
@@ -90,32 +88,25 @@ import Testing
 
     // MARK: bottom-bar clearance
 
-    // Two different jobs, one source. A SCROLLING screen wants the bar's height plus
-    // breathing room so its last row doesn't hug the bar; a FIXED footer wants to sit
-    // exactly on top of the bar with no dead space under it. Before these were derived,
-    // the planning session's fixed footer used the scroll figure and left ~46pt of blank
-    // canvas above the tab bar — half of "the bottom action bar takes up too much room".
+    // Two jobs, one source: a SCROLLING screen wants the bar's height plus breathing room; a
+    // FIXED footer sits exactly on top of the bar, and the scroll figure leaves ~46pt blank.
 
     @Test func theBarsHeightIsWhatTheBarActuallyDraws() {
-        // Not a guess: `WaffledTabBar` frames the capture button at `captureButtonSize`
-        // and pads itself by `barTopPadding`, so this is the same arithmetic the bar does.
-        // The FAB's `-18` offset is cosmetic and does NOT participate in layout, which is
-        // why the tallest CHILD sets the height.
+        // Not a guess: `WaffledTabBar` frames the capture button at `captureButtonSize` and
+        // pads by `barTopPadding`. The FAB's `-18` offset is cosmetic, so the tallest CHILD wins.
         #expect(WF.tabBarHeight == WF.captureButtonSize + WF.barTopPadding)
         #expect(WF.tabBarHeight == 64)
     }
 
     @Test func theScrollClearanceIsStillExactlyOneHundredAndTen() {
-        // Every scrolling screen in the app is tuned against this number — deriving it
-        // must not move it. This is the regression guard on the refactor, not a new rule.
+        // Every scrolling screen is tuned against this number — deriving it must not move it.
         #expect(WF.tabBarClearance == 110)
         #expect(WF.tabBarClearance == WF.tabBarHeight + WF.scrollBreathingRoom)
     }
 
     @Test func aFixedFooterClearsTheBarWithoutTheBreathingRoom() {
-        // The whole point: strictly less than the scroll clearance, but still at least
-        // the bar's height — anything less puts the footer's controls UNDER the bar,
-        // which is how the pantry Edit button became untappable.
+        // Strictly less than the scroll clearance but at least the bar's height: anything less
+        // puts the footer's controls UNDER the bar.
         #expect(WF.fixedBarClearance < WF.tabBarClearance)
         #expect(WF.fixedBarClearance >= WF.tabBarHeight || WF.fixedBarClearance == 0)
     }

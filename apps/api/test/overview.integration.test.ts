@@ -117,26 +117,17 @@ describe('person overview · the planning focus is gated on the module', () => {
 })
 
 describe('person overview · this week\'s planning focus', () => {
-  // "where does that save? or where would I be able to see that focus outside of the
-  // weekly planning? do we put it or surface it anywhere else in the UI?"
-  //
-  // It saved to `planning_session_steps.data.kids` and was read by exactly two things:
-  // the Kids step, which shows it back, and the Recap. So the answer was "nowhere" — a
-  // child said what their one thing was on planning night and then never saw it again.
-  //
-  // It surfaces on their profile, which is where "what they're working on" already lives
-  // (goals, streak, stars). Read here rather than copied: the session record stays the
-  // one place it is stored, exactly as the recap treats it.
+  // A kid's "one thing this week" is stored only in `planning_session_steps.data.kids`,
+  // and it surfaces on their profile — where "what they're working on" already lives.
+  // READ here, not copied: the session record stays the one place it is stored.
   const iso = (d: Date) => d.toISOString().slice(0, 10)
 
-  // The whole feature is opt-in, so the profile shows nothing until the module is on —
-  // asserted below before this runs.
+  // The whole feature is opt-in, so the profile shows nothing until the module is on.
   beforeAll(async () => {
     await withClient((c) =>
       c.query(
-        // NOT jsonb_set with a two-level path: it can only create the LAST level, so with
-        // no `settings.modules` object yet it returns the row UNCHANGED and silently — a
-        // module that never turns on and a test that fails for the wrong reason.
+        // NOT jsonb_set with a two-level path: it can only create the LAST level, so with no
+        // `settings.modules` object yet it returns the row UNCHANGED and silently.
         `update households
             set settings = coalesce(settings, '{}'::jsonb)
                            || jsonb_build_object('modules',
@@ -175,8 +166,8 @@ describe('person overview · this week\'s planning focus', () => {
 
   it('surfaces the focus from the session covering TODAY', async () => {
     // The week we are actually in — not the week a session was planning. A session run on
-    // Sunday plans the week ahead, so by Wednesday the focus somebody is living with is
-    // the one from the session whose week contains today.
+    // Sunday plans the week ahead, so by Wednesday the focus is the session whose week
+    // contains today.
     const today = new Date()
     const start = new Date(today)
     start.setDate(start.getDate() - start.getDay()) // this household starts weeks on Sunday
@@ -187,8 +178,7 @@ describe('person overview · this week\'s planning focus', () => {
   })
 
   it('ignores a focus from a week that has already passed', async () => {
-    // Last week's one thing is over. Showing it would be the profile quietly disagreeing
-    // with the Kids step, which only ever asks about the week being planned.
+    // Showing last week's one thing would have the profile disagreeing with the Kids step.
     const old = new Date()
     old.setDate(old.getDate() - 28)
     old.setDate(old.getDate() - old.getDay())

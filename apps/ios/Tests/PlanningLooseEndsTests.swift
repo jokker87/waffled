@@ -4,15 +4,9 @@ import Testing
 
 // Weekly Planning · step 1 "Loose ends" — the step's wire types and its state machine.
 //
-// The decoding suite works from VERBATIM payload bytes, lifted from
-// `apps/api/test/weekly-planning-looseEnds.integration.test.ts` (the chore fixture "Take
-// the bins out", the parked note "Ask about the school trip", the four notDone
-// destinations and the two parked ones). Hand-shaped fixtures drift; these are what the
-// route actually answers.
-//
-// The model suite drives the injected closures — the same fake-feed shape as
-// `FamilyNightModelTests` — because every network op on the model is a closure with a
-// `WaffledAPI()`-backed default, and that is the seam.
+// The decoding suite works from VERBATIM payload bytes lifted from the API integration test:
+// hand-shaped fixtures drift, these are what the route actually answers. The model suite drives the
+// injected closures, which are the model's only seam.
 
 private enum LooseEndsFailure: Error { case refused }
 
@@ -23,7 +17,6 @@ private let noteId = "22222222-2222-4222-8222-222222222222"
 
 @Suite struct PlanningLooseEndsDecodingTests {
 
-    /// The whole read, as the route answers it.
     @Test func decodesTheView() throws {
         let json = """
         {
@@ -62,7 +55,6 @@ private let noteId = "22222222-2222-4222-8222-222222222222"
         #expect(view.counts.notDone == 1)
         #expect(view.counts.parked == 1)
         #expect(view.sources == ["chores", "lists", "rhythms", "goals"])
-        // The key is unique across kinds and is what the deck remembers.
         #expect(view.notDone.first?.key == "chore:\(choreId)")
         #expect(view.notDone.first?.detail == "3 days late")
         #expect(view.notDone.first?.actions == ["done"])
@@ -73,8 +65,7 @@ private let noteId = "22222222-2222-4222-8222-222222222222"
         #expect(view.routes.first?.source == "notDone")
     }
 
-    /// `primary` IS OPTIONAL. The server omits the key entirely on every destination but
-    /// one, so a `Bool` here would fail the whole read.
+    /// `primary` IS OPTIONAL: the server omits the key on all but one, so a `Bool` would fail.
     @Test func destinationPrimaryIsAbsentOnAllButOne() throws {
         let json = """
         {"notDone":[
@@ -88,12 +79,9 @@ private let noteId = "22222222-2222-4222-8222-222222222222"
         #expect(d.notDone[0].primary == true)
         #expect(d.notDone[1].primary == nil)
         #expect(d.parked[0].primary == nil)
-        // What the card actually asks: is this the loud one?
         #expect(d.notDone.filter { $0.primary == true }.count == 1)
     }
 
-    /// An item may arrive with the optional keys missing rather than null — both are the
-    /// same absence, and neither may cost the step.
     @Test func decodesAnItemWithNoEmojiOrDetailKeys() throws {
         let json = """
         {"key":"goal:\(choreId)","kind":"goal","id":"\(choreId)","title":"Run three times","actions":[]}
@@ -105,8 +93,8 @@ private let noteId = "22222222-2222-4222-8222-222222222222"
         #expect(item.actions.isEmpty)
     }
 
-    /// A route persisted by something older can be missing `title`/`source` — the server's
-    /// own guard only checks kind/id/to — and one bad row must not blank the step.
+    /// A route persisted by something older can be missing `title`/`source` — the server's guard
+    /// checks only kind/id/to — and one bad row must not blank the step.
     @Test func decodesARouteMissingTitleAndSource() throws {
         let json = """
         [{"kind":"parked","id":"\(noteId)","to":"tasks"}]
@@ -164,8 +152,6 @@ private let noteId = "22222222-2222-4222-8222-222222222222"
         WaffledAPI.LooseEndDestination(to: "calendar", label: "Calendar", hint: "It needs an appointment slot", primary: nil),
     ]
 
-    /// Group A: the destinations are the card's choices; the writing answer and "leave it
-    /// open" stay quiet underneath, with "leave" first.
     @Test func notDoneKeepsItsWritingAnswerQuiet() {
         let built = LooseEndChoice.build(
             item: item(kind: "chore", actions: ["done"]), group: .notDone, destinations: notDoneDests)
@@ -177,8 +163,7 @@ private let noteId = "22222222-2222-4222-8222-222222222222"
         #expect(built.quiet.last?.label == "It’s done already")
     }
 
-    /// Group B: a note might turn out to be nothing, so "talk about it now" and "keep it
-    /// parked" are ordinary choices on the card — four in all — and only Drop stays quiet.
+    /// Group B: a note might turn out to be nothing, so four choices are ordinary; only Drop hides.
     @Test func parkedPromotesTalkAboutItAndKeepItParked() {
         let dests = [
             WaffledAPI.LooseEndDestination(to: "tasks", label: "Make it a task", hint: "Someone owns it this week", primary: true)
@@ -193,8 +178,6 @@ private let noteId = "22222222-2222-4222-8222-222222222222"
         #expect(built.quiet.first?.label == "Drop it")
     }
 
-    /// A card whose item can take no action at all (a chore wanting photo proof) still
-    /// offers its destinations — routing is never gated on the module.
     @Test func anItemWithNoActionsStillRoutes() {
         let built = LooseEndChoice.build(
             item: item(kind: "chore", actions: []), group: .notDone, destinations: notDoneDests)
@@ -203,8 +186,6 @@ private let noteId = "22222222-2222-4222-8222-222222222222"
         #expect(built.quiet.map(\.key) == ["leave"])
     }
 
-    /// The cleared state names what was looked at, and how much is waiting in the group
-    /// you are not on.
     @Test func clearedCopyNamesTheSourcesAndTheOtherGroup() {
         #expect(
             LooseEndCopy.clearedSubtitle(.notDone, sources: ["chores", "lists"], remainingOther: 1)
@@ -231,9 +212,7 @@ private final class LooseEndsFeed {
     var routeCalls: [(sessionId: String, kind: String, id: String, title: String, source: String, to: String?)] = []
     var resolveCalls: [(kind: String, id: String, action: String, sessionId: String)] = []
     var parkCalls: [(note: String, sessionId: String)] = []
-    /// What the next route call should answer with.
     var routesAfterWrite: [WaffledAPI.LooseEndRoute] = []
-    /// Lists ruled in or out through the step's chooser.
     var listRulings: [(id: String, relevant: Bool)] = []
     var ruleListFails = false
 
@@ -311,8 +290,7 @@ private func model(_ feed: LooseEndsFeed) -> PlanningLooseEndsModel {
         actions: ["done"])
     private let session = "33333333-3333-4333-8333-333333333333"
 
-    /// ROUTING HIDES THE CARD, AND UNDO BRINGS IT BACK. Both go through the same call —
-    /// undo is `to: nil` — and the server answers with the whole array either way.
+    /// ROUTING HIDES THE CARD, AND UNDO BRINGS IT BACK — the same call, undo being `to: nil`.
     @Test func routesThenUndoes() async {
         let feed = LooseEndsFeed(snapshot: looseEndsView(notDone: [chore]))
         let m = model(feed)
@@ -327,7 +305,6 @@ private func model(_ feed: LooseEndsFeed) -> PlanningLooseEndsModel {
         #expect(feed.routeCalls.last?.to == "tasks")
         #expect(feed.routeCalls.last?.source == "notDone")
         #expect(feed.routeCalls.last?.title == "Take the bins out")
-        // The deck stops asking about what it has already triaged…
         #expect(m.remaining(.notDone) == 0)
         #expect(m.trail.map(\.title) == ["Take the bins out"])
         // …and the crumb carries the CROSS-STEP CONTRACT, not just counts.
@@ -346,8 +323,7 @@ private func model(_ feed: LooseEndsFeed) -> PlanningLooseEndsModel {
         #expect(m.decisionData["routes"] == .array([]))
     }
 
-    /// The routes seeded by the READ are what stops a reload mid-step re-asking
-    /// everything already triaged.
+    /// The routes seeded by the READ are what stops a reload mid-step re-asking everything.
     @Test func seedsRoutesFromTheRead() async {
         let routed = WaffledAPI.LooseEndRoute(
             kind: "chore", id: choreId, title: "Take the bins out", source: "notDone", to: "kids")
@@ -361,9 +337,8 @@ private func model(_ feed: LooseEndsFeed) -> PlanningLooseEndsModel {
         #expect(m.total(.notDone) == 1)
     }
 
-    /// THE SEED IS LOAD-BEARING. A second visit to the step starts with a fresh model, and
-    /// the crumb REPLACES the step's `data` when it is answered — so a model that pushed an
-    /// empty `routes` because its read failed would destroy what the first visit routed.
+    /// THE SEED IS LOAD-BEARING. A second visit starts with a fresh model, and the crumb REPLACES
+    /// the step's `data` — so an empty `routes` after a failed read would destroy the first visit's.
     @Test func seedsRoutesFromTheStepsOwnDataSoAFailedReadCannotWipeThem() async {
         let persisted = JSONValue.array([
             .object([
@@ -382,7 +357,6 @@ private func model(_ feed: LooseEndsFeed) -> PlanningLooseEndsModel {
         #expect(m.routes.count == 1)
         #expect(m.routes[0].to == "tasks")
         #expect(m.routes[0].title == "Take the bins out")
-        // …and so the crumb still carries the cross-step contract rather than erasing it.
         #expect(m.decisionData["routes"] == persisted)
     }
 
@@ -408,8 +382,6 @@ private func model(_ feed: LooseEndsFeed) -> PlanningLooseEndsModel {
         #expect(m.routes.isEmpty)
     }
 
-    /// A REFUSED WRITE CHANGES NOTHING but the error line — the state it would have
-    /// written is only assigned when the call returns.
     @Test func aRefusedRouteLeavesTheDeckAlone() async {
         let feed = LooseEndsFeed(snapshot: looseEndsView(notDone: [chore]))
         feed.routeFails = true
@@ -425,8 +397,7 @@ private func model(_ feed: LooseEndsFeed) -> PlanningLooseEndsModel {
         #expect(m.working == false)
     }
 
-    /// A settled item is answered by its own module, so the step re-reads rather than
-    /// removing it locally — and the tally the crumb carries counts it.
+    /// A settled item is answered by its own module, so the step re-reads rather than removing it.
     @Test func settlingWritesThenReloads() async {
         let feed = LooseEndsFeed(snapshot: looseEndsView(notDone: [chore]))
         let m = model(feed)
@@ -443,7 +414,6 @@ private func model(_ feed: LooseEndsFeed) -> PlanningLooseEndsModel {
         #expect(m.decisionData["answered"] == .int(1))
     }
 
-    /// A refused settle neither counts nor refetches.
     @Test func aRefusedSettleDoesNotCountOrRefetch() async {
         let feed = LooseEndsFeed(snapshot: looseEndsView(notDone: [chore]))
         feed.resolveFails = true
@@ -469,12 +439,10 @@ private func model(_ feed: LooseEndsFeed) -> PlanningLooseEndsModel {
         #expect(m.remaining(.notDone) == 0)
         #expect(feed.routeCalls.isEmpty)
         #expect(feed.resolveCalls.isEmpty)
-        // …and a new week starts the aside list again.
         m.resetForWeek()
         #expect(m.remaining(.notDone) == 1)
     }
 
-    /// The capture bar parks a note and re-reads, so the new note joins group B.
     @Test func parkingAddsToTheBoard() async {
         let feed = LooseEndsFeed(snapshot: looseEndsView(notDone: []))
         let m = model(feed)
@@ -493,8 +461,7 @@ private func model(_ feed: LooseEndsFeed) -> PlanningLooseEndsModel {
         #expect(feed.parkCalls.count == 1)
     }
 
-    /// A failed refresh keeps the last good read and still counts as loaded — the shared
-    /// REST loading contract, so a dropped connection never blanks the deck.
+    /// A failed refresh keeps the last good read and still counts as loaded (the REST contract).
     @Test func aFailedRefreshKeepsTheLastRead() async {
         let feed = LooseEndsFeed(snapshot: looseEndsView(notDone: [chore]))
         let m = model(feed)
@@ -508,8 +475,8 @@ private func model(_ feed: LooseEndsFeed) -> PlanningLooseEndsModel {
         #expect(m.view?.weekStart == "2026-09-06")
     }
 
-    /// A first load that fails leaves nothing to show — but it is LOADED, so the step
-    /// renders its "couldn't read" state rather than a spinner forever.
+    /// A first load that fails leaves nothing to show, but it is LOADED, so the step renders its
+    /// "couldn't read" state rather than a spinner forever.
     @Test func aFirstLoadThatFailsIsStillLoaded() async {
         let feed = LooseEndsFeed(snapshot: looseEndsView(notDone: [chore]))
         feed.fetchFails = true
@@ -521,16 +488,14 @@ private func model(_ feed: LooseEndsFeed) -> PlanningLooseEndsModel {
         #expect(m.view == nil)
     }
 
-    /// The trail names the STEP, and always with the notDone label — "Parked"'s own
-    /// labels are verbs ("Make it a task"), which read wrong after an arrow.
+    /// The trail names the STEP with the notDone label: "Parked"'s labels are verbs.
     @Test func theTrailNamesTheStepNotTheVerb() async {
         let feed = LooseEndsFeed(snapshot: looseEndsView(notDone: [chore]))
         let m = model(feed)
         await m.load(weekStart: "2026-09-06", sessionId: session)
 
         #expect(m.stepName("tasks") == "Tasks")
-        // A route can outlive a module toggle, so an unknown destination falls back to its
-        // key rather than rendering blank.
+        // A route can outlive a module toggle, so an unknown destination falls back to its key.
         #expect(m.stepName("meals") == "meals")
     }
 
@@ -553,16 +518,8 @@ private func model(_ feed: LooseEndsFeed) -> PlanningLooseEndsModel {
 
 // MARK: - What arrives at the destination step
 
-/// WHAT THE BOX AT THE TOP OF A DESTINATION STEP HOLDS.
-///
-/// Two different mechanisms put work in front of a later step, and for a while they landed
-/// in two different places: a PARKED NOTE came down through `step.parked` and was drawn by
-/// the shell's banner at the TOP, while a ROUTED LOOSE END came down through step 1's own
-/// `data.routes` and was drawn by the step body itself, in a section at the BOTTOM. It was
-/// reported exactly that way — "wouldn't these be in the top 'parked things' box? why are
-/// they hidden at the bottom?"
-///
-/// They share one box now, and this is the rule for what goes in its routed half.
+/// WHAT THE BOX AT THE TOP OF A DESTINATION STEP HOLDS. Two mechanisms put work in front of a
+/// later step — a PARKED NOTE via `step.parked`, a ROUTED LOOSE END via step 1's `data.routes`.
 @Suite struct PlanningSentHereTests {
 
     private let parkedId = "33333333-3333-4333-8333-333333333333"
@@ -584,11 +541,7 @@ private func model(_ feed: LooseEndsFeed) -> PlanningLooseEndsModel {
     }
 
     /// THE DOUBLE-SHOW THIS PREVENTS. Routing a PARKED note also sets its
-    /// `planning_parked_items.step_key` (`routeLooseEnd` in `looseEnds.ts` — "the other half
-    /// of what that column is for"), so the very same note comes back on the destination
-    /// step through BOTH doors: as a `parked` handoff and as a `parked`-kind route. The
-    /// handoff is the richer of the two — it can be handled or dropped — so the route row
-    /// for it is suppressed.
+    /// `planning_parked_items.step_key`, so it arrives through BOTH doors; the handoff is richer.
     @Test func aParkedNoteRoutedHereIsNotOfferedTwice() {
         let routes = [
             route(kind: "parked", id: parkedId, title: "Ask about the school trip", to: "calendar"),
@@ -602,10 +555,7 @@ private func model(_ feed: LooseEndsFeed) -> PlanningLooseEndsModel {
                 == ["c1"])
     }
 
-    /// …but the note has to actually BE in the box. `parkedByStep` caps the handoff list at
-    /// six, and a note that fell off that cap (or had its tag cleared) is not on screen —
-    /// dropping its route row too would lose it entirely, which is the bug this whole box
-    /// exists to fix.
+    /// …but the note has to actually BE in the box: `parkedByStep` caps the handoff list at six.
     @Test func aParkedRouteWithNoNoteOnScreenIsStillOffered() {
         let routes = [
             route(kind: "parked", id: parkedId, title: "Ask about the school trip", to: "calendar"),
@@ -620,11 +570,7 @@ private func model(_ feed: LooseEndsFeed) -> PlanningLooseEndsModel {
                 == [parkedId])
     }
 
-    /// The Kids step's own read already merges what step 1 sent it into its board
-    /// (`kids.ts` marks those options `routed` and sorts them first), so the shared box
-    /// stays out of its way rather than printing the same chore twice on one screen.
-    /// `looseEnds` is the same argument from the other end: step 1 draws the whole board
-    /// and its own undo trail. (The server refuses that route anyway — belt and braces.)
+    /// The Kids step's own read already merges what step 1 sent it, so the shared box stays out.
     @Test func stepsThatDrawTheirOwnRoutedRowsAreLeftAlone() {
         let routes = [
             route(kind: "chore", id: "c1", title: "Bins", to: "kids"),
@@ -635,8 +581,7 @@ private func model(_ feed: LooseEndsFeed) -> PlanningLooseEndsModel {
         #expect(PlanningRouteSeed.sentHere(to: "looseEnds", in: routes, parked: nil, settled: []).isEmpty)
     }
 
-    /// The offer goes away once it has been taken, so nobody makes the same event twice.
-    /// Keyed `kind:id` rather than by title, because two loose ends can read the same.
+    /// The offer goes away once taken. Keyed `kind:id`, because two loose ends can read the same.
     @Test func aRouteAlreadyActedOnStopsBeingOffered() {
         let routes = [
             route(kind: "chore", id: "c1", title: "Bins", to: "calendar"),
@@ -651,8 +596,7 @@ private func model(_ feed: LooseEndsFeed) -> PlanningLooseEndsModel {
                 == ["l1"])
     }
 
-    /// Nothing routed here is the NORMAL case, and it has to leave the box empty rather
-    /// than draw a heading over nothing.
+    // Nothing routed here is the NORMAL case, and must leave the box empty, not a bare heading.
     @Test func nothingRoutedHereIsTheNormalCase() {
         #expect(PlanningRouteSeed.sentHere(to: "calendar", in: [], parked: nil, settled: []).isEmpty)
         #expect(
@@ -662,10 +606,7 @@ private func model(_ feed: LooseEndsFeed) -> PlanningLooseEndsModel {
                 parked: nil, settled: []).isEmpty)
     }
 
-    /// A row written by an older build can be missing `title`/`source` — the server's own
-    /// guard on this column checks only `kind`/`id`/`to` — and one unreadable row must cost
-    /// that row and nothing else. Absent, null and "not an array" all just mean step 1
-    /// hasn't routed anything.
+    // A row from an older build can be missing `title`/`source`, and must cost that row only.
     @Test func theRoutesAreDecodedTolerantly() {
         let decoded = PlanningRouteSeed.decode(.array([
             .object([
@@ -690,11 +631,7 @@ private func model(_ feed: LooseEndsFeed) -> PlanningLooseEndsModel {
     }
 }
 
-// WHICH LISTS THIS STEP ASKS ABOUT — chosen in the step, by whoever is running it.
-//
-// "I think we want the lists election to be in the weekly planning loose ends step, and it
-// shouldn't be admin gated, maybe adult gated but any adult can run weekly planning and
-// choose what lists should matter vs not."
+// WHICH LISTS THIS STEP ASKS ABOUT — chosen in the step, by whoever is running it. Not admin gated.
 @MainActor
 @Suite struct PlanningLooseEndsListChoiceTests {
     private let session = "33333333-3333-4333-8333-333333333333"
@@ -717,8 +654,7 @@ private func model(_ feed: LooseEndsFeed) -> PlanningLooseEndsModel {
         #expect(feed.fetchCount == 1)
     }
 
-    // Sparse on the wire — the server merges, so sending the whole map would rule lists
-    // back in behind another device's back.
+    // Sparse on the wire — the server merges, so the whole map would rule lists back in.
     @Test func rulingOneListOutSendsOnlyThatList() async {
         let feed = LooseEndsFeed(snapshot: looseEndsView(notDone: [], lists: [repairs, someday]))
         let m = await loaded(feed)
@@ -731,8 +667,7 @@ private func model(_ feed: LooseEndsFeed) -> PlanningLooseEndsModel {
         #expect(feed.listRulings.first?.relevant == false)
     }
 
-    // The deck is the SERVER's answer. A list ruled out takes its cards with it, and this
-    // client does not try to work out which ones those were.
+    // The deck is the SERVER's answer: a list ruled out takes its cards with it.
     @Test func rulingAListOutRereadsTheDeck() async {
         let feed = LooseEndsFeed(snapshot: looseEndsView(notDone: [], lists: [repairs, someday]))
         let m = await loaded(feed)
@@ -756,8 +691,7 @@ private func model(_ feed: LooseEndsFeed) -> PlanningLooseEndsModel {
         #expect(feed.fetchCount == 1)
     }
 
-    // A server that has never heard of the setting sends no key, and the chooser hides
-    // itself rather than showing an empty sheet.
+    // A server that has never heard of the setting sends no key, and the chooser hides itself.
     @Test func noCandidatesMeansNothingToChooseBetween() async {
         let feed = LooseEndsFeed(snapshot: looseEndsView(notDone: []))
         let m = await loaded(feed)
@@ -765,12 +699,8 @@ private func model(_ feed: LooseEndsFeed) -> PlanningLooseEndsModel {
     }
 }
 
-// WHO ALREADY HAS IT.
-//
-// "Some of these are already assigned an owner but we have no idea who." The colour and
-// the avatar arrive with the name because planning runs entirely over REST and may be read
-// while PowerSync is disconnected — so resolving a person id against the mirror is exactly
-// what this payload must not require.
+// WHO ALREADY HAS IT. The colour and the avatar arrive with the name, because planning runs over
+// REST and may be read while PowerSync is disconnected.
 @Suite struct PlanningLooseEndOwnerTests {
 
     @Test func decodesTheOwnerWithEverythingNeededToPaintIt() throws {
@@ -796,8 +726,7 @@ private func model(_ feed: LooseEndsFeed) -> PlanningLooseEndsModel {
         #expect(try WaffledAPI.decoder.decode(WaffledAPI.LooseEnd.self, from: json).owner == nil)
     }
 
-    // A server predating the field sends no key at all. Swift's decoder is strict, so this
-    // is the case that would blank the whole step rather than drop one chip.
+    // A server predating the field sends no key, and Swift's decoder is strict.
     @Test func aPayloadWithoutTheFieldStillDecodes() throws {
         let json = Data("""
         { "key": "chore:1", "kind": "chore", "id": "1", "title": "Make your bed",
@@ -808,8 +737,6 @@ private func model(_ feed: LooseEndsFeed) -> PlanningLooseEndsModel {
         #expect(end.title == "Make your bed")
     }
 
-    // The owner rides through the model untouched — it is the server's word on who has it,
-    // never something this client resolves or re-labels.
     @MainActor @Test func theModelCarriesTheOwnerToTheRow() async {
         let owned = looseEnd(
             key: "chore:1", kind: "chore", id: "1", title: "Make your bed", actions: ["done"],

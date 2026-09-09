@@ -9,31 +9,16 @@ import '../../../styles/planning-calendar.css'
 
 // Step 2 · Calendar — the week is the whole screen, and it is the REAL calendar.
 //
-// The week is SEVEN DAY ROWS in one card, not seven columns: a weekday in small caps
-// over a large serif date, that day's events as inline chips, and a dashed `+` at the
-// end of the row. A day with nothing says "Nothing on the calendar" and takes a tint,
-// so an open evening reads as an opportunity rather than as a hole. Nothing here is
-// invented — the rows are `GET /api/events` over the week the server handed us,
-// coloured by owner exactly as the month/week/agenda views colour them (useEventColor).
+// SEVEN DAY ROWS in one card, not seven columns. A day with nothing says "Nothing on the calendar"
+// and takes a tint, so an open evening reads as an opportunity. The rows are `GET /api/events` over
+// the week the server handed us, coloured by owner exactly as the other calendar views colour them.
 //
 // Four rules this file must not break:
-//  1. THE SERVER OWNS THE WEEK. `weekStart` is a prop; the seven days are that date
-//     plus 0…6. Nothing here asks the device what week it is.
-//  2. BUSY WEEKS STAY ONE SCREEN. A day over four events shows the first four and a
-//     "+N more" pill that opens that day IN PLACE. Never a scrolling row, and never a
-//     navigation away — the shell owns where the session is.
-//  3. ADDING IS THE APP'S OWN EVENT MODAL. `EventModal`, opened on the day whose `+`
-//     was tapped. It already asks the date, the time AND ITS DURATION, repeats, the
-//     location and who it's for, and it already writes through the local-first path
-//     (`createEventLocal`, falling back to `POST /api/events`). A second event form
-//     living in this step is exactly the drift the reuse rule exists to prevent — and
-//     it is what the bug this layout replaced came out of. The old inline composer
-//     asked for the time through an `input[type=time]` at `opacity: 0` stretched over
-//     a ~70px chip: no visible affordance, and no way at all to reach it on a touch
-//     kiosk with no keyboard. It also overloaded `''` to mean BOTH "all day" and "no
-//     value", rendering `value={time || DEFAULT_TIME}`, so anything that produced an
-//     empty value showed 5pm back. And it had no duration at all — every addition was
-//     hardcoded to exactly one hour. So everything landed at 5pm for an hour.
+//  1. THE SERVER OWNS THE WEEK. `weekStart` is a prop; the seven days are that date plus 0…6.
+//  2. BUSY WEEKS STAY ONE SCREEN. A day over four events collapses behind a "+N more" pill that
+//     opens that day IN PLACE — never a scrolling row, never a navigation away.
+//  3. ADDING IS THE APP'S OWN EVENT MODAL, which already asks the date, the time AND ITS DURATION,
+//     repeats, the location and who it's for, and writes through the local-first path.
 //  4. NO INVENTED PRESENCE. The mock's face row is deliberately absent: the session is
 //     single-driver and we do not track who is in the room.
 
@@ -56,10 +41,8 @@ function names(list: string[]): string {
 }
 
 /**
- * The one line under the week range: how much is on the week, and what is still open.
- * "7 events · Sunday and Thursday are still open" / "28 events · every day has
- * something". The open days are the POINT of the step — a week with room in it is the
- * thing a family can still decide about — so they are named, not counted.
+ * The one line under the week range. The open days are the POINT of the step — a week with room in
+ * it is the thing a family can still decide about — so they are named, not counted.
  */
 export function weekSummary(total: number, openDays: string[]): string {
   const count = total === 0 ? 'Nothing on the week yet' : total === 1 ? '1 event' : `${total} events`
@@ -72,8 +55,8 @@ export function weekSummary(total: number, openDays: string[]): string {
   return `${count} · ${open}`
 }
 
-// "1:00 PM". Deliberately not `fmtTime`: that renders a lowercase "all day", and the
-// chip's leading cell is a real label ("All day") rather than a whispered aside.
+// Deliberately not `fmtTime`: that renders a lowercase "all day", and the chip's leading cell is
+// a real label.
 function chipWhen(e: AgendaEvent): string {
   if (e.allDay) return 'All day'
   const d = new Date(e.startsAt)
@@ -92,11 +75,8 @@ interface Day {
   today: boolean
 }
 
-// One event, as the week draws it: a coloured time, the title in the owner's colour on
-// their tint, and their avatar bubble at the end. `.ev-tint` + `evVars` is the same
-// chip painting every other calendar surface uses — theme-aware, and it follows the
-// household's solid-vs-tinted event style — so the unassigned/household case (the
-// neutral grey, no bubble) falls out of `useEventColor` rather than being a branch here.
+// One event, as the week draws it. `.ev-tint` + `evVars` is the same chip painting every other
+// calendar surface uses, so the unassigned/household case falls out of `useEventColor`.
 function Chip({ e, color }: { e: AgendaEvent; color: string }) {
   const avatar = e.personEmoji ?? (e.personName ? e.personName.slice(0, 1).toUpperCase() : null)
   return (
@@ -117,8 +97,7 @@ function Body({ weekStart, setDecisionData, refresh, busy }: StepBodyProps) {
   const tz = household?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
   const colorOf = useEventColor()
 
-  // The week: the server's `weekStart` plus 0…6. Local parse (no trailing Z) so the
-  // rows are the days the household actually calls them.
+  // The server's `weekStart` plus 0…6. Local parse (no trailing Z) so the rows are the right days.
   const days = useMemo<Day[]>(() => {
     const start = new Date(`${weekStart}T00:00:00`)
     const todayKey = ymd(new Date())
@@ -152,25 +131,17 @@ function Body({ weekStart, setDecisionData, refresh, busy }: StepBodyProps) {
     return map
   }, [events, tz])
 
-  // Which day the event modal is open on (null = closed). The row's `+` preselects that
-  // day; the header's button preselects today when today is inside the week being
-  // planned, and the week's first day otherwise — a session run on a Sunday is usually
-  // planning the week ahead, and "today" would be outside it.
+  // Which day the event modal is open on. The header's button preselects today when today is
+  // inside the week being planned, else the week's first day.
   const [addOn, setAddOn] = useState<string | null>(null)
-  // Days whose "+N more" has been opened. Per day, and never reset by a refetch: a row
-  // that collapsed again under someone mid-read would be worse than a slightly tall one.
+  // Per day, and never reset by a refetch: a row that collapsed under someone mid-read is worse.
   const [opened, setOpened] = useState<Set<string>>(() => new Set())
-  // How many things this session put on the week — the crumb, and only ever a count.
-  // The recap reads through to the calendar itself, so copying event data onto the
-  // session record would give the two something to disagree about.
+  // The crumb, and only ever a count: the recap reads through to the calendar itself.
   const [added, setAdded] = useState(0)
-  // A parked note being turned INTO an event: its words seed the title, so the note is
-  // not retyped. Null whenever the modal was opened the ordinary way.
+  // A parked note being turned INTO an event: its words seed the title, so it is not retyped.
   const [fromNote, setFromNote] = useState<string | null>(null)
 
-  // The verb this step lends the shell's parked-note banner. "Make an event" opens the
-  // same modal the `＋` opens — there is no second composer here, which is the whole
-  // point of lending a verb rather than growing one.
+  // The verb this step lends the shell's parked-note banner — the same modal the `＋` opens.
   const finishHandoff = useHandoffAction('Make an event', (note) => {
     setFromNote(note)
     setAddOn(headerDay)
@@ -186,7 +157,6 @@ function Body({ weekStart, setDecisionData, refresh, busy }: StepBodyProps) {
     setDecisionData({ added: n })
     // Something was really created, so a note that opened this modal is settled.
     if (fromNote !== null) { setFromNote(null); finishHandoff(true) }
-    // The rows and the shell's counter should both agree with what just happened.
     refetch()
     refresh()
   }
@@ -211,7 +181,6 @@ function Body({ weekStart, setDecisionData, refresh, busy }: StepBodyProps) {
         </button>
       </header>
 
-      {/* One card, seven rows, hairlines between them. */}
       <div className="wpc-week">
         {days.map((d) => {
           const list = byDay[d.key] ?? []
@@ -263,9 +232,7 @@ function Body({ weekStart, setDecisionData, refresh, busy }: StepBodyProps) {
         Busy weeks stay one screen &mdash; a day over four events shows &ldquo;+N more&rdquo;, which opens that day.
       </p>
 
-      {/* The app's own event modal — NOT a second event form. It carries the date it was
-          opened on, and owns the time, the duration, repeats, the location and who it's
-          for, plus the local-first write. */}
+      {/* The app's own event modal — NOT a second event form. It owns the time and the write. */}
       {addOn && (
         <EventModal
           date={addOn}
@@ -278,7 +245,6 @@ function Body({ weekStart, setDecisionData, refresh, busy }: StepBodyProps) {
   )
 }
 
-// No FooterExtra: the shell already owns the single primary ("Looks right"), and one
-// primary button is the whole argument of this screen.
+// No FooterExtra: the shell already owns the single primary ("Looks right").
 const mod: PlanningStepModule = { Body }
 export default mod

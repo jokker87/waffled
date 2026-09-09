@@ -2,29 +2,19 @@ import Foundation
 import Testing
 @testable import Waffled
 
-// Weekly Planning · step 5 "Connection" — "Who gets time with whom?"
-//
-// NOTHING NEW IS STORED FOR THIS STEP: a pairing is a query over event participants, and
-// claiming a slot writes an ordinary calendar event. So the things worth pinning are the
-// four ways this step could look right and be wrong, each of which was really reported:
-//
-//  1. THE CATCH-UP LADDER. The write is local-first and the board is a server read, so
-//     re-reading once asked too early and the row said "Nothing on the calendar with just
-//     the two of you" about an event visibly on the calendar. The ladder must stop the
-//     moment the credit appears, and GIVE UP rather than loop.
-//  2. THE ROW NAMES THE EVENT, and exactly one chip on it ever reads as chosen.
-//  3. LINK A TIME writes a pointer — no event, no pairing, no time.
-//  4. AN EVENT YOU MAKE FOR A PAIRING IS THAT PAIRING'S ANSWER, and which event that is
-//     is answered BY DIFFERENCE, never by an id somebody handed us.
+// Weekly Planning · step 5 "Connection" — nothing new is stored: a pairing is a query over
+// event participants, and claiming a slot writes an ordinary calendar event. What is
+// pinned here are the four ways it could look right and be wrong: the catch-up ladder must
+// stop the moment the credit appears and GIVE UP rather than loop; the row names the event
+// and exactly one chip ever reads as chosen; "Link a time" writes a pointer only; and the
+// event made for a pairing is identified BY DIFFERENCE, never by an id handed to us.
 
 private enum ConnectionFailure: Error { case rejected }
 
 @MainActor
 private final class ConnectionFeed {
-    /// Consumed in order; the last one repeats forever after.
     var boards: [WaffledAPI.PlanningConnectionBoard]
     var reads = 0
-    /// 1-based read that should throw instead of answering.
     var throwOnRead: Int?
     var waits: [Duration] = []
     var saved: [[String: String]] = []
@@ -56,7 +46,6 @@ private func model(_ feed: ConnectionFeed) -> PlanningConnectionModel {
             feed.saved.append(links)
             if feed.saveFails { throw ConnectionFailure.rejected }
         },
-        // The ladder's pause, recorded rather than slept through.
         wait: { duration in feed.waits.append(duration) })
 }
 
@@ -105,8 +94,7 @@ private let session = "session-1"
 
 @Suite struct PlanningConnectionDecodingTests {
 
-    /// Verbatim from `apps/api/test/weekly-planning-connection.integration.test.ts` — the
-    /// recurring "Yard work" occurrence the board must credit, and the two slot shapes.
+    /// Verbatim from `apps/api/test/weekly-planning-connection.integration.test.ts`.
     private static let boardJSON = Data(
         """
         {
@@ -181,19 +169,17 @@ private let session = "session-1"
         #expect(decoded.pairings.count == 2)
         let kw = try #require(decoded.pairings.first)
         #expect(kw.who == "Kevin and Wally")
-        // The pairing's key is the spelling `PUT /links` is keyed by, on both platforms.
         #expect(kw.key == "kevin-wally")
         #expect(kw.alreadyThisWeek.map(\.title) == ["Yard work"])
         #expect(kw.alreadyThisWeek.first?.minutes == 120)
-        // day / time / when are composed SERVER-side and rendered verbatim.
         #expect(kw.alreadyThisWeek.first?.day == "Saturday")
         #expect(kw.alreadyThisWeek.first?.time == "1:00 PM")
         #expect(kw.alreadyThisWeek.first?.when == "Saturday 1:00 PM")
         #expect(kw.lastTogetherOn == nil)
     }
 
-    /// `startsAt: null` MEANS THE WHOLE DAY IS FREE — not "unknown", and not a malformed
-    /// row. The label already says so, and the event sheet's own picker decides the hour.
+    /// `startsAt: null` MEANS THE WHOLE DAY IS FREE — not "unknown", not a malformed row.
+    /// The event sheet's own picker decides the hour.
     @Test func aNullSlotStartMeansFreeAllDayRatherThanMissing() throws {
         let decoded = try WaffledAPI.decoder.decode(
             WaffledAPI.PlanningConnectionBoard.self, from: Self.boardJSON)
@@ -210,9 +196,8 @@ private let session = "session-1"
         #expect(slots[1].label == "Wed after Scouts")
     }
 
-    /// The instant the server sends carries MILLISECONDS (`luxon`'s `toISO()`), which a
-    /// bare `ISO8601DateFormatter` refuses — and a nil here would silently fall back to the
-    /// sheet's 5pm default, which is the exact bug `prefillStart:` exists to prevent.
+    /// The instant the server sends carries MILLISECONDS (`luxon`'s `toISO()`), which a bare
+    /// `ISO8601DateFormatter` refuses — and nil would fall back to the sheet's 5pm default.
     @Test func theSlotsInstantParsesWithTheAppsOwnTolerantParser() throws {
         let decoded = try WaffledAPI.decoder.decode(
             WaffledAPI.PlanningConnectionBoard.self, from: Self.boardJSON)
@@ -220,7 +205,6 @@ private let session = "session-1"
 
         let parsed = try #require(EventTime.parse(after.startsAt))
         #expect(parsed.timeIntervalSince1970 == 1_789_000_200)  // 2026-09-10T00:30:00Z
-        // …and the free-all-day one has nothing to parse, which is not a failure.
         #expect(EventTime.parse(decoded.pairings.first?.slots.first?.startsAt) == nil)
     }
 
@@ -257,8 +241,6 @@ private let session = "session-1"
     }
 
     @Test func aLinkedEventAnswersThePairingWhateverElseTheWeekSays() {
-        // The linked one is in `togetherThisWeek` — an evening with somebody else on it
-        // too, which is the whole point of being able to pick one.
         let p = pairing(
             ["a", "b"], who: "Kevin and Kelly",
             already: [event("e1", "Yard work")],
@@ -292,8 +274,8 @@ private let session = "session-1"
                 == "Nothing on the calendar with just the two of you.")
     }
 
-    /// "Aug 8", never "Aug 7": `lastTogetherOn` is a calendar label the server resolved in
-    /// the household's zone, so the parse is UTC.
+    /// "Aug 8", never "Aug 7": `lastTogetherOn` is a calendar label resolved in the
+    /// household's zone, so the parse is UTC.
     @Test func theStalenessDateDoesNotSlipWestOfGreenwich() {
         #expect(PlanningConnectionCopy.monthDay("2026-08-08") == "Aug 8")
         #expect(PlanningConnectionCopy.monthDay("2027-01-01") == "Jan 1")
@@ -312,14 +294,11 @@ private let session = "session-1"
             ["a", "b"], who: "Kevin and Kelly",
             already: [event("e1", "Yard work")],
             together: [event("e2", "Dinner")])
-        // Time that is already just the two of them FIRST, then the shared evenings.
         #expect(PlanningConnectionCopy.bothOnIt(p).map(\.id) == ["e1", "e2"])
     }
 
-    /// "I added a custom time … the events did save but they didn't populate on the
-    /// connection tab." The ranking reads only history BEFORE the planned week, so a
-    /// pairing you have just given time to does not move up — and a row you cannot see is
-    /// indistinguishable from a write that never happened.
+    /// The ranking reads only history BEFORE the planned week, so a pairing you have just
+    /// given time to does not move up — and an invisible row looks like a lost write.
     @Test func creditedPairingsClaimTheirRowsFirst() {
         let pairings = [
             pairing(["a", "b"], who: "A and B"),
@@ -342,7 +321,6 @@ private let session = "session-1"
 
         let shown = PlanningConnectionCopy.visible(credited + guesses)
 
-        // Four rows, not three — and the guess is dropped rather than a fact about the week.
         #expect(shown.count == 4)
         #expect(shown.allSatisfy { !$0.alreadyThisWeek.isEmpty })
     }
@@ -381,9 +359,8 @@ private let session = "session-1"
 
         let row = PlanningConnectionRow(p, linkedId: nil)
 
-        // The chip used to show `alreadyThisWeek[0]` while the sentence showed the LINKED
-        // event, so it could name two different events at once. With several candidates and
-        // nothing picked, there is nothing a single chip can honestly stand for.
+        // With several candidates and nothing picked, there is nothing a single chip can
+        // honestly stand for — it would otherwise name a different event than the sentence.
         #expect(row.oneTap == nil)
         #expect(row.oneTapChosen == false)
         #expect(row.showPicker)
@@ -397,7 +374,6 @@ private let session = "session-1"
 
         #expect(row.oneTap?.id == "e1")
         #expect(row.oneTapChosen == false)
-        // Nothing more to choose from than the chip already covers.
         #expect(row.showPicker == false)
     }
 
@@ -412,16 +388,13 @@ private let session = "session-1"
         #expect(row.answer?.id == "e3")
         #expect(row.oneTap?.id == "e3")
         #expect(row.oneTapChosen)
-        // The sentence and the chip name the SAME event.
         #expect(row.sentence.contains("Dinner at the Hales"))
-        // The picker is still offered so the answer is changeable — never in a chosen state.
         #expect(row.showPicker)
     }
 
     @Test func aLinkPointingAtNothingOnTheWeekLeavesTheRowUnanswered() {
         let p = pairing(["a", "b"], who: "Kevin and Kelly", already: [event("e1", "Yard work")])
 
-        // The linked event was deleted from the calendar since it was picked.
         let row = PlanningConnectionRow(p, linkedId: "gone")
 
         #expect(row.answer == nil)
@@ -457,14 +430,13 @@ private let session = "session-1"
         #expect(m.failed)
     }
 
-    /// THE CATCH-UP LADDER stops the moment the credited count goes UP — the board having
-    /// caught up with a local-first write, which is usually the first or second try.
+    /// THE CATCH-UP LADDER stops the moment the credited count goes UP — the board catching
+    /// up with a local-first write.
     @Test func theLadderStopsAsSoonAsTheCreditAppears() async {
         let empty = board([pairing(["a", "b"], who: "A and B")])
         let credited = board([
             pairing(["a", "b"], who: "A and B", already: [event("new", "Coffee")]),
         ])
-        // load, then: still empty, still empty, credited.
         let feed = ConnectionFeed([empty, empty, empty, credited])
         let m = model(feed)
         await m.load(weekStart: week)
@@ -477,8 +449,7 @@ private let session = "session-1"
     }
 
     /// …AND IT GIVES UP RATHER THAN LOOPING FOREVER. Six reads, five widening pauses; past
-    /// that the upload isn't landing on this visit and the next ordinary read is
-    /// authoritative anyway.
+    /// that the next ordinary read is authoritative anyway.
     @Test func theLadderGivesUpAfterSixReads() async {
         let feed = ConnectionFeed([board([pairing(["a", "b"], who: "A and B")])])
         let m = model(feed)
@@ -491,14 +462,13 @@ private let session = "session-1"
             feed.waits == [
                 .milliseconds(250), .milliseconds(500), .seconds(1), .seconds(2), .seconds(3),
             ])
-        // Nothing was linked, because nothing appeared.
         #expect(m.links.isEmpty)
         #expect(feed.saved.isEmpty)
         // The event still counts as added — it IS on the calendar; only the board is behind.
         #expect(m.decisionData["added"] == .int(1))
     }
 
-    /// A broken read is not "the board hasn't caught up yet". Climbing the ladder on it
+    /// A broken read is not "the board hasn't caught up yet": climbing the ladder on it
     /// would hammer a dead endpoint six times.
     @Test func aFailedReadStopsTheLadderRatherThanRetrying() async {
         let feed = ConnectionFeed([board([pairing(["a", "b"], who: "A and B")])])
@@ -514,10 +484,9 @@ private let session = "session-1"
         #expect(m.board?.pairings.count == 1)  // the board we had is still there
     }
 
-    /// AN EVENT YOU MAKE FOR A PAIRING IS THAT PAIRING'S ANSWER — and which event that is
-    /// is answered BY DIFFERENCE, not by an id handed back from the sheet: the write is
-    /// local-first, so the only id that certainly belongs to the server is the one that has
-    /// APPEARED since we looked.
+    /// WHICH EVENT ANSWERS A PAIRING IS DECIDED BY DIFFERENCE, not by an id handed back from
+    /// the sheet: the write is local-first, so the only id certainly on the server is the
+    /// one that APPEARED since we looked.
     @Test func theAutoLinkPicksTheEventThatAppeared() async {
         let before = board([
             pairing(["a", "b"], who: "A and B", already: [event("old", "Yard work")]),
@@ -540,8 +509,7 @@ private let session = "session-1"
         #expect(m.rows.first?.oneTapChosen == true)
     }
 
-    /// A pairing built from scratch ("Make a pairing", three people) may match no row on
-    /// the board — and then nothing is linked, which is correct: there is no row to answer.
+    /// A pairing built from scratch may match no row — and then nothing is linked, correctly.
     @Test func anEventForAPairingWithNoRowLinksNothing() async {
         let only = board([pairing(["a", "b"], who: "A and B")])
         let feed = ConnectionFeed([only])
@@ -574,10 +542,7 @@ private let session = "session-1"
         await m.link(key: "a-b", eventId: "e2", sessionId: session)
         #expect(m.links.isEmpty)
         #expect(m.rows.first?.answer == nil)
-        // Both writes went out: the answer is undoable, and the undo is remembered too.
         #expect(feed.saved == [["a-b": "e2"], [:]])
-        // Nothing was written to the calendar and nobody's event was edited — the board is
-        // untouched by a link.
         #expect(feed.reads == 1)
     }
 
@@ -591,14 +556,12 @@ private let session = "session-1"
 
         await m.link(key: "a-b", eventId: "e1", sessionId: session)
 
-        // The link is already on screen; the next ordinary read is authoritative.
         #expect(m.links == ["a-b": "e1"])
         #expect(feed.saved.count == 1)
     }
 
-    /// THE CRUMB IS A MIRROR OF WHAT THE STEP DECIDED. `decideStep` REPLACES the step's
-    /// data, so `links` — which the mid-step route persisted onto the same row — has to be
-    /// written back or answering the step erases it. The keys match the web's exactly.
+    /// `decideStep` REPLACES the step's data, so `links` — persisted onto the same row by the
+    /// mid-step route — has to be written back or answering the step erases it.
     @Test func theCrumbCarriesTheLinksSoAnsweringTheStepDoesNotWipeThem() async {
         let feed = ConnectionFeed([
             board([pairing(["a", "b"], who: "A and B", already: [event("e1", "Yard work")])]),
@@ -630,19 +593,12 @@ private let session = "session-1"
 
         #expect(m.links == ["a-b": "e2"])
         #expect(m.rows.first?.answer?.id == "e2")
-        // A second seed for the SAME week never overwrites what this sitting decided.
         m.seedLinks(from: .object(["a-b": .string("e1")]), weekStart: week)
         #expect(m.links == ["a-b": "e2"])
     }
 
-    /// A DIFFERENT WEEK IS A DIFFERENT SET OF LINKS.
-    ///
-    /// The week stepper is reachable from inside a session, and the shell used to key a step
-    /// body on the step alone — so two weeks with sessions on this step shared one model.
-    /// `guard links.isEmpty` then refused week B's own `data.links`, week B rendered week A's
-    /// pairings as already answered (the keys are person-id joins, identical across weeks),
-    /// and the next `link()` — which PUTs the whole map — wrote WEEK A'S EVENT IDS ONTO
-    /// WEEK B's session.
+    /// A DIFFERENT WEEK IS A DIFFERENT SET OF LINKS: link keys are person-id joins that are
+    /// identical across weeks, so a model shared between two weeks cross-writes them.
     @Test func steppingToAnotherWeekDoesNotInheritTheFirstWeeksLinks() async {
         let feed = ConnectionFeed([
             board([pairing(["a", "b"], who: "A and B", already: [event("e1", "Yard work")])]),
@@ -654,7 +610,6 @@ private let session = "session-1"
         await m.load(weekStart: week)
         #expect(m.links == ["a-b": "e1"])
 
-        // Next week, whose own row has nothing linked.
         let nextWeek = "2026-09-13"
         m.seedLinks(from: nil, weekStart: nextWeek)
 
@@ -662,7 +617,6 @@ private let session = "session-1"
         #expect(m.rows.first?.answer == nil)
     }
 
-    /// …and week B's OWN data is adopted rather than merely cleared.
     @Test func anotherWeekAdoptsItsOwnLinks() async {
         let feed = ConnectionFeed([
             board([pairing(["a", "b"], who: "A and B", already: [event("e1", "Yard work")])]),

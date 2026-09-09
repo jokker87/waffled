@@ -2,17 +2,10 @@ import { render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Routes, Route } from 'react-router'
 import { PersonProfile } from './PersonProfile'
 
-// "This week's one thing", surfaced on the profile.
-//
-// It answers a question Weekly Planning left open: a child said what they were focusing
-// on at the Kids step, and the answer lived only in `planning_session_steps.data.kids` —
-// read by that step and the recap and nothing else. So they never saw it again.
-//
-// The profile is where "what they're working on" already lives (goals, streak, stars),
-// which is why it goes here rather than becoming a fourth place to look. The card is
-// PRESENCE-GATED: the server sends null when the module is off, when no session covers
-// this week, or when nobody answered for this person — all three mean "nothing to say",
-// so the card isn't rendered rather than explaining itself.
+// "This week's one thing", surfaced on the profile: a child's Kids-step answer lived only in
+// `planning_session_steps.data.kids`, so they never saw it again. The card is PRESENCE-GATED —
+// the server sends null when the module is off, when no session covers the week, or when nobody
+// answered — so it isn't rendered rather than explaining itself.
 
 const base = {
   person: { id: 'p2', name: 'Lottie', avatarEmoji: '🦊', colorHex: '#E0794B', age: 7, memberType: 'kid' },
@@ -59,13 +52,12 @@ describe('PersonProfile · this week’s one thing', () => {
 
     expect(await screen.findByText('Read 20 minutes a day')).toBeInTheDocument()
     expect(screen.getByText('3 of 20 books')).toBeInTheDocument()
-    // Traceable: a line nobody can place is a line nobody trusts.
     expect(screen.getByText(/said at this week’s planning session/i)).toBeInTheDocument()
   })
 
   it('renders no card at all when there is nothing to say', async () => {
-    // Module off, no session for this week, or nobody answered — the server collapses all
-    // three to null, and an absent card is the whole affordance.
+    // Module off, no session for this week, or nobody answered — the server collapses all three
+    // to null, and an absent card is the whole affordance.
     mockApi({ ...base, planningFocus: null })
     renderProfile()
     await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledWith(expect.stringContaining('/overview'), expect.anything()))
@@ -74,8 +66,6 @@ describe('PersonProfile · this week’s one thing', () => {
   })
 
   it('survives a focus with no detail line', async () => {
-    // A free-text answer ("＋ Something else") has no progress to report, so `detail` is
-    // null — which must read as a clean statement rather than an empty row.
     mockApi({ ...base, planningFocus: { emoji: '✨', label: 'Be kind to Wally', detail: null, weekStart: '2026-09-06' } })
     renderProfile()
     expect(await screen.findByText('Be kind to Wally')).toBeInTheDocument()

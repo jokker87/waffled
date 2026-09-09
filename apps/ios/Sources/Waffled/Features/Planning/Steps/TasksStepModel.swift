@@ -3,27 +3,18 @@ import Foundation
 import Observation
 import UniformTypeIdentifiers
 
-// Weekly Planning · step 8 (Tasks) — the step's model and its pure formatting.
+// Weekly Planning · step 8 (Tasks) — the step's model and its pure formatting. Ported from
+// `apps/web/src/kiosk/planning/steps/TasksStep.tsx`.
 //
-// Ported from `apps/web/src/kiosk/planning/steps/TasksStep.tsx`.
-//
-// A COLUMN IS THE WEEK, NOT THE SITTING. Its contents come from the server read — what
-// that person is carrying for the week being planned — never from local "what I just
-// moved" state, so a refresh, a remount or the iPad picking up where the phone left off
-// all show the same board. Handing a chore out therefore re-reads rather than
-// bookkeeping in the view.
-//
-// The unit is the chore DEFINITION, not the day's instance: the session plans a week,
-// and an instance is one day. Every write is an EXISTING chores endpoint, so this step
-// writes nothing of its own.
+// A COLUMN IS THE WEEK, NOT THE SITTING. Its contents come from the server read, never from local
+// "what I just moved" state, so handing a chore out re-reads. The unit is the chore DEFINITION,
+// not the day's instance, and every write is an EXISTING chores endpoint.
 
 // MARK: - Formatting
 
-/// Pure strings, built ONCE PER LOAD (see `PlanningTasksModel.apply`) and looked up O(1)
-/// by the view — the project's "keep date math out of the render path" rule.
+/// Pure strings, built ONCE PER LOAD and looked up O(1) — date math stays out of the render path.
 enum PlanningTasksFormat {
 
-    /// "9am", "9:30am" — the day chip is a glance, not a schedule.
     static func shortTime(_ hhmm: String?) -> String {
         guard let hhmm else { return "" }
         let parts = hhmm.split(separator: ":")
@@ -33,8 +24,7 @@ enum PlanningTasksFormat {
         return m == 0 ? "\(h12)\(ampm)" : "\(h12):\(String(format: "%02d", m))\(ampm)"
     }
 
-    /// When this chore lands, in as few words as the chip can hold. EVERY BRANCH IS A
-    /// FACT THE SERVER HANDED US — nothing here guesses a day.
+    /// When this chore lands. EVERY BRANCH IS A FACT THE SERVER HANDED US — nothing guesses a day.
     static func dayChip(_ c: WaffledAPI.PlanningTasksChore) -> String {
         let time = shortTime(c.dueTime)
         func withTime(_ s: String) -> String { time.isEmpty ? s : "\(s) \(time)" }
@@ -46,29 +36,24 @@ enum PlanningTasksFormat {
         return "No day set"
     }
 
-    /// Where a card came from, as far as the chores module can honestly say.
     static func provenance(_ c: WaffledAPI.PlanningTasksChore) -> String {
         if c.carriedOver { return "Left over from before this week" }
         return c.cadence == "once" ? "One-off task" : "Recurring chore"
     }
 
-    /// The fairness read, stated rather than scored.
     static func carriesLabel(_ n: Int) -> String {
         n == 0 ? "No recurring chores yet" : "Carries \(n) recurring chore\(n == 1 ? "" : "s")"
     }
 
-    /// A one-off's day can be moved; a recurring chore's days come from its rrule and
-    /// belong to the chore editor, not to a chip on a board.
+    /// A one-off's day can be moved; a recurring chore's days come from its rrule.
     static func dayIsSettable(_ c: WaffledAPI.PlanningTasksChore) -> Bool { c.cadence == "once" }
 
-    /// A card with no day at all — an invitation when it can be set, and a calm
-    /// statement of fact when it can't.
     static func dayIsUnset(_ c: WaffledAPI.PlanningTasksChore) -> Bool {
         c.days.isEmpty && c.dueOn == nil && !c.carriedOver
     }
 
-    // UTC on both, matching the server: a `days` entry is a calendar label, and parsing
-    // it in the device's zone lands a chore on the day before for anyone west of UTC.
+    // UTC on both, matching the server: a `days` entry is a calendar label, and parsing it in the
+    // device's zone lands a chore on the day before for anyone west of UTC.
     static func weekdayOf(_ iso: String) -> String {
         guard let d = isoDay.date(from: iso) else { return iso }
         return shortDay.string(from: d)
@@ -104,30 +89,23 @@ enum PlanningTasksFormat {
 
 // MARK: - Dragging a card onto a person
 
-/// Where a card sits, in the SAME two-way vocabulary the web uses for its `data-colkey`
-/// (`'unassigned'` + a person id) and the Chores board uses for its columns. A drop
-/// target names one of these, and so does the place a card came from — which is what
-/// makes "did this drop actually move anything?" a comparison rather than a special case.
+/// Where a card sits, in the SAME two-way vocabulary the web and the Chores board use — which
+/// makes "did this drop move anything?" a comparison.
 enum PlanningTaskColumn: Hashable {
     case upForGrabs
     case person(String)
 }
 
-/// The custom drag payload for handing a task out by dragging it.
-///
-/// A `.draggable(String)` payload is offered to EVERY text field in the app, so the
-/// dragged id gets pasted into whatever the finger lands near — this bit us on the recipe
-/// ingredient rows. A private UTType conforming to `public.data` (**not** `public.text`,
-/// and declared in `project.yml` under `UTExportedTypeDeclarations`) means only this
-/// step's drop targets will take it.
+/// The custom drag payload. A `.draggable(String)` payload is offered to EVERY text field in the
+/// app, so the dragged id gets pasted into whatever the finger lands near; a private UTType
+/// conforming to `public.data` (**not** `public.text`, declared in `project.yml` under
+/// `UTExportedTypeDeclarations`) fixes that.
 extension UTType {
     static let waffledPlanningTask = UTType(exportedAs: "app.waffled.planning-task")
 }
 
-/// IT CARRIES AN ID AND NOTHING ELSE — deliberately. The chore, and above all *who has
-/// it*, are read back off the current board at drop time (`PlanningTasksModel.drop`): a
-/// column is the week and the server owns it, so a payload minted at drag start and
-/// resolved a re-read later must not be the authority on anything.
+    /// IT CARRIES AN ID AND NOTHING ELSE. The chore, and above all *who has it*, are read back off
+    /// the current board at drop time, because a column is the week and the server owns it.
 struct PlanningTaskDrag: Transferable, Codable {
     let choreId: String
 
@@ -141,16 +119,12 @@ struct PlanningTaskDrag: Transferable, Codable {
 @MainActor
 @Observable
 final class PlanningTasksModel {
-    /// Every network op injected as a closure with a `WaffledAPI()`-backed default.
     typealias FetchBoard = (_ weekStart: String) async throws -> WaffledAPI.PlanningTasksBoard
-    /// Hand a chore over, or take it back with `nil`. The default composes the two
-    /// chores endpoints — the PATCH **and** an assign for every open instance.
+    /// Hand a chore over, or take it back with `nil`: the PATCH **and** an assign per open instance.
     typealias HandOut = (_ chore: WaffledAPI.PlanningTasksChore, _ personId: String?) async throws -> Void
-    /// Save a chore from the app's own editor: `nil` id creates, an id edits.
     typealias SaveChore = (_ choreId: String?, _ body: [String: JSONValue]) async throws -> Void
 
-    /// What the chore editor is open on. `.add(personId: nil)` is the strip's own
-    /// "Add a task" — nobody prefilled, which is not the same as adding to a column.
+    /// What the chore editor is open on. `.add(personId: nil)` is the strip's own "Add a task".
     enum Composer: Identifiable {
         case add(personId: String?, note: String?)
         case edit(chore: WaffledAPI.PlanningTasksChore, owner: String?)
@@ -165,11 +139,9 @@ final class PlanningTasksModel {
 
     private(set) var board: WaffledAPI.PlanningTasksBoard?
     private(set) var loaded = false
-    /// The chore id currently being handed over — one at a time, and the card says so.
     private(set) var savingChoreId: String?
-    /// The NET number of chores this sitting handed over. The only thing worth
-    /// remembering locally, because the board itself can no longer tell you what moved
-    /// today. A take-back undoes its own tally, or the recap would over-report.
+    /// The NET number handed over this sitting — the board can't tell you what moved today. A
+    /// take-back undoes its own tally, or the recap would over-report.
     private(set) var assigned = 0
     /// Bumped on every applied board, so the view knows when to re-hand the shell its crumb.
     private(set) var rev = 0
@@ -177,13 +149,10 @@ final class PlanningTasksModel {
     var errorMessage: String?
 
     private(set) var composer: Composer?
-    /// True once the open composer actually SAVED something — read on dismissal, which
-    /// fires for a cancel and a save alike.
     private var composerSaved = false
-    /// The parked note this composer was opened for, and the shell's completion. Held on
-    /// the MODEL rather than in view `@State` because the lent verb's closure is captured
-    /// by the shell: a struct `View`'s captured `self` reads stale state, an
-    /// `@Observable` never does.
+    /// The parked note this composer was opened for, and the shell's completion. Held on the MODEL
+    /// rather than in view `@State` because the lent verb's closure is captured by the shell: a
+    /// struct `View`'s captured `self` reads stale state, an `@Observable` never does.
     private var handoffDone: ((Bool) -> Void)?
 
     // Derived once per load — never recomputed in the render path.
@@ -215,19 +184,17 @@ final class PlanningTasksModel {
         self.saveChore = saveChore
     }
 
-    /// The crumb kept on the session record: COUNTS ONLY. The recap reads through to
-    /// chores for the detail, so copying chore rows here would just let the two disagree.
+    /// The crumb kept on the session record: COUNTS ONLY. The recap reads through to chores.
     var crumb: [String: JSONValue] {
         ["assigned": .int(assigned),
          "leftUpForGrabs": .int(board?.unassigned.count ?? 0)]
     }
 
-    /// The day a task added during this session lands on — server-owned, so adding a task
-    /// on a Wednesday while planning next week can't quietly date it to that Wednesday.
+    /// The day a task added during this session lands on — server-owned, so it can't be dated to
+    /// the day the session happens to be run.
     var newTaskDay: String? { board?.newTaskDay }
 
-    /// Read the board. A FAILED fetch keeps whatever was already on screen but still
-    /// counts as loaded.
+    /// Read the board. A FAILED fetch keeps whatever was on screen but still counts as loaded.
     func load(weekStart: String) async {
         do {
             apply(try await fetchBoard(weekStart))
@@ -239,16 +206,11 @@ final class PlanningTasksModel {
         loaded = true
     }
 
-    /// Move a chore to a person, or (nil) back up for grabs. ONE path for the face row
-    /// and the 🙌, so a hand-out can never do something a take-back can't undo.
+    /// Move a chore to a person, or (nil) back up for grabs. ONE path for the face row and the 🙌,
+    /// so a hand-out can never do something a take-back can't undo. Returns true when it landed.
     ///
-    /// Returns true when it landed, so the caller knows whether to tell the shell.
-    ///
-    /// A FAILED HAND-OUT RE-READS THE BOARD, because "nothing moved" is not something this
-    /// can know. Handing a chore over is TWO writes — the chore definition, then each
-    /// pending instance — so a throw from the second one leaves the definition already
-    /// moved. This used to claim the opposite in both the comment and the message shown to
-    /// the user, and skip the refetch, which left the card in its old column.
+    /// A FAILED HAND-OUT RE-READS THE BOARD: handing a chore over is TWO writes — the definition,
+    /// then each pending instance — so a throw from the second leaves the definition already moved.
     @discardableResult
     func give(_ chore: WaffledAPI.PlanningTasksChore, to personId: String?, weekStart: String) async -> Bool {
         guard savingChoreId == nil else { return false }
@@ -270,29 +232,17 @@ final class PlanningTasksModel {
 
     // MARK: Dragging a card onto a person
 
-    /// Which column a card sits in RIGHT NOW, or nil when the board no longer has it.
-    ///
-    /// The board is the only authority here — the drag payload carries an id, not an
-    /// owner, so a re-read landing mid-drag can't leave a drop acting on a stale idea of
-    /// who had the task.
+    /// Which column a card sits in RIGHT NOW, or nil when the board no longer has it. The board is
+    /// the only authority: the payload carries an id, not an owner.
     func column(ofChore choreId: String) -> PlanningTaskColumn? { located(choreId)?.column }
 
-    /// A card was dropped on a column. THE THIRD CALLER OF `give`, not a fourth write
-    /// path — dragging has to be undoable by exactly the same means as tapping a face.
+    /// A card was dropped on a column. THE THIRD CALLER OF `give`, not a fourth write path —
+    /// dragging has to be undoable by exactly the same means as tapping a face.
     ///
-    /// Two gestures resolve to nothing and must not spend a write:
-    ///
-    ///  * **A card dropped where it already sits.** `give` tallies unconditionally, so
-    ///    letting this through would both PATCH the chore to the name it already has and
-    ///    inflate `assigned` — the crumb the recap reports — for a move that never
-    ///    happened.
-    ///  * **A card the board no longer holds** (deleted mid-drag, or a payload minted
-    ///    against a board this step has since replaced). There is nothing to PATCH, and
-    ///    guessing would move the wrong task.
-    ///
-    /// Returns true only when a write really landed, so the caller knows whether to tell
-    /// the shell. The DROP ITSELF still succeeds either way — see the view: a harmless
-    /// gesture is not an error, and bouncing the card back reads like one.
+    /// Two gestures resolve to nothing and must not spend a write: a card dropped where it already
+    /// sits (`give` tallies unconditionally, so it would inflate the crumb the recap reports) and a
+    /// card the board no longer holds. Returns true only when a write really landed; the DROP
+    /// ITSELF still succeeds either way, because a harmless gesture is not an error.
     @discardableResult
     func drop(choreId: String, onto column: PlanningTaskColumn, weekStart: String) async -> Bool {
         guard let found = located(choreId), found.column != column else { return false }
@@ -302,9 +252,7 @@ final class PlanningTasksModel {
         }
     }
 
-    /// The card AND the column it sits in, in one pass — "is it still here?" and "where
-    /// did it come from?" are the same question asked of the same two collections, and a
-    /// drop needs both answers to agree with each other.
+    /// The card AND the column it sits in, in one pass — a drop needs both answers to agree.
     private func located(_ choreId: String)
         -> (chore: WaffledAPI.PlanningTasksChore, column: PlanningTaskColumn)? {
         if let hit = board?.unassigned.first(where: { $0.id == choreId }) { return (hit, .upForGrabs) }
@@ -328,21 +276,16 @@ final class PlanningTasksModel {
         composer = .edit(chore: chore, owner: owner)
     }
 
-    /// The shell's parked-note banner lent this step a verb. Open the app's OWN chore
-    /// editor seeded with the note's words — the banner grows no composer of its own,
-    /// which is what keeps one way to add a chore in this app.
+    /// The banner lent this step a verb: open the app's OWN chore editor seeded with the note.
     func beginHandoff(note: String, done: @escaping (Bool) -> Void) {
-        // A second note arriving while one is still open must not strand the first
-        // completion — report it unfinished, because it genuinely is.
+        // A second note arriving while one is still open must not strand the first completion.
         handoffDone?(false)
         handoffDone = done
         composerSaved = false
         composer = .add(personId: nil, note: note)
     }
 
-    /// Persist whatever the editor built. Returns nil on success, else the message the
-    /// sheet shows in place (so a failed save keeps the sheet open instead of dismissing
-    /// on a silent failure).
+    /// Persist whatever the editor built. Returns nil on success, else the message the sheet shows.
     func saveFromComposer(choreId: String?, body: [String: JSONValue]) async -> String? {
         do {
             try await saveChore(choreId, body)
@@ -355,11 +298,8 @@ final class PlanningTasksModel {
         }
     }
 
-    /// The editor closed. Reports the handoff honestly: A CANCELLED COMPOSER REPORTS
-    /// `false`, because settling the note would throw away the only record that the thing
-    /// still needs doing — on the strength of somebody having opened a box and closed it
-    /// again. Returns true when something was really created or edited, so the caller
-    /// knows to re-read.
+    /// The editor closed. A CANCELLED COMPOSER REPORTS `false`, because settling the note would
+    /// throw away the only record that the thing still needs doing.
     @discardableResult
     func composerDismissed() -> Bool {
         let saved = composerSaved
@@ -372,9 +312,7 @@ final class PlanningTasksModel {
         return saved
     }
 
-    /// Withdraw a still-open handoff when the step goes away — the note is unfinished,
-    /// and the banner must be told so rather than left waiting on a completion that will
-    /// never come.
+    /// Withdraw a still-open handoff when the step goes away, or the banner waits forever.
     func abandonHandoff() {
         if let done = handoffDone {
             handoffDone = nil
@@ -412,27 +350,15 @@ final class PlanningTasksModel {
 // MARK: - Bridging a board card into the app's chore editor
 
 extension WaffledAPI.PlanningTasksChore {
-    /// The app's `ChoreEditSheet` edits a `WaffledAPI.ChoreInstanceDTO`, which has no
-    /// memberwise initializer (a custom `init(from:)` suppresses it) and lives in a file
-    /// this step does not own. So the card is re-encoded and decoded through the same
-    /// `WaffledAPI.decoder` the network path uses — one editor for the whole app, and no
-    /// edit to a shared file.
-    ///
-    /// `owner` is the column the card sits in: a chore's "Who" is not on the board
-    /// payload, and the column IS that fact.
-    ///
-    /// `rewardAmount` is written as an **int**. The DTO decodes it with
-    /// `(try? decode(Int.self)) ?? 0`, so encoding a `.double` would silently decode as
-    /// zero — and the editor would open showing no stars, then wipe the reward on Save.
-    ///
-    /// `requiresApproval` / `requiresPhoto` are carried for the same reason the server
-    /// bothers to send them: the editor reads a missing flag as false, so leaving them
-    /// out would quietly switch approval (or photo proof) off the first time anybody
-    /// fixed a typo here.
+    /// The app's `ChoreEditSheet` edits a `WaffledAPI.ChoreInstanceDTO`, which has no memberwise
+    /// initializer and lives in a file this step does not own — so the card is re-encoded and
+    /// decoded through `WaffledAPI.decoder`. `owner` is the column the card sits in, because a
+    /// chore's "Who" is not on the board payload. `rewardAmount` must be an **int** (the DTO uses
+    /// `(try? decode(Int.self)) ?? 0`, so a `.double` decodes as zero and Save wipes the reward),
+    /// and the approval/photo flags are carried because the editor reads a missing flag as false.
     func asChoreInstance(owner: String?) -> WaffledAPI.ChoreInstanceDTO? {
         var fields: [String: JSONValue] = [
-            // No instance is involved — a card is a DEFINITION — so the id is the
-            // chore's own. It is only ever read back as the editor's identity.
+            // No instance is involved — a card is a DEFINITION — so the id is the chore's own.
             "id": .string(id),
             "choreId": .string(id),
             "choreTitle": .string(title),
@@ -446,8 +372,7 @@ extension WaffledAPI.PlanningTasksChore {
         ]
         if let emoji { fields["emoji"] = .string(emoji) }
         if let rrule { fields["rrule"] = .string(rrule) }
-        // The day the editor opens on, so tapping the chip lands on the day the card was
-        // showing. Omitting it would silently move the chore to today.
+        // The day the editor opens on. Omitting it would silently move the chore to today.
         if let dueOn { fields["dueOn"] = .string(dueOn) }
         if let dueTime { fields["dueTime"] = .string(dueTime) }
         if let rewardCurrency { fields["rewardCurrency"] = .string(rewardCurrency) }

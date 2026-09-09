@@ -1,47 +1,28 @@
 import SwiftUI
 
-// Weekly Planning — the session shell.
+// Weekly Planning — the session shell: the chrome, the lobby, the "left for now" screen,
+// the agenda sheet and the saved record. Every step's BODY lives in its own file behind
+// `planningStepBody(_:)`, and the step catalog comes from the server so this screen and
+// the web cannot drift.
 //
-// The argument the design makes is that the WEEK is the content and the chrome is four
-// things: a step counter, a title, the ONE question the step asks, and a 2px progress
-// hair. The ten steps behind the counter are reachable from the counter itself (the
-// agenda sheet) rather than a permanent rail — a rail teaches the shape of the session
-// once and then costs a fifth of the display forever.
-//
-// Every step's BODY lives in its own file behind `planningStepBody(_:)`; this file owns
-// only the chrome, the lobby, the "left for now" screen, the agenda sheet and the saved
-// record. The step catalog — order, titles, questions, primary labels, which module each
-// step reads — comes from the server so this screen and the web cannot drift.
-//
-// Ported from `apps/web/src/kiosk/WeeklyPlanning.tsx`. The one substantive difference is
-// that the web keeps "which step" in the URL and this keeps it in `PlanningModel
-// .askedStep`; see that model's doc comment for the full list of assignments the web
-// does with `navigate`.
+// Ported from `apps/web/src/kiosk/WeeklyPlanning.tsx`; the web keeps "which step" in the
+// URL, this keeps it in `PlanningModel.askedStep`.
 
-/// The whole session surface: lobby → session → record, plus the agenda sheet.
 struct PlanningShellView: View {
     @Environment(SyncManager.self) private var sync
-    /// Pops the screen for the header's own back chevron — see `sessionHeader`, which
-    /// replaces the navigation bar rather than sitting under it.
     @Environment(\.dismiss) private var dismiss
 
     @State private var model = PlanningModel()
     @State private var sheet = false
     @State private var confirmDiscard = false
-    /// The verb the step on screen has lent the parked-note banner, if it has one — and
-    /// the step that lent it.
-    ///
-    /// Pairing them is the same trick as the model's crumb, and for the same reason: a
-    /// verb whose owner is no longer on screen is simply not READ, so nothing has to
-    /// clear it at the right moment. An `.onChange(of: current?.key)` that nilled it
-    /// would race the incoming step's own `.task`/`.onAppear` — SwiftUI does not order a
-    /// parent's change handler against a child's appearance — and losing that race
-    /// leaves the banner permanently on "Handled", which the seam's own doc calls the
-    /// worse of the two failures.
+    /// The verb the step on screen has lent the parked-note banner, paired with the step
+    /// that lent it, so a verb whose owner is off screen is simply not READ. Do NOT swap
+    /// this for an `.onChange(of: current?.key)` that nils it — SwiftUI does not order a
+    /// parent's change handler against the child's `.task`, and the banner sticks.
     @State private var handoffVerb: PlanningHandoffVerb?
     @State private var handoffVerbStepKey: String?
-    /// A write the STEP owns is in flight — see PlanningStepProps.reportBusy. The
-    /// footer goes cold for it, so "Looks right" cannot answer a step mid-write.
+    /// A write the STEP owns is in flight (see PlanningStepProps.reportBusy); the footer
+    /// goes cold so "Looks right" cannot answer a step mid-write.
     @State private var stepBusy = false
 
     private var isKiosk: Bool { DeviceExperience.current == .kiosk }
@@ -49,29 +30,17 @@ struct PlanningShellView: View {
     var body: some View {
         content
             .background(WF.canvas)
-            // THE NAVIGATION BAR IS GONE, and that is a deliberate ~44pt.
-            //
-            // It cost a full bar to render the word "Weekly planning" directly above a
-            // serif "Horizon scan" — two titles for one screen, and the one that mattered
-            // was the lower one. Between that bar, four header rows and a footer carrying
-            // the wrong clearance, the chrome had taken over half of an iPhone 17 Pro:
-            // "that is too much so that I dont even want to go through the steps."
-            //
-            // `sessionHeader` now carries the back chevron itself, in the same 36pt
-            // circular treatment the reward shop uses for exactly this — a pushed screen
-            // that draws its own header. Swipe-back still works.
+            // Hidden deliberately: `sessionHeader` carries the back chevron itself, and
+            // swipe-back still works.
             .toolbar(.hidden, for: .navigationBar)
             // Keyed on the refresh signal, not a bare `.task`: SwiftUI runs a bare one
-            // once per appearance, so this screen would sit on launch-time data through
-            // every pull-to-refresh. See SyncManager.refreshRev.
+            // once per appearance, so this screen would sit on launch-time data.
             .task(id: sync.refreshRev) { await model.load() }
             .sheet(isPresented: $sheet) { agendaSheet }
     }
 
     @ViewBuilder private var content: some View {
         if !sync.module(.weeklyPlanning) {
-            // Every route under /api/weekly-planning 403s with the module off, so there
-            // is nothing to load and nothing to say but where the switch is.
             WaffledEmptyState(
                 emoji: "🗓️",
                 title: "Weekly Planning is off",
@@ -136,11 +105,8 @@ struct PlanningShellView: View {
 
     // MARK: - Left for now
 
-    /// Where "Leave for now" puts you, and the answer to "I expected to leave the
-    /// planning session and then go back to where I can select a week to plan for". It is
-    /// the lobby's job with a session in hand: the week you were planning is OFFERED
-    /// rather than forced, and the week stepper — which is only reachable through the
-    /// agenda sheet once a session exists — is right here.
+    /// Where "Leave for now" puts you: the lobby's job with a session in hand — the week
+    /// you were planning is offered rather than forced, and the week stepper is here.
     private var pausedScreen: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
@@ -160,8 +126,6 @@ struct PlanningShellView: View {
 
     // MARK: - The record
 
-    /// The finished session is a receipt, not a dashboard: what it decided, and a way
-    /// back in. After this, Today is the surface.
     private var recordScreen: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
@@ -171,22 +135,9 @@ struct PlanningShellView: View {
                     Text(model.savedAtLabel.map { "\(model.weekLabel) · saved \($0)" } ?? model.weekLabel)
                         .font(.system(size: 13, weight: .semibold)).foregroundStyle(WF.ink3)
                 }
-                // THE WEEK ITSELF, first — "if a week is done, any reason we wouldnt show
-                // the recap page basically instead of a checklist being complete? the
-                // weekly recap is more relevant and has the info".
-                //
-                // Quite right. Ten green ticks against ten step names says the session
-                // finished; it says nothing about the week the session decided. The recap
-                // step's body already reads that week back — the days, what changed
-                // grouped by the module that owns it, the notes nobody tagged, what was
-                // left alone on purpose — so the record renders THAT rather than a second,
-                // thinner summary of it. Through the seam, not by naming the concrete
-                // view, so a step body that gets renamed can't leave this screen behind.
-                //
-                // Its `.task` does one extra read here. That is the trade: a receipt you
-                // can actually read is worth a fetch. Note the recap's own crumb write is
-                // pure local state (see PlanningModel.setDecisionData), so rendering it
-                // outside a running session writes nothing to the server.
+                // The recap step's body already reads the week back, so the record renders
+                // that rather than a second summary — reached through the seam so a renamed
+                // step body can't leave this screen behind.
                 if let recap = model.steps.first(where: { $0.key == "recap" }),
                    let sessionId = model.session?.id,
                    let week = model.view?.weekStart {
@@ -194,10 +145,8 @@ struct PlanningShellView: View {
                         .id("record-recap")
                 }
 
-                // The per-step tick-list is KEPT, and demoted. It carries the one thing
-                // the recap can't: which steps were skipped on purpose ("Kids · Skipped —
-                // a real answer"). That is a real answer about the week and deleting it
-                // would lose it — but it belongs under the week, not in front of it.
+                // The tick-list is demoted, not deleted: it carries the one thing the
+                // recap can't — which steps were skipped on purpose.
                 VStack(alignment: .leading, spacing: 8) {
                     SectionLabel(text: "What each step decided")
                     WaffledCard(padding: 4) {
@@ -262,80 +211,38 @@ struct PlanningShellView: View {
                         let props = stepProps(step, sessionId: sessionId, weekStart: week)
                         PlanningHandoffBanner(
                             step: step,
-                            // Everything that was SENT to this step now arrives in the
-                            // one box at the top — parked notes and routed loose ends
-                            // both. They used to come through two doors that opened in
-                            // two places: "wouldnt these be in the top 'parked things'
-                            // box? why are they hidden at the bottom?"
                             routes: props.routes,
                             busy: model.busy,
-                            // A verb belongs to the step that lent it: a banner still
-                            // offering "Make an event" two steps later would open the
-                            // wrong composer.
+                            // A verb belongs to the step that lent it, or a banner two
+                            // steps later opens the wrong composer.
                             verb: handoffVerbStepKey == step.key ? handoffVerb : nil,
                             resolve: { id, action in await model.resolveParked(id: id, action: action) })
-                            // Per-note "hidden" state is local to the banner; a step
-                            // change has to start it empty. It is ALSO what remembers
-                            // which routed rows have been acted on this sitting, so the
-                            // lifetime has to stay exactly this: a same-step refetch
-                            // keeps it, a step change clears it.
+                            // Per-note "hidden" state is local to the banner and also
+                            // remembers which routed rows were acted on this sitting: a
+                            // same-step refetch keeps it, a step change clears it.
                             .id(step.key)
-                        // Keyed on the step AND THE WEEK so moving on — or stepping to
-                        // another week from inside the session — gives the next body a
-                        // clean slate rather than inheriting the last one's @State.
-                        //
-                        // The week used to be missing, and it is reachable from in here:
-                        // two weeks with sessions on the same step shared one step model,
-                        // so week B kept week A's answers (see ConnectionStepModel.seedLinks).
+                        // Keyed on the step AND THE WEEK: without the week, two sessions
+                        // on the same step share one step model and week B keeps week A's
+                        // answers (see ConnectionStepModel.seedLinks).
                         planningStepBody(props).id("\(step.key)|\(props.weekStart)")
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(16)
-                // The footer below is fixed, so this scroll view clears IT rather than
-                // the tab bar; the footer carries the bar's clearance.
                 .padding(.bottom, 12)
             }
-            // HOW THE KEYBOARD GETS DISMISSED IN THIS SESSION, and why no step body in
-            // here declares `.wfKeyboardDoneToolbar`.
-            //
-            // That helper puts a "Done" button in an input accessory view. Measured on an
-            // iPhone 17 Pro it is ~79pt tall — for one button — and it docks directly
-            // above the keyboard, which in this screen means directly on top of a footer
-            // that is ALREADY pinned there. Footer, then a near-empty white band, then the
-            // keys: "why is there so much extra space?"
-            //
-            // The convention's own rule (DesignSystem/FieldStyles) is that the accessory
-            // exists for a keyboard "when it otherwise has none — decimal pads have no
-            // return key". Every field in this session takes text, so every one of them
-            // has a return key; the justification doesn't apply here. Dragging the content
-            // dismisses instead, which costs no height at all.
-            //
-            // Sheets presented FROM a step keep their toolbars: they have no pinned footer
-            // to collide with, and their own scroll views are their own business.
+            // Why no step body declares `.wfKeyboardDoneToolbar`: that accessory docks on
+            // top of this screen's already-pinned footer, and every field here has a return
+            // key anyway. Sheets presented FROM a step keep their toolbars.
             .scrollDismissesKeyboard(.interactively)
             sessionFooter
         }
     }
 
-    /// "I think we have this backwards" — and it was.
-    ///
-    /// The screen's own name goes in the top row where a navigation title would be, with
-    /// the week beside it; the session's MACHINERY — which step you're on, the way out,
-    /// the progress hair — sits underneath it. The first arrangement led with the
-    /// machinery and buried the name of the thing you were actually doing.
-    ///
-    /// - **row 1** — back out, the step's name, the week. What screen is this?
-    /// - **row 2** — the counter (the door to the agenda) and the exit. Session controls,
-    ///   grouped, directly above the hair that belongs with them.
-    /// - **the ask** — the one question the step puts to you.
     private var sessionHeader: some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 10) {
                 if !isKiosk {
-                    // The navigation bar's job, done in the header's own first row — so
-                    // it sits with the title it used to sit above. On the kiosk this
-                    // screen is a rail PAGE with nothing to pop, so no chevron there.
                     Button { dismiss() } label: {
                         Image(systemName: "chevron.left")
                             .font(.system(size: 16, weight: .bold)).foregroundStyle(WF.ink2)
@@ -357,9 +264,6 @@ struct PlanningShellView: View {
             }
             HStack(spacing: 10) {
                 Button { sheet = true } label: {
-                    // `WaffledMenuPill` is the app's "tap to change" trigger — bold text
-                    // plus a down chevron — which is exactly what the counter is: the
-                    // door to the agenda.
                     WaffledMenuPill(text: "\(model.position) of \(model.runnable.count)")
                 }
                 .buttonStyle(.plain)
@@ -367,17 +271,9 @@ struct PlanningShellView: View {
 
                 Spacer(minLength: 6)
 
-                // THE DOOR, in the chrome rather than only inside the agenda sheet. "We
-                // do need some sort of exit button without going through the whole
-                // thing." A ten-step surface with no visible exit reads as one you are
-                // committed to finishing. The words are the sheet's, deliberately: "for
-                // now" is the part that matters, because leaving keeps the session and
-                // everything it has already decided.
-                //
-                // It stays a SEPARATE control from the chevron above it: back pops this
-                // screen and leaves the session current, so re-opening Planning drops you
-                // straight back in — which is the very thing "leave for now" was added to
-                // fix. Same direction, different promise.
+                // A SEPARATE control from the chevron above: back pops the screen and
+                // leaves the session current (re-opening Planning resumes it), while this
+                // parks the session.
                 Button { model.leave() } label: {
                     Text("Leave for now")
                         .font(.system(size: 13.5, weight: .bold)).foregroundStyle(WF.ink3)
@@ -390,7 +286,6 @@ struct PlanningShellView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16).padding(.top, 6).padding(.bottom, 10)
-        // The 2px hair — the only progress indicator the design keeps.
         .overlay(alignment: .bottom) {
             ProgressBar(value: model.progress, tint: WF.primary, track: WF.hair, height: 2)
         }
@@ -414,22 +309,16 @@ struct PlanningShellView: View {
             primaryAnswerButton
         }
         .padding(.horizontal, 16).padding(.top, 10)
-        // `fixedBarClearance`, NOT `bottomBarClearance`. This footer is pinned, not
-        // scrolled, so it wants to sit flush on top of the tab bar; the scrolling figure
-        // left ~46pt of bare canvas between the buttons and the bar. See WF.tabBarHeight.
-        //
-        // …and no clearance at all while a keyboard is docked, because `AppRoot` has taken
-        // the bar away by then (KeyboardState.hidesBottomBar — one rule, read in both
-        // places). Reserving for an absent bar is what stacked the footer, the tab bar and
-        // the keyboard into three rows of chrome with the step squeezed above them.
+        // `fixedBarClearance`, NOT `bottomBarClearance`: this footer is pinned, so it sits
+        // flush on top of the tab bar. And no clearance at all while a keyboard is docked —
+        // `AppRoot` has taken the bar away by then (KeyboardState.hidesBottomBar).
         .padding(.bottom, 10 + (KeyboardState.shared.hidesBottomBar ? 0 : WF.fixedBarClearance))
         .background(WF.card)
         .overlay(alignment: .top) { Rectangle().fill(WF.hair).frame(height: 1) }
     }
 
-    /// Hand-rolled rather than `WaffledPrimaryCTA`: that takes a single `label: String`
-    /// and fills the width, and this button carries TWO weights — the step's own
-    /// affirmative plus a de-emphasised "· next: <title>" — beside a Skip control.
+    /// Hand-rolled rather than `WaffledPrimaryCTA`: that takes one `label: String` and
+    /// fills the width, and this carries two weights beside a Skip control.
     private var primaryAnswerButton: some View {
         Button {
             Task { await model.answer("done") }
@@ -439,11 +328,8 @@ struct PlanningShellView: View {
                 Text(model.current?.primary ?? "Done")
                     .font(.system(size: 15, weight: .bold)).foregroundStyle(.white)
                     .lineLimit(1)
-                // "· next: <title>" is a KIOSK affordance. On a phone the two together
-                // never fit: the affirmative wrapped onto two lines and the hint truncated
-                // anyway ("Nothing / missing · next: Family ni…"), which cost height AND
-                // read as broken. The agenda pill one row up already answers "what's
-                // next", so the phone drops the hint rather than shrinking the answer.
+                // "· next: <title>" is a KIOSK affordance: on a phone the two never fit,
+                // and the agenda pill one row up already answers "what's next".
                 if isKiosk, let next = model.next {
                     Text("· next: \(next.title)")
                         .font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.75))
@@ -477,8 +363,6 @@ struct PlanningShellView: View {
                             ForEach(group.steps) { step in agendaRow(step) }
                         }
                     }
-                    // The sheet already promises you can "leave whenever", so it has to
-                    // offer the door. Leaving keeps the session exactly where it is.
                     Button {
                         sheet = false
                         model.leave()
@@ -543,10 +427,9 @@ struct PlanningShellView: View {
 
     // MARK: - Shared bits
 
-    /// The week stepper. Offered in the lobby, in the agenda sheet, on the "left for now"
-    /// screen and under the record — the four places you'd look for "no, a different
-    /// week". The back arrow floors at the household's CURRENT week: a week that has
-    /// finished cannot be planned.
+    /// The week stepper, offered in all four places you'd look for "a different week".
+    /// The back arrow floors at the household's CURRENT week — a finished week cannot be
+    /// planned.
     private var weekStepper: some View {
         HStack(spacing: 12) {
             Button { Task { await model.goPreviousWeek() } } label: {
@@ -581,9 +464,8 @@ struct PlanningShellView: View {
         }
     }
 
-    /// Start the week over. The lobby is otherwise unreachable once a session exists —
-    /// coming back to Planning resumes — so without this a week started by mistake could
-    /// never be undone. Two-tap because it can't be taken back.
+    /// Start the week over. The lobby is otherwise unreachable once a session exists, so
+    /// without this a week started by mistake could never be undone. Two-tap: no undo.
     @ViewBuilder private var discardBlock: some View {
         if confirmDiscard {
             VStack(alignment: .leading, spacing: 10) {
@@ -639,8 +521,8 @@ struct PlanningShellView: View {
             setDecisionData: { model.setDecisionData($0) },
             refresh: { Task { await model.load() } },
             busy: model.busy,
-            // Off the looseEnds step's OWN row — see the note on `PlanningStepProps.routes`.
-            // A step that hasn't run yet simply has no `routes` key, hence `?? []`.
+            // Off the looseEnds step's OWN row — see `PlanningStepProps.routes`. A step
+            // that hasn't run yet has no `routes` key, hence `?? []`.
             routes: PlanningRouteSeed.decode(model.steps.first { $0.key == "looseEnds" }?.data["routes"]),
             goToStep: { model.show($0) },
             lendVerb: { verb in

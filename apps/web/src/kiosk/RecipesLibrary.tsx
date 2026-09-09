@@ -17,8 +17,6 @@ function gradClass(r: Recipe): string {
   return (r.category && GRAD_BY_CATEGORY[r.category.toLowerCase()]) || 'g-veg'
 }
 
-// Title + every metadata field, so search matches cuisine / protein / a vegetable
-// ("cucumber") / a tag / effort, etc.
 function haystack(r: Recipe): string {
   return [r.title, r.cuisine, r.protein, r.base, r.mealType, r.effort, r.cookMethod, r.collection, ...(r.tags ?? []), ...r.vegetables, ...r.dietary]
     .filter(Boolean)
@@ -42,12 +40,10 @@ const SORTS: Array<{ key: string; label: string }> = [
   { key: 'recent', label: 'Recently cooked' },
 ]
 
-// The library is a unified list: recipes AND saved meals (decision 11). The two
-// come from different endpoints — recipes are already loaded client-side and
-// filtered here, while saved meals are searched *server-side* (`GET /api/meals?q=`,
-// which matches the plate name OR any of its dish titles, so "chicken" finds
-// "BBQ Sunday"). Never re-filter the returned meals against the plate name — that
-// would throw away exactly the matches the server worked to find.
+// The library is a unified list: recipes AND saved meals. Recipes are already loaded
+// client-side and filtered here; saved meals are searched SERVER-side (`GET /api/meals?q=`,
+// which matches the plate name OR any dish title). Never re-filter the returned meals
+// against the plate name — that throws away exactly the matches the server found.
 export function RecipesLibrary() {
   const navigate = useNavigate()
   const { recipes, loading, error } = useRecipes()
@@ -63,13 +59,11 @@ export function RecipesLibrary() {
   const [proteins, setProteins] = useState<string[]>(() => initArr('protein'))
   const [diets, setDiets] = useState<string[]>(() => initArr('diet'))
   const [sort, setSort] = useState('name')
-  // A TYPE filter, not a structured one: it selects saved plates rather than
-  // narrowing recipe metadata. Lumping it in with fav/cuisine/protein (which all
-  // drop meals, since a plate has none of that) would make it filter itself out.
+  // A TYPE filter, not a structured one: it selects saved plates rather than narrowing
+  // recipe metadata, so lumping it in with fav/cuisine/protein would filter itself out.
   const [mealsOnly, setMealsOnly] = useState(() => params.get('type') === 'meal')
 
-  // Debounced so a search doesn't fire a request per keystroke — the recipe list is
-  // already in memory, but the saved-meal search is a round trip.
+  // Debounced: the recipe list is in memory, but the saved-meal search is a round trip.
   const [mealQ, setMealQ] = useState(() => (params.get('q') ?? '').trim())
   useEffect(() => {
     const t = setTimeout(() => setMealQ(q.trim()), 200)
@@ -106,15 +100,13 @@ export function RecipesLibrary() {
     return a.title.localeCompare(b.title)
   })
 
-  // The structured filters (favorite / never-cooked / collection / cuisine / protein /
-  // dietary) are recipe metadata a plate doesn't carry, so a meal can be neither
-  // included nor excluded by them honestly — with any of them on, this is a recipe
-  // list. Free-text search, by contrast, spans both.
+  // The structured filters are recipe metadata a plate doesn't carry, so with any of them
+  // on this is a recipe list. Free-text search, by contrast, spans both.
   const structuredFilter = fav || newOnly || collections.length > 0 || cuisines.length > 0 || proteins.length > 0 || diets.length > 0
   const mealList = savedMeals ?? []
   const shownMeals = structuredFilter ? [] : [...mealList].sort((a, b) => a.name.localeCompare(b.name))
-  // "Meals" hides the recipes instead of narrowing them — the counts still read
-  // against the whole library, so "1 of 2" tells you what you're not seeing.
+  // "Meals" HIDES the recipes rather than narrowing them — the counts still read against
+  // the whole library, so "1 of 2" tells you what you're not seeing.
   const shownRecipes = mealsOnly ? [] : sorted
   const shownCount = shownRecipes.length + shownMeals.length
   const totalCount = recipes.length + mealList.length
@@ -124,12 +116,10 @@ export function RecipesLibrary() {
     setFav(false); setNewOnly(false); setCollections([]); setCuisines([]); setProteins([]); setDiets([]); setQ(''); setMealsOnly(false)
   }
 
-  // THE LIBRARY IS GENUINELY EMPTY — not merely "nothing is showing". The difference
-  // matters: a search with no hits also shows nothing, and hiding the search box
-  // there would strand somebody with a query they can no longer clear. So this is
-  // gated on both sources being loaded, both being empty, and NOTHING being typed or
-  // toggled. Only then is the search/sort/filter row chrome that cannot do anything,
-  // and only then does the screen become a single invitation.
+  // THE LIBRARY IS GENUINELY EMPTY — not merely "nothing is showing". A search with no hits
+  // also shows nothing, and hiding the search box there would strand somebody with a query
+  // they can no longer clear. So this needs both sources loaded, both empty, and nothing
+  // typed or toggled.
   const libraryEmpty = !loading && !error && !mealsLoading && recipes.length === 0 && mealList.length === 0 && !anyFilter
 
   useTopbarFull(

@@ -1,29 +1,14 @@
 import SwiftUI
 
-/// Weekly Planning · step 1 "Loose ends" — "Anything still open from last week?"
-///
-/// What is still open, and the notes somebody parked — each routed to the step that will handle it.
-///
-/// Ported from `apps/web/src/kiosk/planning/steps/LooseEndsStep.tsx`. The state, the copy
-/// and the card's choice table live in `LooseEndsModel.swift`; this file is the screen.
-///
-/// STEP 1 ROUTES; IT DOES NOT REPAIR. Every primary choice on the card is a DESTINATION —
-/// the step that will handle the thing — and choosing one writes nothing to any module.
-/// The see-all screen says so out loud, because it is the one claim a user has to believe
-/// for the step to feel safe.
-///
-/// THE SWITCH BELONGS TO THE DECK, NOT TO SEE-ALL. See-all lists BOTH groups under their
-/// own headings, so a switch there would govern nothing while still looking selected —
-/// which read as "these are my not-done items" when it wasn't. So the switch renders only
-/// in card mode; the way back is the "One at a time" control that never moves.
-///
-/// The body is content-sized on the assumption that the SHELL owns the scroll view (it
-/// owns the chrome, the counter and the footer) — hence no `ScrollView` and no
-/// `WF.tabBarClearance` here.
-/// WHO ALREADY HAS IT — one view, both modes.
-///
-/// A face and a name: who already has this loose end. Used by both row shapes this step
-/// draws — the card deck and see-all.
+// Weekly Planning · step 1 "Loose ends" — what is still open, and the notes somebody
+// parked, each routed to the step that will handle it. State, copy and the choice table
+// live in `LooseEndsModel.swift`; this file is the screen.
+//
+// STEP 1 ROUTES; IT DOES NOT REPAIR: every primary choice is a DESTINATION and writes
+// nothing to any module. THE SWITCH BELONGS TO THE DECK, NOT TO SEE-ALL, which lists BOTH
+// groups under their own headings. The body is content-sized because the SHELL owns the
+// scroll view (no `ScrollView`, no `WF.tabBarClearance` here).
+
 struct PlanningOwnerChip: View {
     let owner: WaffledAPI.LooseEndOwner
 
@@ -42,9 +27,6 @@ struct PlanningOwnerChip: View {
 struct LooseEndsStepView: View {
     let props: PlanningStepProps
 
-    /// Who is running the session — for the lists chooser's gate. The viewer's own
-    /// capabilities, read the same way every other gated control in this app reads them,
-    /// so there is one answer to "may I" rather than a flag on the payload as well.
     @Environment(SyncManager.self) private var sync
 
     @State private var model = PlanningLooseEndsModel()
@@ -52,31 +34,24 @@ struct LooseEndsStepView: View {
     /// Verification only: `WAFFLED_LE_SEEALL` starts in see-all. See DemoHooks.
     @State private var seeAll = DemoHooks.looseEndsSeeAll
     @State private var chooser = false
-    /// The list whose switch is mid-write, so only that row dims.
     @State private var ruling: String?
     @State private var note = ""
     @FocusState private var noteFocused: Bool
 
-    /// The shell is writing, or we are. Either way the controls are cold.
     private var disabled: Bool { props.busy || model.working }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             bar
 
-            // The switch is the entire explanation of the two kinds, so the note goes with
-            // it — in see-all each section carries its own caption instead.
             if !seeAll {
                 Text(group.note)
                     .font(.system(size: 12.5)).foregroundStyle(WF.ink3)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            // WHICH LISTS THIS STEP ASKS ABOUT. Under the note rather than in the bar:
-            // the bar already carries the group switch and "See all", and a third control
-            // on a phone-width row is how this screen ended up "taking up 50% of the
-            // screen" the first time. Only under "not done" — the parked board has no
-            // lists behind it — and only for somebody who may make the choice.
+            // Under the note rather than in the bar: a third control on a phone-width row
+            // is how this screen ended up taking half the screen.
             if showChooser { listsButton }
 
             if let message = model.errorMessage {
@@ -87,7 +62,6 @@ struct LooseEndsStepView: View {
 
             trail
 
-            // In card mode the capture bar belongs to group B's deck, so it shows with it.
             if group == .parked && !seeAll { captureBar }
         }
         .sheet(isPresented: $chooser) { listsSheet }
@@ -95,32 +69,25 @@ struct LooseEndsStepView: View {
         .task(id: model.listCandidates.count) {
             if DemoHooks.openLists && showChooser { chooser = true }
         }
-        // One key for both: a new session or a new week is a different set of loose ends.
         .task(id: "\(props.sessionId)|\(props.weekStart)") {
             model.resetForWeek()
-            // The step's own persisted decisions, read BEFORE the fetch. `data.routes` is
-            // therefore a READ dependency of this step, not only somewhere it writes: the
-            // crumb replaces `data` when the step is answered, so a second visit whose
-            // fetch failed must not push an empty array over what the first one routed.
+            // Read BEFORE the fetch: `data.routes` is a READ dependency, not only somewhere
+            // this step writes. The crumb replaces `data` when the step is answered, so a
+            // second visit whose fetch failed must not overwrite what the first routed.
             model.seedRoutes(from: props.step.data["routes"])
             await model.load(weekStart: props.weekStart, sessionId: props.sessionId)
-            // Headless keyboard verification (`DemoHooks.focusPark`): the session footer is
-            // PINNED, so the band between it and the keyboard is only measurable with the
-            // keyboard up — and the Simulator has no way to tap a text field. The capture
-            // bar belongs to group B's deck, so switch to it first or there is no field to
-            // focus. The sleep waits for the deck to lay out; focus on a view that isn't on
-            // screen yet is a silent no-op, exactly as it is on a disabled one.
+            // Headless keyboard verification (`DemoHooks.focusPark`): the footer is PINNED,
+            // so the band above the keyboard is only measurable with the keyboard up.
+            // Group B first (no deck, no field), and the sleep waits for layout.
             if DemoHooks.focusPark {
                 group = .parked
                 try? await Task.sleep(for: .seconds(1))
                 noteFocused = true
             }
         }
-        // The crumb, pushed on every state change rather than from five call sites.
         .onChange(of: model.revision) { _, _ in props.setDecisionData(model.decisionData) }
-        // THIS STEP LENDS NOTHING. Its own bar PARKS notes, so a verb that turned a parked
-        // note into a parked note is circular; the shell's banner keeps saying "Handled",
-        // which is the honest answer here.
+        // THIS STEP LENDS NOTHING: its own bar PARKS notes, so a verb that turned a parked
+        // note into a parked note is circular.
         .onAppear { props.lendVerb(nil) }
     }
 
@@ -129,13 +96,11 @@ struct LooseEndsStepView: View {
     @ViewBuilder private var bar: some View {
         HStack(spacing: 10) {
             if seeAll {
-                // No switch here — see-all shows BOTH groups under their own headings.
                 Text("Everything still open")
                     .font(.system(size: 14, weight: .bold)).foregroundStyle(WF.ink)
             } else {
-                // The switch carries the distinction AND both counts, so you always know
-                // what is left in the group you are not looking at. A cleared group shows
-                // a check instead of a zero.
+                // The switch carries the distinction AND both counts, so you know what is
+                // left in the group you are not looking at.
                 HStack(spacing: 8) {
                     ForEach(LooseEndGroup.allCases, id: \.rawValue) { g in
                         Button {
@@ -158,8 +123,6 @@ struct LooseEndsStepView: View {
                 }
             }
             Spacer(minLength: 6)
-            // The escape hatch for the week somebody dropped twenty things — and, from
-            // see-all, the only way back, which is why it never moves.
             Button(seeAll ? "One at a time" : "See all") { seeAll.toggle() }
                 .font(.system(size: 13, weight: .bold))
                 .foregroundStyle(WF.ai)
@@ -169,13 +132,9 @@ struct LooseEndsStepView: View {
 
     // MARK: - Which lists this step asks about
 
-    /// Absent entirely rather than disabled: a control that opens an empty sheet, or one
-    /// that refuses on save, is worse than no control.
-    ///
-    /// `planning.manage` is adult-by-default and NOT admin — "any adult can run weekly
-    /// planning and choose what lists should matter vs not" — so the person driving the
-    /// session on a Sunday evening can do this without going to Settings, which is
-    /// admin-only and on the other side of the app.
+    /// Absent entirely rather than disabled: a control that opens an empty sheet is worse
+    /// than none. `planning.manage` is adult-by-default and NOT admin, so whoever runs the
+    /// session can do this without admin-only Settings.
     private var showChooser: Bool {
         sync.can("planning.manage")
             && !model.listCandidates.isEmpty
@@ -195,8 +154,6 @@ struct LooseEndsStepView: View {
         .buttonStyle(.plain)
     }
 
-    /// "2 of 3" — said here rather than in the sheet, because the whole point of the line
-    /// is to tell you something is being left out before you open anything.
     private var listsSummary: String {
         let all = model.listCandidates
         let on = all.filter(\.relevant).count
@@ -246,8 +203,7 @@ struct LooseEndsStepView: View {
         }
     }
 
-    /// The write, then the step's own re-read — a list ruled out takes its cards out of
-    /// the deck with it, and which cards those were is the server's answer.
+    /// A list ruled out takes its cards out of the deck, and which cards is the server's.
     private func rule(_ id: String, _ on: Bool) {
         guard ruling == nil else { return }
         ruling = id
@@ -289,8 +245,6 @@ struct LooseEndsStepView: View {
             Text("\(position) of \(total)")
                 .font(.system(size: 12, weight: .heavy)).foregroundStyle(WF.ink3)
 
-            // Two offset layers behind the card, so it reads as a stack you are working
-            // through rather than a form that happens to change.
             ZStack(alignment: .top) {
                 RoundedRectangle(cornerRadius: WF.rLG, style: .continuous)
                     .fill(WF.card).opacity(0.5)
@@ -343,9 +297,8 @@ struct LooseEndsStepView: View {
         }
     }
 
-    /// One full-width choice — the label, and the reason under it. Full width rather than
-    /// the web's two-column grid: four destinations at phone width would each be a
-    /// truncated two-word column, and the hint is half of what makes the choice choosable.
+    /// Full width, not the web's two-column grid: at phone width four destinations would each
+    /// be a truncated two-word column, and the hint is half of the choice.
     private func choiceButton(_ choice: LooseEndChoice, item: WaffledAPI.LooseEnd) -> some View {
         Button {
             perform(choice, on: item)
@@ -386,7 +339,6 @@ struct LooseEndsStepView: View {
 
     @ViewBuilder private var seeAllList: some View {
         VStack(alignment: .leading, spacing: 16) {
-            // The one claim the user has to believe for this step to feel safe.
             Text(LooseEndCopy.disclaimer)
                 .font(.system(size: 12.5)).foregroundStyle(WF.ink2)
                 .fixedSize(horizontal: false, vertical: true)
@@ -396,9 +348,6 @@ struct LooseEndsStepView: View {
 
             ForEach(LooseEndGroup.allCases, id: \.rawValue) { g in
                 VStack(alignment: .leading, spacing: 10) {
-                    // With no switch above, the heading is the whole label for what
-                    // follows: the name, the count the switch used to carry, and the
-                    // four-word version of what the group means.
                     HStack(spacing: 6) {
                         Text(g.label).font(.system(size: 15, weight: .bold)).foregroundStyle(WF.ink)
                         Text(model.remaining(g) == 0 ? "✓" : "\(model.remaining(g))")
@@ -413,10 +362,8 @@ struct LooseEndsStepView: View {
                             ForEach(model.open(g), id: \.key) { item in row(item, group: g) }
                         }
                     }
-                    // The capture bar is reachable in BOTH modes — "See all" reads as the
-                    // fuller screen and must not be the one place you cannot write
-                    // something down. Inside the Parked section, so what it adds to is
-                    // never in question.
+                    // Reachable in BOTH modes: "See all" must not be the one place you
+                    // cannot write something down.
                     if g == .parked { captureBar }
                 }
             }
@@ -432,14 +379,9 @@ struct LooseEndsStepView: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(item.title).font(.system(size: 15, weight: .bold)).foregroundStyle(WF.ink)
                             .fixedSize(horizontal: false, vertical: true)
-                        // WHERE IT CAME FROM, and who has it. The card deck has always
-                        // named the kind; see-all dropped it, which is how a screen of
-                        // eleven rows ended up with a chore called "Groceries"
-                        // indistinguishable in kind from an unchecked list item.
-                        //
-                        // `ChipFlow` rather than an HStack: at phone width a long list
-                        // name plus a person's name has to wrap, and truncating the owner
-                        // would defeat the point of showing it.
+                        // WHERE IT CAME FROM, and who has it: without the kind, a chore
+                        // called "Groceries" is indistinguishable from a list item.
+                        // `ChipFlow`, not an HStack, because both names have to wrap.
                         ChipFlow(spacing: 6, lineSpacing: 3) {
                             Text(LooseEndCopy.kindLabel(item.kind).uppercased())
                                 .font(.system(size: 10.5, weight: .heavy)).tracking(0.5)
@@ -452,8 +394,6 @@ struct LooseEndsStepView: View {
                     }
                     Spacer(minLength: 0)
                 }
-                // Every choice as a pill — the destinations first, then the answers that
-                // write. `ChipFlow` wraps them rather than scrolling, so nothing hides.
                 ChipFlow(spacing: 6, lineSpacing: 6) {
                     ForEach(model.destinations(g), id: \.to) { d in
                         pill(d.label, primary: d.primary == true) { sendOn(item, from: g, to: d.to) }
@@ -559,10 +499,8 @@ struct LooseEndsStepView: View {
         .padding(.horizontal, 12).padding(.vertical, 10)
         .wfField()
         // NO `.wfKeyboardDoneToolbar` HERE, deliberately — see the note in
-        // PlanningShellView.sessionScreen. That accessory bar measured ~79pt on an
-        // iPhone 17 Pro for a single button, stacked directly on top of the session's
-        // fixed footer: "why is there so much extra space?" The shell dismisses the
-        // keyboard on scroll instead, and this field's keyboard has a return key.
+        // PlanningShellView.sessionScreen. That accessory bar measured ~79pt for one button
+        // stacked on the session's fixed footer, and this field's keyboard has a return key.
     }
 
     private var canPark: Bool {
@@ -582,10 +520,8 @@ struct LooseEndsStepView: View {
         }
     }
 
-    /// Send it on. The shell is told afterwards for the same reason the web emits
-    /// `weeklyPlanning` on every route: routing a PARKED note sets its `step_key`, which is
-    /// what the later steps' hand-off banners read, so the session view is genuinely stale
-    /// until it re-reads.
+    /// Routing a PARKED note sets its `step_key`, which the later steps' hand-off banners
+    /// read — so the session view is genuinely stale until the shell re-reads.
     private func sendOn(_ item: WaffledAPI.LooseEnd, from g: LooseEndGroup, to: String) {
         Task {
             if await model.send(item, from: g, to: to, sessionId: props.sessionId) {
@@ -604,8 +540,6 @@ struct LooseEndsStepView: View {
         Task {
             let ok = await model.settle(
                 item, action: action, weekStart: props.weekStart, sessionId: props.sessionId)
-            // The write landed in another module, so the shell's counter and its agenda
-            // sheet should agree with what just happened.
             if ok { props.refresh() }
         }
     }
@@ -616,8 +550,7 @@ struct LooseEndsStepView: View {
         Task {
             if await model.park(text, weekStart: props.weekStart, sessionId: props.sessionId) {
                 note = ""
-                // Parking is a burst — somebody empties their head into the bar — so the
-                // cursor goes back rather than making you re-aim at the field.
+                // Parking is a burst, so the cursor goes back rather than making you re-aim.
                 noteFocused = true
                 props.refresh()
             }

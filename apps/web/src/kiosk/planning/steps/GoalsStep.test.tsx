@@ -5,11 +5,9 @@ import type { StepBodyProps } from '../registry'
 
 // Step 6 · Goals — "What's each group's focus this week?"
 //
-// The tabs ARE the goal lists (a private one wears its lock), only one group is on
-// screen at a time, and picking a goal sets the goals module's existing `is_featured`
-// flag. Picking NOTHING is a real answer: it settles the group and puts the ★ on its
-// tab just the same. The fetch double is stateful so what's asserted is the step's
-// reaction to the server's fresh answer, not to an optimistic guess.
+// The tabs ARE the goal lists, only one group is on screen at a time, and picking a goal sets the
+// goals module's existing `is_featured` flag. Picking NOTHING is a real answer. The fetch double is
+// stateful so what's asserted is the step's reaction to the server's fresh answer.
 
 const goal = (over: Partial<Record<string, unknown>> = {}) => ({
   id: 'g1',
@@ -31,8 +29,7 @@ const goal = (over: Partial<Record<string, unknown>> = {}) => ({
   isSpotlight: false,
   hasRewards: false,
   target: null,
-  // A habit is shown on THIS period's count — the lifetime 99 must never be what the
-  // card says, which is exactly what the shared display helper is for.
+  // A habit is shown on THIS period's count — the lifetime 99 must never be what the card says.
   totalProgress: 99,
   milestoneTotal: 0,
   milestoneReached: 0,
@@ -42,8 +39,7 @@ const goal = (over: Partial<Record<string, unknown>> = {}) => ({
   streakDays: 0,
   loggedTodayBy: [],
   participants: [],
-  // `kind · pace` — the pace half is the server's sentence and its tone; the client
-  // renders it, it never composes one.
+  // `kind · pace` — the pace half is the server's sentence and its tone; the client only renders it.
   pace: { text: '2 of 5 last week', tone: 'behind' },
   ...over,
 })
@@ -92,12 +88,9 @@ const VIEW = () => ({
 
 const calls: { url: string; method: string; body: Record<string, unknown> | null }[] = []
 
-// The double serves the goals module's OWN endpoints too, because the step now embeds
-// the app's real goal editor: it reads /api/goal-lists and /api/goals, and creating
-// POSTs /api/goals. The POST re-derives the view the way the server does — the new goal
-// arrives featured, and a group adopts a pin as its focus only when it has exactly one
-// (two pins are ambiguous and adopt neither), so nothing here can pass for the wrong
-// reason.
+// The double serves the goals module's OWN endpoints too, because the step embeds the app's real
+// goal editor. The POST re-derives the view the way the server does — the new goal arrives
+// featured, and a group adopts a pin as its focus only when it has exactly one.
 function mockApi(view = VIEW()) {
   calls.length = 0
   const state = JSON.parse(JSON.stringify(view)) as ReturnType<typeof VIEW>
@@ -162,8 +155,7 @@ const step = {
   key: 'goals', number: 6, title: 'Goals', ask: 'What’s each group’s focus this week?',
   primary: 'Done', act: 'Claim the good', requiresModule: 'goals',
   available: true, status: 'pending' as const, data: {}, decidedAt: null,
-  // The shell renders the parked-note handoff, not the step — see Handoff in
-  // WeeklyPlanning.tsx. A step test mounts `Body` alone, so there is never one here.
+  // The shell renders the parked-note handoff, not the step, and a step test mounts `Body` alone.
   parked: [],
 }
 
@@ -221,8 +213,7 @@ describe('GoalsStep · the group card says what the group is', () => {
   it('heads the card with the group’s name, what it is, and who’s in it', async () => {
     renderStep()
     const card = await screen.findByRole('tabpanel')
-    // "shared · everyone tracks it" — from the server's isEveryone, not a headcount
-    // the client guessed at.
+    // From the server's isEveryone, not a headcount the client guessed at.
     expect(within(card).getByText('shared · everyone tracks it')).toBeInTheDocument()
     // One avatar per member, using the app's own .avstack/.av design-system classes.
     expect(card.querySelectorAll('.avstack .av')).toHaveLength(2)
@@ -232,11 +223,8 @@ describe('GoalsStep · the group card says what the group is', () => {
     renderStep()
     await waitFor(() => expect(screen.getAllByRole('tab')).toHaveLength(3))
     fireEvent.click(tab('Mom & Dad'))
-    // Wait for the tab to actually BE selected before looking at the panel. Clicking and
-    // going straight to `findByText` raced the re-render and failed under parallel load
-    // — the tabs were in the DOM, the panel's content had not caught up, and the 1s
-    // default ran out. Asserting the state change first makes the wait about the thing
-    // that has to happen rather than about how fast the machine is.
+    // Wait for the tab to actually BE selected before looking at the panel: clicking and going
+    // straight to `findByText` races the re-render under parallel load.
     await waitFor(() => expect(tab('Mom & Dad')).toHaveAttribute('aria-selected', 'true'))
     expect(await screen.findByText('private · just the two of you')).toBeInTheDocument()
     fireEvent.click(tab('Lottie'))
@@ -251,10 +239,9 @@ describe('GoalsStep · the group card says what the group is', () => {
     expect(await screen.findByText(/This week · Water the garden/)).toBeInTheDocument()
   })
 
-  // Coming back from "＋ New goal for this week": the editor created the goal already
-  // featured, so the server reports it as the group's focus while `settled` stays
-  // false. It must read as "already pinned, confirm it" — not as a decision the
-  // session made on the family's behalf.
+  // Coming back from "＋ New goal for this week": the editor created the goal already featured, so
+  // the server reports it as the group's focus while `settled` stays false. It must read as
+  // "already pinned, confirm it", not as a decision the session made for the family.
   it('shows an already-featured goal as the focus, but does not claim the group settled', async () => {
     const view = VIEW()
     view.groups[0].focusGoalId = 'g1'
@@ -272,7 +259,6 @@ describe('GoalsStep · the pace line', () => {
   it('renders the server’s sentence with its tone, and composes none of its own', async () => {
     renderStep()
     const card = await screen.findByRole('radio', { name: /Water the garden/ })
-    // "kind · pace" — Habit, then how it's actually going.
     const pace = within(card).getByText('2 of 5 last week')
     expect(pace).toHaveAttribute('data-tone', 'behind')
     expect(within(card).getByText(/^Habit/)).toBeInTheDocument()
@@ -345,12 +331,9 @@ describe('GoalsStep · picking the week’s focus', () => {
   })
 })
 
-// When the honest answer doesn't exist yet.
-//
 // The editor opens as a modal OVER the week rather than navigating to /goals/new, which would
-// eject the family from the session — a fifteen-second detour with nothing to bring them back.
-// Same component, no route change, and the group they were looking at is the group the goal
-// belongs to.
+// eject the family from the session. Same component, no route change, and the group they were
+// looking at is the group the goal belongs to.
 describe('GoalsStep · making the goal that does not exist yet', () => {
   const openModal = async (group: string) => {
     renderStep()
@@ -362,8 +345,7 @@ describe('GoalsStep · making the goal that does not exist yet', () => {
 
   it('opens the editor in place, with the group they were on already fixed', async () => {
     const modal = await openModal('Lottie')
-    // Stated, not offered: the tab they were on IS the target, and there is no picker
-    // to knock it off by accident.
+    // Stated, not offered: the tab they were on IS the target, with no picker to knock it off.
     expect(within(modal).getByTestId('ge-who-locked')).toHaveTextContent('Lottie')
     expect(within(modal).queryByRole('button', { name: /＋ New group/ })).not.toBeInTheDocument()
     // The session is still on screen behind it — no navigation happened.
@@ -378,16 +360,13 @@ describe('GoalsStep · making the goal that does not exist yet', () => {
 
     await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.url.endsWith('/api/goals'))).toBe(true))
     const post = calls.find((c) => c.method === 'POST' && c.url.endsWith('/api/goals'))!
-    // The group is the one they were on, and the goal is pinned on the way in — that is
-    // what makes it come back as the week's focus.
+    // The group is the one they were on, and the goal is pinned on the way in.
     expect(post.body).toMatchObject({ title: 'Walk after dinner', goalListId: 'l-lottie', isFeatured: true })
 
-    // Modal gone, session untouched, and the new goal is the one on screen.
     await waitFor(() => expect(screen.queryByTestId('wpg-modal')).not.toBeInTheDocument())
     expect(screen.getByTestId('loc').textContent).toBe('/planning/goals')
     expect(await screen.findByRole('radio', { name: /Walk after dinner/ })).toBeChecked()
-    // Still on Lottie's tab, and it is NOT starred: a pin the session merely adopted is
-    // a focus to confirm, not a decision the session made for them.
+    // Still on Lottie's tab, and NOT starred: a pin the session merely adopted is a focus to confirm.
     expect(tab('Lottie')).toHaveAttribute('aria-selected', 'true')
     expect(tab('Lottie')).not.toHaveAttribute('data-settled', 'true')
     expect(screen.getByText(/Pinned already · Walk after dinner/)).toBeInTheDocument()
@@ -412,7 +391,6 @@ describe('GoalsStep · making the goal that does not exist yet', () => {
     }) as unknown as typeof fetch
     renderStep()
     await waitFor(() => expect(screen.getAllByRole('tab')).toHaveLength(3))
-    // "Family" has two members — not theirs to add to.
     await waitFor(() => expect(screen.getByRole('button', { name: /New goal for this week/ })).toBeDisabled())
   })
 })

@@ -1,42 +1,36 @@
 import Foundation
 import Observation
 
-// Weekly Planning · step 10 (Recap) — the step's state and its pure formatting.
+// Weekly Planning · step 10 (Recap) — the step's state and its pure formatting. Ported from
+// `apps/web/src/kiosk/planning/steps/RecapStep.tsx`.
 //
-// Ported from `apps/web/src/kiosk/planning/steps/RecapStep.tsx`.
-//
-// THE MODEL COMPUTES NOTHING ABOUT THE WEEK. Every headline, every sentence and every
-// tally arrives resolved from `GET /api/weekly-planning/recap`, which reads the modules
-// that own the decisions. A client that re-added the counts, or reworded a decision into
-// its own sentence, would be a second reading of the week free to drift from the server's
-// — and from the web's. What this file decides is two things the server cannot: the day
-// labels (a device-local reading of a calendar label) and one `SyncedEvent` per event so
-// the strip can be tinted through the app's OWN `EventPalette`.
+// THE MODEL COMPUTES NOTHING ABOUT THE WEEK: every headline, sentence and tally arrives
+// resolved from `GET /api/weekly-planning/recap`, and a client that re-added the counts would
+// be a second reading of the week, free to drift from the server's and from the web's. What
+// this file decides is the day labels and one `SyncedEvent` per event, so the strip can be
+// tinted through the app's OWN `EventPalette`.
 
 // MARK: - Formatting
 
 enum PlanningRecapText {
 
-    /// The dinner line: "Lentil soup · Lottie" when somebody is cooking it. Mirrors the
-    /// web's `mealLine` exactly, including that a cook with no meal produces nothing.
+    /// The dinner line: "Lentil soup · Lottie". Mirrors the web's `mealLine`, including that a
+    /// cook with no meal produces nothing.
     static func mealLine(meal: String?, cook: String?) -> String? {
         guard let meal, !meal.isEmpty else { return nil }
         guard let cook, !cook.isEmpty else { return meal }
         return "\(meal) · \(cook)"
     }
 
-    /// "1 decision" / "4 decisions" — the card header's own number, which is the server's
-    /// `counts.decisions` and never a sum this file computed.
+    /// The card header's own number, which is the server's `counts.decisions` and never a sum
+    /// this file computed.
     static func decisionsLabel(_ n: Int) -> String {
         n == 1 ? "1 decision" : "\(n) decisions"
     }
 
-    /// THE TENSE. The recap reads on two surfaces — step 10, inside a session about to be
-    /// saved, and the finished-week record, which may be opened on Thursday. Every
-    /// sentence below that promises what SAVING will do is a lie on the second one, and
-    /// "what tonight changed" is the wrong night. Which surface it is comes from the
-    /// week's own `savedAt` rather than a flag a view passes down, so a saved week cannot
-    /// read one way here and another on the web.
+    /// THE TENSE. The recap reads on two surfaces — step 10, and the finished-week record,
+    /// which may be opened on Thursday — so no sentence may promise what SAVING will do. Which
+    /// surface it is comes from the week's own `savedAt`, never a flag a view passes down.
 
     static func changedTitle(saved: Bool) -> String {
         saved ? "What the session changed" : "What tonight changed"
@@ -55,15 +49,13 @@ enum PlanningRecapText {
             : "\(pointer) Saving writes the record: what was decided, what was deferred, what rolled over, with a timestamp. After that Today is the surface, not this session."
     }
 
-    /// "…and 2 more still on the board".
     static func lastCallMoreLabel(_ n: Int) -> String {
         n == 1 ? "…and 1 more still on the board" : "…and \(n) more still on the board"
     }
 
-    /// "Sun" and "6" for a `YYYY-MM-DD`. UTC + POSIX, matching `PlanningFormat`: a day in
-    /// the planned week is a calendar LABEL, and parsing it in the device's zone renders
-    /// the previous weekday for anybody west of Greenwich (the web parses at noon for the
-    /// same reason).
+    /// "Sun" and "6" for a `YYYY-MM-DD`. UTC + POSIX, matching `PlanningFormat`: a day in the
+    /// planned week is a calendar LABEL, and parsing it in the device's zone renders the
+    /// previous weekday for anybody west of Greenwich.
     static func dayName(_ ymd: String) -> String {
         guard let d = isoDay.date(from: ymd) else { return ymd }
         return shortDay.string(from: d)
@@ -100,14 +92,10 @@ enum PlanningRecapText {
 
 // MARK: - Rows
 
-/// One event on the strip, with the shape the app's own colour resolver takes.
-///
-/// `synced` is a `SyncedEvent` built from the payload's colour INPUTS — owner, owner
-/// colour, participants — precomputed here so a row is one set lookup
-/// (`sync.eventPalette.hex(for:)`) rather than three allocations per frame. Reusing that
-/// resolver is the point: the week read back has to look like the calendar it describes,
-/// which means the family colour when an event covers the household and the owner's
-/// otherwise — not a second palette invented by this step.
+/// One event on the strip. `synced` is a `SyncedEvent` built from the payload's colour INPUTS —
+/// owner, owner colour, participants — precomputed here so a row is one set lookup rather than
+/// three allocations per frame. Reusing the app's own resolver is the point: the week read back
+/// has to look like the calendar it describes.
 struct PlanningRecapEventRow: Identifiable, Equatable, Sendable {
     let id: String
     let title: String
@@ -120,10 +108,8 @@ struct PlanningRecapDayRow: Identifiable, Equatable, Sendable {
     let date: String
     let dayName: String
     let dayNumber: String
-    /// "Lentil soup · Lottie", or nil when nothing is planned (or meals is off).
     let mealLine: String?
     let events: [PlanningRecapEventRow]
-    /// Events the day is holding back, so a busy day says "+2 more" instead of growing.
     let more: Int
 
     var id: String { date }
@@ -143,17 +129,14 @@ final class PlanningRecapModel {
 
     private(set) var view: WaffledAPI.PlanningRecapView?
     private(set) var loaded = false
-    /// Days with every string already built. Rebuilt once per applied read.
     private(set) var days: [PlanningRecapDayRow] = []
-    /// The note a drop is in flight for — one at a time, and the row says so.
     private(set) var working: String?
     var errorMessage: String?
     /// Bumped on every applied read, so the view pushes the crumb on one `onChange`.
     private(set) var rev = 0
 
-    /// Notes the family walked past ON PURPOSE. Local, and that is the design: "keep it
-    /// parked" is the answer that writes NOTHING — the note stays open and turns up in
-    /// next Sunday's step 1, which is the whole point of a last call rather than an inbox.
+    /// Notes the family walked past ON PURPOSE. Local, and that is the design: "keep it parked"
+    /// writes NOTHING, and the note turns up in next Sunday's step 1.
     private(set) var keptIds: Set<String> = []
     private(set) var droppedIds: Set<String> = []
 
@@ -175,7 +158,6 @@ final class PlanningRecapModel {
 
     // MARK: Derived
 
-    /// The notes still on the board — minus the ones this sitting kept or dropped.
     var openLastCall: [WaffledAPI.PlanningRecapLastCall] {
         (view?.lastCall ?? []).filter { !keptIds.contains($0.id) && !droppedIds.contains($0.id) }
     }
@@ -184,29 +166,23 @@ final class PlanningRecapModel {
     var leftAlone: [WaffledAPI.PlanningRecapLeftAlone] { view?.leftAlone ?? [] }
     var counts: WaffledAPI.PlanningRecapCounts { view?.counts ?? .init() }
 
-    /// "Nothing was decided in this session" — an honest state, not an empty screen.
     var nothingDecided: Bool { groups.isEmpty && leftAlone.isEmpty }
 
-    /// The week is already saved — the record, not step 10. Off the payload, because the
-    /// server ships `savedAt` for exactly this ("here so any surface reading the record
-    /// can date it") and a screen-level flag would be a second opinion about it.
+    /// The week is already saved — the record, not step 10. Off the payload, because the server
+    /// ships `savedAt` for exactly this and a screen-level flag would be a second opinion.
     var saved: Bool { view?.savedAt != nil }
 
-    /// The receipt's integers, and ONLY those. See `PlanningRecapCrumb`.
-    ///
-    /// NIL UNTIL A READ HAS LANDED: the shell REPLACES the step's data when the
-    /// affirmative is pressed, so handing one up after a failed fetch would write zeroes
-    /// over a week that really did decide things.
+    /// The receipt's integers, and ONLY those. NIL UNTIL A READ HAS LANDED: the shell REPLACES
+    /// the step's data when the affirmative is pressed, so handing one up after a failed fetch
+    /// would write zeroes over a week that really did decide things.
     var crumb: [String: JSONValue]? { PlanningRecapCrumb.decision(view) }
 
     func dismissError() { errorMessage = nil }
 
     // MARK: Read
 
-    /// Read the week back. A FAILED fetch keeps whatever was already on screen and still
-    /// sets `loaded`, so the last screen of the session says what happened rather than
-    /// spinning — and the week itself is unaffected either way, because this step writes
-    /// nothing.
+    /// Read the week back. A FAILED fetch keeps whatever was on screen and still sets `loaded`,
+    /// so the last screen of the session says what happened rather than spinning.
     func load(sessionId: String?, weekStart: String?) async {
         do {
             apply(try await fetchRecap(sessionId, weekStart))
@@ -220,15 +196,15 @@ final class PlanningRecapModel {
 
     // MARK: The one write — and it belongs to step 1
 
-    /// "Keep it parked" writes NOTHING. It is the quiet answer, and the note being still
-    /// open next Sunday is the feature.
+    /// "Keep it parked" writes NOTHING — the quiet answer, and the note being still open next
+    /// Sunday is the feature.
     func keepParked(_ id: String) {
         guard working == nil else { return }
         keptIds.insert(id)
     }
 
-    /// "Drop it" — through step 1's resolver. A failure leaves the note on the board
-    /// rather than hiding a row whose write never landed.
+    /// "Drop it" — through step 1's resolver. A failure leaves the note on the board rather
+    /// than hiding a row whose write never landed.
     func drop(_ id: String, sessionId: String) async {
         guard working == nil else { return }
         working = id
@@ -253,10 +229,9 @@ final class PlanningRecapModel {
                 events: day.events.map { event in
                     PlanningRecapEventRow(
                         id: event.id, title: event.title, when: event.when,
-                        // The colour INPUTS, in the shape `EventPalette` reads. Only the
-                        // four fields that decide a colour are filled: nothing here is a
-                        // real synced row, and pretending otherwise (an invented
-                        // `startsAt`, say) would put a wrong instant somewhere.
+                        // The colour INPUTS, in the shape `EventPalette` reads. Only the four
+                        // fields that decide a colour are filled: an invented `startsAt` would
+                        // put a wrong instant somewhere.
                         synced: SyncedEvent(
                             id: event.id, title: event.title, startsAtRaw: nil, startsAt: nil,
                             allDay: false, personId: event.personId, colorHex: event.personColor,

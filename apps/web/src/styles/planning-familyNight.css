@@ -1,30 +1,9 @@
 /* Weekly Planning · step 4 — Family night (FamilyNightStep.tsx).
 
-   Three rows and a theme line. The step's whole job is to be READ and left alone, so
-   this stylesheet stays small on purpose: one card, three rows, a face strip, and the
-   bar that appears when the week is called off. Anything the app already has — .field
-   for the theme input, .btn .btn-ghost for the two buttons — is used as-is rather than
-   restyled here.
-
-   Every colour is a token, so dark mode comes for free. Never hardcode a hex here. The
-   one inline colour in the TSX is a person's own colorHex, tinted (…22), which is the
-   same thing the Tasks step's faces do.
-
-   VOCABULARY
-     .wpfn                  the step body
-     .wpfn-card             the gathering; .skipped dims it without hiding it
-     .wpfn-h .wpfn-t .wpfn-rec .wpfn-when   who/what, how often, and this week's when
-     .wpfn-theme            the free-text theme line (the app's .field, on its side)
-     .wpfn-row              one part: emoji, label + suggestion, the faces, its detail
-     .wpfn-sug              "suggested · …" / "pinned for this week · …" / "nobody yet"
-     .wpfn-faces .wpfn-face tap a face to pin that part for this week (.on = who's on it)
-     .wpfn-detail           WHAT the part is this week — a different question from who
-     .wpfn-cal …            this week on the calendar (NOT the standing weekly series):
-                            .wpfn-cal-emoji/-main/-t/-s/-acts/-act, and .wpfn-cal-list
-                            /-pick/-empty for pointing at an event the week already has
-     .wpfn-note             the sentence explaining that the three are suggestions
-     .wpfn-skipbar          the week is off: what that did, and the way back
-*/
+   The step's whole job is to be READ and left alone, so this stylesheet stays small on
+   purpose. Anything the app already has — .field for the theme input, .btn .btn-ghost for
+   the buttons — is used as-is. Every colour is a token, so dark mode comes for free; the
+   one inline colour in the TSX is a person's own colorHex, tinted. */
 
 .wpfn {
   display: flex;
@@ -88,9 +67,8 @@
   margin-bottom: 14px;
 }
 
-/* WHAT the part is. Same shape as the theme line (the app's own `.field`, on its side)
-   because it is the same kind of thing: a sentence somebody types, saved on blur. Starts
-   in the label's column and runs to the edge, so the emoji column stays the row's rail. */
+/* Same shape as the theme line, because it is the same kind of thing: a sentence somebody
+   types, saved on blur. Starts in the label's column so the emoji column stays the rail. */
 .wpfn-detail.field {
   grid-column: 2 / -1;
   display: flex;
@@ -111,8 +89,7 @@
 
 /* ── This week on the calendar ────────────────────────────────────────────────── */
 /* Distinct from the STANDING recurring series: that is a household setting, this is one
-   dated gathering. The row states which of the two it is talking about, because getting
-   them confused is the only way to read it wrong. */
+   dated gathering. Confusing the two is the only way to read the row wrong. */
 .wpfn-cal {
   display: flex;
   align-items: flex-start;
@@ -127,8 +104,6 @@
 .wpfn-cal-acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 9px; }
 .wpfn-cal-act { flex: none; padding: 8px 14px; font-size: 13px; }
 
-/* The week's events to point at. A list, not a modal: it is a short pick from what is
-   already there, and a dialog for four rows would be heavier than the decision. */
 .wpfn-cal-list {
   list-style: none;
   margin: 10px 0 0;
@@ -171,9 +146,8 @@
 /* ── A part ──────────────────────────────────────────────────────────────────── */
 
 .wpfn-row {
-  /* A grid rather than a flex row: the part now has TWO lines — who has it (emoji,
-     label, faces) and what it IS (the detail field) — and the second has to sit under
-     the label rather than squeeze in beside the faces. */
+  /* A grid rather than a flex row: the part has TWO lines — who has it and what it IS —
+     and the second has to sit under the label rather than beside the faces. */
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
@@ -204,8 +178,6 @@
   color: var(--ink-3);
   margin-top: 2px;
 }
-/* A pin is the one thing on this screen somebody actually decided — it reads as chosen,
-   not as another grey hint. */
 .wpfn-sug.pinned {
   color: var(--person-3);
 }
@@ -217,8 +189,7 @@
   flex-wrap: wrap;
   justify-content: flex-end;
 }
-/* Deliberately the Tasks step's face: same size, same tinted pill, same lift on hover —
-   tapping a face means the same thing on both screens. */
+/* Deliberately the Tasks step's face — tapping a face means the same thing on both. */
 .wpfn-face {
   width: 34px;
   height: 34px;
@@ -298,9 +269,6 @@
 }
 
 /* ── Phone ───────────────────────────────────────────────────────────────────── */
-/* The same three rows, each becoming two lines: emoji + label + suggestion, then the
-   faces indented under it. Nothing is dropped — a narrow screen still gets the whole
-   decision. */
 
 @media (max-width: 620px) {
   .wpfn {

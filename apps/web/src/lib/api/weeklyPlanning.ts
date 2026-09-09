@@ -1,8 +1,8 @@
 // Weekly Planning domain — the guided session that decides the week ahead.
 //
-// The step catalog (order, titles, the question each step asks) is SERVER-owned and
-// arrives in the view; nothing here hardcodes it, so web and iOS can't drift on the
-// shape of the session. See docs/product/weekly-planning-plan.md.
+// The step catalog (order, titles, the question each step asks) is SERVER-owned and arrives
+// in the view; nothing here hardcodes it, so web and iOS can't drift on the session's
+// shape. See docs/product/weekly-planning-plan.md.
 import { useEffect, useState } from 'react'
 import { apiGet, apiSend, apiDelete } from './client'
 import { useRefetchOn, emit } from './bus'
@@ -22,7 +22,6 @@ export interface PlanningStep {
   number: number
   title: string
   ask: string
-  // The affirmative answer to `ask`, for the primary button.
   primary: string
   act: string
   requiresModule?: string
@@ -32,10 +31,9 @@ export interface PlanningStep {
   data: Record<string, unknown>
   decidedAt: string | null
   /**
-   * Open parked notes TAGGED FOR THIS STEP — what somebody wrote earlier meaning to deal
-   * with it here. Empty for `looseEnds` (which already draws the whole board) and for
-   * untagged notes (nobody's yet, so they are the recap's last call rather than every
-   * step's banner). Capped server-side: a nudge, not an inbox.
+   * Open parked notes TAGGED FOR THIS STEP. Empty for `looseEnds` (which draws the whole
+   * board) and for untagged notes (the recap's last call, not every step's banner).
+   * Capped server-side: a nudge, not an inbox.
    */
   parked: PlanningStepHandoff[]
 }
@@ -57,23 +55,19 @@ export interface WeeklyPlanningConfig {
   showOnToday: boolean
   /**
    * Which lists step 1 is even about, keyed by list id. ABSENT MEANS RELEVANT — a sparse
-   * opt-out map like `steps`, so read it as `lists[id] !== false` and never as `lists[id]`.
-   * A patch is merged server-side, so send only what changed.
+   * opt-out map like `steps`, so read it as `lists[id] !== false`. Patches merge server-side.
    */
   lists: Record<string, boolean>
 }
 
-// Defined once, in the step's own api file: the same server helper answers both this
-// module's config read and step 1's, so one type describes both. Imported for use below
-// AND re-exported, since callers reach for it from either place.
+// Defined once in the step's own api file: one server helper answers both this module's
+// config read and step 1's. Re-exported, since callers reach for it from either place.
 import type { PlanningListCandidate } from './planning/looseEnds'
 export type { PlanningListCandidate }
 
 export interface WeeklyPlanningView {
   config: WeeklyPlanningConfig
-  // The week this view is about (the server snapped and floored it).
   weekStart: string
-  // The week a session plans when nobody asked for a particular one.
   defaultWeekStart: string
   // The earliest plannable week — the floor of the week stepper.
   minWeekStart: string
@@ -100,15 +94,12 @@ export const weeklyPlanningApi = {
   complete: (id: string) =>
     apiSend<{ session: PlanningSession; steps: PlanningStep[] }>('POST', `/api/weekly-planning/session/${id}/complete`, {})
       .then((r) => { emit('weeklyPlanning'); return r }),
-  // Discard the session and put the week back to its lobby. What the session decided
-  // stays where it landed (the calendar, the chore board, the goals) — this only
-  // throws away the session record.
+  // Discard the session and put the week back to its lobby. What the session decided stays
+  // where it landed — this only throws away the session record.
   discard: (id: string) =>
     apiDelete(`/api/weekly-planning/session/${id}`).then((r) => { emit('weeklyPlanning'); return r }),
 }
 
-// The steps this household actually runs, in order — the ones the session walks and
-// the only ones the agenda sheet lists.
 export const availableSteps = (steps: PlanningStep[]): PlanningStep[] => steps.filter((s) => s.available)
 
 // The acts, in catalog order, each with its available steps. Drives the agenda sheet's
@@ -123,11 +114,9 @@ export function stepsByAct(steps: PlanningStep[]): { act: string; steps: Plannin
   return out
 }
 
-// Which step is on screen, resolved against what's actually available. In order: the
-// step named in the URL, then the session's own pointer (which is what lets another
-// device resume where this one left off), then the first runnable step. A key that
-// isn't available — its module was turned off mid-week, or somebody typed it — must
-// never strand the session on a blank screen.
+// In order: the step named in the URL, then the session's own pointer (which lets another
+// device resume where this one left off), then the first runnable step. An unavailable key
+// must never strand the session on a blank screen.
 export function resolveCurrent(view: WeeklyPlanningView | null, urlStep?: string | null): PlanningStep | null {
   if (!view) return null
   const avail = availableSteps(view.steps)

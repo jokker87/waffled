@@ -1,19 +1,11 @@
-// Weekly Planning · step 1 "Loose ends" — service logic.
-//
-// STEP 1 IS INTAKE, NOT REPAIR: it ROUTES things to the steps that will handle them and
-// writes nothing to any module. The two exceptions prove it — "It's done already" (the
-// module should know) and "Drop it" (a parked note, which exists nowhere else). NOT DONE
-// is computed from the modules that own the work; PARKED is what somebody wrote down
-// during the week, in the one table this step owns (0102_planning_parked_items). See
+// Weekly Planning · step 1 "Loose ends" — service logic. See
 // docs/product/weekly-planning-plan.md § "Step 1 routes; it does not resolve".
 //
-// THE CROSS-STEP CONTRACT, which later steps read directly:
-// `planning_session_steps.data` for the `looseEnds` step holds
-// `{ routes: [{ kind, id, title, source, to }] }`, `to` being a step key. Steps 2/6/8/9
-// filter it to their own key; nothing else is shared.
-//
-// A source module that is off contributes nothing, on the read AND the write — planning
-// must not be a hole that reaches into a disabled module.
+// STEP 1 IS INTAKE, NOT REPAIR: it ROUTES items to the steps that will handle them and
+// writes nothing to any module, bar "It's done already" and (for a parked note) "Drop
+// it". A source module that is off contributes nothing, read AND write. The CROSS-STEP
+// CONTRACT later steps read: `planning_session_steps.data` for `looseEnds` holds `{
+// routes: [{ kind, id, title, source, to }] }`, filtered by each step to its own `to`.
 import { query } from '../../../platform/db'
 import { moduleEnabled, type ModuleKey } from '../../../platform/modules'
 import type { Tenant } from '../../households/households'
@@ -23,18 +15,11 @@ import { setItemChecked, softDeleteItem } from '../../lists/lists.service'
 import { listAttention, completeRhythm, skipPeriod } from '../../rhythms/rhythms'
 import { listGoals, logProgress } from '../../goals/goals.service'
 
-// ---------------------------------------------------------------------------
-// The shape the step reads
-// ---------------------------------------------------------------------------
+// ─── The shape the step reads ───────────────────────────────────────────────
 
-// WHO A LOOSE END ALREADY BELONGS TO.
-//
-// A row's owner is part of the decision: routing something that already has an owner is a
-// different decision from routing something nobody has picked up, and a title plus how late it
-// is cannot tell you whose bed is unmade.
-//
-// The colour and the avatar travel WITH the name so each client renders the person the way
-// the rest of its app does, rather than inventing a chip of its own from an id.
+// WHO A LOOSE END ALREADY BELONGS TO. Routing something that already has an owner is a
+// different decision from routing something nobody picked up. Colour and avatar travel
+// WITH the name.
 export interface LooseEndOwner {
   id: string
   name: string
@@ -45,39 +30,32 @@ export interface LooseEndOwner {
 export type LooseEndKind = 'chore' | 'list' | 'rhythm' | 'goal' | 'parked'
 export type LooseEndGroup = 'notDone' | 'parked'
 
-// The two answers that actually WRITE. Routing is not one of them — it goes to the
-// session, not to a module. Which of these an item offers is decided here, per item,
-// rather than by the client guessing from `kind`: a chore that demands photo proof
-// can't be completed from a session with no camera, and only a parked note can be
-// dropped. A third answer, "leave it open" / "keep it parked", writes nothing at all
-// and so lives entirely in the client — which is what keeps per-item state out of any
-// planning table.
+// The two answers that actually WRITE (routing goes to the session, not to a module).
+// Which of them an item offers is decided here per item rather than guessed from `kind`:
+// a photo-proof chore can't be completed from a camera-less session, and only a parked
+// note can be dropped. "Leave it open" writes nothing and lives entirely in the client.
 export type LooseEndAction = 'done' | 'drop'
 
 export interface LooseEnd {
-  // Stable across refetches, and unique across kinds — the client's list key and what
-  // the deck remembers as already answered.
+  // Stable across refetches and unique across kinds — the client's list key, and what the
+  // deck remembers as answered.
   key: string
   kind: LooseEndKind
   id: string
   title: string
   emoji: string | null
-  // Who it already belongs to, or null for "nobody has this" — which is a real state and
-  // exactly the row worth routing, not a missing value. Null throughout for a list item
-  // (a list has no owner) and for a parked note (whose byline is in `detail`).
+  // Null means "nobody has this" — a real state, and exactly the row worth routing.
+  // Always null for a list item and a parked note.
   owner: LooseEndOwner | null
-  // The one line under the title: how late, which list, how short, or — for a parked
-  // note — who wrote it, how long ago, and how many sessions have passed it over.
-  // Composed here so web and iOS say the same thing.
+  // The one line under the title (how late, which list, who wrote it). Composed here so
+  // web and iOS say the same thing.
   detail: string | null
   actions: LooseEndAction[]
 }
 
-// A destination is a STEP, and the catalog of them is server-owned for the same reason
-// the step catalog is: the label and the reason under it are the other half of the
-// question, and a client copy would drift the moment one platform reworded it. A step
-// whose module is off is filtered out here, so the card never offers a destination the
-// session will skip over anyway.
+// A destination is a STEP, and the catalog is server-owned for the same reason the step
+// catalog is: a client copy would drift the moment one platform reworded it. A step whose
+// module is off is filtered out here.
 export interface LooseEndDestination {
   to: string
   label: string
@@ -85,16 +63,13 @@ export interface LooseEndDestination {
   primary?: boolean
 }
 
-// What step 1 routed, and where. Persisted on the session (see the header note); the
-// shape later steps read.
+// What step 1 routed, and where. Persisted on the session; the shape later steps read.
 export interface LooseEndRoute {
   kind: LooseEndKind
   id: string
-  // The title AS IT READ WHEN ROUTED, so a later step can render the row without
-  // re-reading four modules. A label, never a source of truth — the module still owns
-  // the item, and the recap reads through to it.
+  // The title AS IT READ WHEN ROUTED, so a later step needn't re-read four modules. A
+  // label, never a source of truth.
   title: string
-  // Which half of step 1 it came from.
   source: LooseEndGroup
   // The step that will handle it: a key from the server-owned catalog.
   to: string
@@ -105,28 +80,22 @@ export interface LooseEndsView {
   weekStart: string
   notDone: LooseEnd[]
   parked: LooseEnd[]
-  // The server's own tally of each group.
   counts: { notDone: number; parked: number }
   // Where each group's card can send an item, filtered to steps this household runs.
   destinations: { notDone: LooseEndDestination[]; parked: LooseEndDestination[] }
   // What has been routed in THIS session so far (empty without a session).
   routes: LooseEndRoute[]
-  // Friendly names of the modules actually read, for the cleared state's "we checked…"
-  // line. Reflects the household's toggles, so it never claims to have checked a
-  // module that is off.
+  // Modules actually read, for the cleared state's "we checked…" line — so it never
+  // claims a module that is off.
   sources: string[]
-  // The lists this step COULD ask about, with how each currently stands — so the chooser
-  // in the step renders off the step's own read rather than fetching the config as well.
-  // Same helper the config read uses, so the two cannot disagree, and the same value
-  // `sources` is derived from below.
+  // The lists this step COULD ask about. Same helper the config read uses, so the two
+  // cannot disagree.
   lists: PlanningListCandidate[]
 }
 
-// What a source returns before owners are resolved: the item plus the id of whoever holds
-// it. Two of the four sources come back through ANOTHER module's reader (`listAttention`,
-// `listGoals`) and own no SQL to join `persons` in, so resolving per-source would mean two
-// mechanisms for one field in one payload — which is how they drift. One map, applied
-// once, in `getLooseEnds`.
+// What a source returns before owners are resolved. Two of the four come back through
+// another module's reader and own no SQL to join `persons`, so ownership is resolved once
+// in `getLooseEnds`.
 type SourceEnd = Omit<LooseEnd, 'owner'> & { ownerId: string | null }
 
 /// The household's people, by id. Small by construction: a household, not a table scan.
@@ -144,9 +113,8 @@ async function peopleById(householdId: string): Promise<Map<string, LooseEndOwne
 const withOwners = (items: SourceEnd[], people: Map<string, LooseEndOwner>): LooseEnd[] =>
   items.map(({ ownerId, ...rest }) => ({ ...rest, owner: (ownerId && people.get(ownerId)) || null }))
 
-// A defensive ceiling per source. The step is a deck with a see-all escape hatch, so
-// twenty items is by design — two thousand is a runaway module, and paging a deck is
-// not a thing anyone asked for.
+// A defensive ceiling per source: the step is a deck with a see-all escape hatch, so
+// twenty items is by design.
 const PER_SOURCE_LIMIT = 200
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -158,8 +126,8 @@ async function householdSettings(householdId: string): Promise<unknown> {
 
 const enabled = (settings: unknown, key: ModuleKey) => moduleEnabled(settings, key)
 
-// Today, in the household's own zone. Every "is it late?" comparison below is against
-// this and never the server's date — the same rule the rest of the codebase follows.
+// Today, in the household's own zone. Every "is it late?" below compares against this,
+// never the server's date.
 async function todayLocal(householdId: string): Promise<string> {
   const { rows } = await query<{ today: string }>(
     `select (now() at time zone timezone)::date::text as today from households where id = $1`,
@@ -181,13 +149,10 @@ function agoLabel(days: number): string {
   return weeks === 1 ? '1 week ago' : `${weeks} weeks ago`
 }
 
-// ---------------------------------------------------------------------------
-// Destinations
-// ---------------------------------------------------------------------------
+// ─── Destinations ──────────────────────────────────────────────────────────
 
-// Same card, different verbs. Group A is triage ("which step owns this?"); group B is
-// a note that might still turn out to be nothing, so two of its four choices settle it
-// here rather than sending it anywhere.
+// Same card, different verbs: group A is triage, group B is a note that might be nothing,
+// so two of its choices settle it here.
 const DESTINATIONS: Record<LooseEndGroup, LooseEndDestination[]> = {
   notDone: [
     { to: 'tasks', label: 'Tasks', hint: 'Give it an owner and a day', primary: true },
@@ -201,8 +166,8 @@ const DESTINATIONS: Record<LooseEndGroup, LooseEndDestination[]> = {
   ],
 }
 
-// Only steps this household actually runs. A destination pointing at a step the
-// session skips over would route things into a void.
+// Only steps this household runs — a destination pointing at a skipped step would route
+// things into a void.
 async function availableDestinations(
   householdId: string
 ): Promise<{ notDone: LooseEndDestination[]; parked: LooseEndDestination[] }> {
@@ -214,12 +179,10 @@ async function availableDestinations(
   }
 }
 
-// ---------------------------------------------------------------------------
-// "Not done" · the four reads
-// ---------------------------------------------------------------------------
+// ─── "Not done" · the four reads ───────────────────────────────────────────
 
-// Overdue chore instances. `awaiting` is excluded on purpose — it has been done and is
-// sitting in the approvals queue, which is the approver's business, not the week's.
+// Overdue chore instances. `awaiting` is excluded on purpose: it is the approver's
+// business, not the week's.
 async function overdueChores(householdId: string, today: string): Promise<SourceEnd[]> {
   const { rows } = await query<{
     id: string
@@ -230,7 +193,7 @@ async function overdueChores(householdId: string, today: string): Promise<Source
     person_id: string | null
   }>(
     // `ci.person_id`, not the chore's: an instance can be reassigned for the day, and the
-    // instance is what is actually late.
+    // instance is what is late.
     `select ci.id, ci.due_on::text as due_on, ci.requires_photo, c.title, c.emoji, ci.person_id
        from chore_instances ci
        join chores c on c.id = ci.chore_id and c.deleted_at is null
@@ -250,42 +213,26 @@ async function overdueChores(householdId: string, today: string): Promise<Source
     emoji: r.emoji,
     ownerId: r.person_id,
     detail: lateBy(daysBetween(r.due_on, today)),
-    // No "it's done already" when the chore demands a photo: there is no camera in a
-    // planning session, and completeInstance would (rightly) refuse. Route it instead.
+    // No "it's done already" when the chore demands a photo: no camera in a planning
+    // session, so route it instead.
     actions: (r.requires_photo ? [] : ['done']) as LooseEndAction[],
   }))
 }
 
-// Unchecked items on the lists a person actually KEEPS, that were already open before
-// this week began.
+// Unchecked items on the lists a person actually KEEPS, already open before this week
+// began.
 //
-// ONLY `list_type = 'custom'` — an allowlist, not a denylist, because the other two
-// kinds are noise for two different reasons and a new kind should have to argue its way
-// in rather than flood by default:
+// ONLY `list_type = 'custom'` — an allowlist, so a new list kind has to argue its way in.
+// GROCERY rebuilds itself from the meal plan every week, so an unchecked "Whole milk"
+// says nothing about the week that ended (and, being the biggest list in the house, would
+// crowd out the real leftovers under PER_SOURCE_LIMIT). TEMPLATES keep every item
+// `checked = false` by design (0072) and are hidden from the Lists rail, so they would
+// flood forever from somewhere the user cannot see.
 //
-//   · GROCERY is a list that REBUILDS ITSELF from the meal plan every week (source
-//     'auto' rows are derived; nobody typed them). An unchecked "Whole milk" says
-//     nothing about the week that just ended, and routing it to the Tasks step is
-//     nonsense. Hand-typed grocery rows ('recipe'/'manual') go too — an off-plan
-//     "Marble rye" is still shopping, so filtering on `source` would only half-fix it.
-//     Left in, a shopping list is also the biggest thing in the household, so under
-//     `order by created_at` + PER_SOURCE_LIMIT it can crowd out the genuine leftovers
-//     entirely.
-//   · TEMPLATES keep their items `checked = false` permanently — that IS the blueprint
-//     (0072) — so every row on every template would be a loose end forever. Worse, the
-//     Lists rail hides templates (`listLists` filters `list_type <> 'template'`), so a
-//     user could not see where the flood came from.
-//
-// The age anchor is the household's CURRENT week start, not the week being planned.
-// That distinction is load-bearing: the planned week is always today or later, so
-// nothing that exists now was created after it — anchoring there filters nothing and
-// the read floods with every unchecked row in the household. Anchored at the current
-// week, "typed this week" is the week you are living in and "still unchecked from
-// before it" is exactly what the step's question asks about.
-// The lists this step COULD ask about: the same `list_type = 'custom'` allowlist the read
-// below applies, lifted out so the setting that rules them in and out is offered over
-// exactly the same set. A switch for the grocery list would be a switch that does
-// nothing, because grocery could never have been asked about in the first place.
+// The age anchor is the household's CURRENT week start, not the week being planned: the
+// planned week is always today or later, so anchoring there filters nothing at all. The
+// lists this step COULD ask about — the same allowlist the read below applies, lifted out
+// so the setting is offered over exactly the same set.
 export interface PlanningListCandidate {
   id: string
   name: string
@@ -350,19 +297,16 @@ async function staleListItems(
     id: r.id,
     title: r.name,
     emoji: r.emoji,
-    // A LIST HAS NO OWNER. `list_items.created_by` records who typed the row, which is
-    // provenance rather than ownership — rendering it in an owner slot would teach the
-    // wrong thing about what the column means.
+    // A LIST HAS NO OWNER. `list_items.created_by` is provenance, not ownership.
     ownerId: null,
     detail: `on ${r.list_name}`,
     actions: ['done'] as LooseEndAction[],
   }))
 }
 
-// Rhythms past due, straight off the rhythms module's own attention query — the one
-// place that knows how period boundaries tile ("Today passes a one-day window, the
-// weekly planner passes a week"). The horizon here is today: a rhythm that is not late
-// yet is not a loose end, it is next week's problem.
+// Rhythms past due, straight off the rhythms module's own attention query — the one place
+// that knows how period boundaries tile. The horizon is today: a rhythm not late yet is
+// next week's problem.
 async function rhythmsPastDue(householdId: string, today: string): Promise<SourceEnd[]> {
   const attention = await listAttention(householdId, today)
   const out: SourceEnd[] = []
@@ -388,8 +332,8 @@ async function rhythmsPastDue(householdId: string, today: string): Promise<Sourc
         emoji: item.rhythm.emoji,
         ownerId: item.rhythm.personId,
         detail: 'Nothing booked for this period',
-        // "It's done already" on an unbooked period means the period is settled —
-        // which in the rhythms module is a period skip, not a completion.
+        // "It's done already" on an unbooked period means the period is settled — in the
+        // rhythms module, a skip.
         actions: ['done'],
       })
     }
@@ -397,9 +341,8 @@ async function rhythmsPastDue(householdId: string, today: string): Promise<Sourc
   return out.slice(0, PER_SOURCE_LIMIT)
 }
 
-// Habit goals short for the week. `periodDone` is the goals module's own read of the
-// CURRENT period (distinct days logged), so nothing is recomputed here — see the
-// "goal display axis" rule: a habit is this period's count, never a lifetime total.
+// `periodDone` is the goals module's read of the CURRENT period — a habit is this
+// period's count, never a lifetime.
 async function shortHabits(householdId: string): Promise<SourceEnd[]> {
   const goals = await listGoals(householdId)
   return goals
@@ -413,7 +356,7 @@ async function shortHabits(householdId: string): Promise<SourceEnd[]> {
       title: g.title,
       emoji: g.emoji,
       // ONE participant and a per-person basis ⇒ it is theirs. A family habit belongs to
-      // everybody, and naming one of them as its owner would be worse than an empty slot.
+      // everybody.
       ownerId: g.targetBasis !== 'family' && g.participants?.length === 1
         ? (g.participants[0] as { personId: string }).personId
         : null,
@@ -422,9 +365,7 @@ async function shortHabits(householdId: string): Promise<SourceEnd[]> {
     }))
 }
 
-// ---------------------------------------------------------------------------
-// "Parked" · the one group with a table
-// ---------------------------------------------------------------------------
+// ─── "Parked" · the one group with a table ─────────────────────────────────
 
 export interface ParkedItem {
   id: string
@@ -476,8 +417,8 @@ export async function listParked(householdId: string): Promise<LooseEnd[]> {
   return rows.map((r) => {
     const bits = [r.parker ? `Parked by ${r.parker}` : 'Parked', agoLabel(Number(r.age_days))]
     const passed = Number(r.passed_over)
-    // The line has to earn the "Drop it" underneath it: a note three sessions have
-    // walked past is the strongest argument that it was never really a thing.
+    // The line has to earn the "Drop it" underneath it: a note three sessions have walked
+    // past was never really a thing.
     if (passed > 0) bits.push(passed === 1 ? 'passed over once' : `passed over ${passed} times`)
     return {
       key: `parked:${r.id}`,
@@ -485,11 +426,10 @@ export async function listParked(householdId: string): Promise<LooseEnd[]> {
       id: r.id,
       title: r.note,
       emoji: null,
-      // The byline ('Parked by Kevin · 2 weeks ago') is already in `detail`.
       owner: null,
       detail: bits.join(' · '),
-      // 'done' is "Talk about it now" — two minutes and it is settled here; 'drop' is
-      // the answer only this group can take, because the note exists nowhere else.
+      // 'done' is "Talk about it now"; 'drop' is the answer only this group can take,
+      // because the note exists nowhere else.
       actions: ['done', 'drop'] as LooseEndAction[],
     }
   })
@@ -498,14 +438,13 @@ export async function listParked(householdId: string): Promise<LooseEnd[]> {
 export interface ParkInput {
   note?: unknown
   // Optional tag naming the step that should ACT on this note — always a destination,
-  // never the step that wrote it. Step 1's capture bar leaves it null; routing a parked
-  // note sets it to the step that will handle it; step 3 ("Horizon scan") sets it when
-  // somebody parks against a tag, and writes the SAME values, so a consumer can't tell
-  // the two producers apart. Validated against the server-owned catalog so a typo can't
-  // Step 10 reads a null tag as "nobody said yet".
+  // never the step that wrote it. Step 1's capture bar leaves it null; routing sets it;
+  // step 3 sets it when somebody parks against a tag, writing the SAME values so
+  // consumers can't tell the producers apart. Step 10 reads a null tag as "nobody said
+  // yet".
   stepKey?: unknown
-  // The session it was parked during, if any. Optional, and the row survives that
-  // session being discarded (on delete set null) — see the migration.
+  // The session it was parked during, if any. The row survives that session being
+  // discarded (on delete set null).
   sessionId?: unknown
 }
 
@@ -515,10 +454,9 @@ export type ParkResult =
 
 const MAX_NOTE = 500
 
-// Park a note. Step 1's capture bar writes here ("Drop something new on the board —
-// one line is enough"), and so does step 3, which parks from the month view with a
-// `stepKey`. The table and this function are deliberately general so a later surface
-// can write to them without a migration or a change to this file.
+// Park a note. Step 1's capture bar writes here, and so does step 3 from the month view.
+// The table and this function are deliberately general so a later surface needs no
+// migration.
 export async function parkItem(tenant: Tenant, input: ParkInput): Promise<ParkResult> {
   const note = typeof input.note === 'string' ? input.note.trim() : ''
   if (!note) return { ok: false, status: 400, error: 'BadRequest', message: 'a parked item needs a note' }
@@ -550,9 +488,7 @@ export async function parkItem(tenant: Tenant, input: ParkInput): Promise<ParkRe
   return { ok: true, item: toParked(rows[0]) }
 }
 
-// ---------------------------------------------------------------------------
-// Routes — the cross-step contract
-// ---------------------------------------------------------------------------
+// ─── Routes — the cross-step contract ──────────────────────────────────────
 
 const isRoute = (v: unknown): v is LooseEndRoute => {
   if (!v || typeof v !== 'object') return false
@@ -560,9 +496,8 @@ const isRoute = (v: unknown): v is LooseEndRoute => {
   return typeof r.kind === 'string' && typeof r.id === 'string' && typeof r.to === 'string'
 }
 
-// Read what step 1 has routed in this session. Later steps get the same array off the
-// session view (`steps.find(s => s.key === 'looseEnds').data.routes`) and never call
-// this — it exists so step 1's own read is self-contained.
+// Later steps get the same array off the session view; this exists so step 1's own read
+// is self-contained.
 export async function listRoutes(sessionId: string): Promise<LooseEndRoute[]> {
   const { rows } = await query<{ data: { routes?: unknown } | null }>(
     `select data from planning_session_steps where session_id = $1 and step_key = 'looseEnds'`,
@@ -573,9 +508,8 @@ export async function listRoutes(sessionId: string): Promise<LooseEndRoute[]> {
 }
 
 // Replace the whole array on the step's `data`, preserving any other key the shell put
-// there. Single-driver by design (v4 dropped the lobby and join code), so a
-// read-modify-write here is safe; `planning_sessions.driver_person_id` is the seam if
-// that ever stops being true.
+// there. Single-driver by design, so a read-modify-write is safe; `driver_person_id` is
+// the seam if that changes.
 async function writeRoutes(sessionId: string, routes: LooseEndRoute[]): Promise<void> {
   await query(
     `insert into planning_session_steps (session_id, step_key, status, data, decided_at)
@@ -607,13 +541,11 @@ export type RouteResult =
 const KINDS: LooseEndKind[] = ['chore', 'list', 'rhythm', 'goal', 'parked']
 const GROUPS: LooseEndGroup[] = ['notDone', 'parked']
 
-// Route an item to the step that will handle it — or un-route it (`to: null`), which
-// is what the undo trail under the card calls.
+// Route an item to the step that will handle it — or un-route it (`to: null`), which the
+// undo trail under the card calls.
 //
-// THIS WRITES NOTHING TO ANY MODULE. The overdue chore stays overdue, the unchecked
-// item stays unchecked; all that changes is which step will be looking at it. The one
-// exception is a PARKED note, whose `step_key` is set here — that column names the step
-// a note belongs to, and this is the other half of what it is for.
+// THIS WRITES NOTHING TO ANY MODULE; all that changes is which step will be looking at
+// the item. The one exception is a PARKED note, whose `step_key` is set here.
 export async function routeLooseEnd(tenant: Tenant, input: RouteInput): Promise<RouteResult> {
   const bad400 = (message: string): RouteResult => ({ ok: false, status: 400, error: 'BadRequest', message })
 
@@ -628,7 +560,6 @@ export async function routeLooseEnd(tenant: Tenant, input: RouteInput): Promise<
 
   const routes = (await listRoutes(session.id)).filter((r) => !(r.kind === kind && r.id === id))
 
-  // Undo: drop the entry, and give a parked note its tag back.
   if (input.to === null || input.to === undefined) {
     await writeRoutes(session.id, routes)
     if (kind === 'parked') await setParkedStepKey(tenant.householdId, id, null)
@@ -653,18 +584,12 @@ export async function routeLooseEnd(tenant: Tenant, input: RouteInput): Promise<
 
 // IS THIS A STEP A NOTE MAY BE ADDRESSED TO? One answer, two callers — `routeLooseEnd`
 // and `updateParkedItem` — because a tag set by editing must be exactly as restricted as
-// one set by routing. If editing were looser you could tag a note for a step the
-// household has turned off, and the gold box that raises it would never fire.
+// one set by routing. Returns the sentence to refuse with, or null when the step is fair.
 //
-// Returns the sentence to refuse with, or null when the step is a fair destination.
-// WHICH TRAILS QUOTE THIS NOTE. Not "the current session" — sessions are per WEEK and
-// several can be open at once (planning the week after next does not close this week's),
-// so "the active one" is not a thing. What is a thing is the set of trails that would be
-// left saying something the note no longer says, and jsonb containment asks exactly that.
-//
-// Completed sessions are excluded: their record is what the family decided that evening
-// and stands as history. The recap reads parked notes through the table itself, so a
-// finished trail quoting old words misleads nobody.
+// WHICH TRAILS QUOTE THIS NOTE. Not "the current session": sessions are per WEEK and
+// several can be open at once, so the query asks for every open trail that would be left
+// saying something the note no longer says. Completed sessions are excluded — their
+// record is what the family decided that evening and stands as history.
 async function sessionsQuoting(householdId: string, id: string): Promise<string[]> {
   const { rows } = await query<{ session_id: string }>(
     `select ss.session_id
@@ -696,18 +621,16 @@ async function setParkedStepKey(householdId: string, id: string, stepKey: string
   return !!rowCount
 }
 
-// ---------------------------------------------------------------------------
-// Editing a note that is already parked
-// ---------------------------------------------------------------------------
+// ─── Editing a note that is already parked ─────────────────────────────────
 
 export interface UpdateParkedInput {
-  // ABSENT MEANS "LEAVE IT ALONE", for both fields — which is why they are read for
-  // PRESENCE rather than for truthiness. `stepKey: null` is a real answer ("No tag") and
-  // has to be tellable from "I'm only fixing the words".
+  // ABSENT MEANS "LEAVE IT ALONE" for both fields, which is why they are read for
+  // PRESENCE: `stepKey: null` is a real answer ("No tag") and has to be tellable from
+  // "only fixing the words".
   note?: unknown
   stepKey?: unknown
-  // The session being planned, when there is one. Not required — see below — and used
-  // for one thing only: keeping this session's route trail agreeing with the tag.
+  // The session being planned, if any. Used for one thing: keeping its route trail
+  // agreeing with the tag.
   sessionId?: unknown
 }
 
@@ -718,35 +641,21 @@ export type UpdateParkedResult =
 /**
  * Fix a parked note's words, or re-address it to a different step.
  *
- * 0101's own comment says "editing a parked note is not a thing the step offers — a note
- * is written once and then answered". That was the shape of the table, not a law, and it
- * stopped being true the moment somebody typed a note with a typo in it or reached for
- * the wrong tag chip: "parked in this session — I have no way to edit the item or change
- * the category and I should." Dropping the note and re-typing it was the only repair, and
- * a drop is supposed to MEAN something ("it was never really a thing").
- *
  * THE COLUMN IS THE EASY HALF. A tag lives in two places at once whenever step 1 put it
  * there: `planning_parked_items.step_key`, and a `{ kind:'parked', id, title, to }` entry
  * on the looseEnds step's `data.routes` (see `routeLooseEnd`). Change one without the
- * other and the note's badge says Meals while step 1's trail says Tasks — worse than not
- * being able to edit at all. So:
+ * other and the note's badge says Meals while step 1's trail says Tasks. So:
  *
- *   · the words change      → the route entry's `title`, which QUOTED them, changes too
- *   · the tag moves         → the route entry's `to` moves with it
- *   · the tag is cleared    → the route entry is RETIRED, which is exactly what
- *                             `routeLooseEnd`'s undo branch does, so "clear the tag" and
- *                             "undo the routing" converge on one state
- *   · there is no entry     → nothing is written to the session. A note parked from step
- *                             3's bar carries a tag and no route, and inventing one here
- *                             would manufacture a state parking itself can never produce.
+ *   · the words change   → the route entry's `title`, which QUOTED them, changes too
+ *   · the tag moves      → the route entry's `to` moves with it
+ *   · the tag is cleared → the route entry is RETIRED, converging with `routeLooseEnd`'s undo
+ *   · there is no entry  → nothing is written to the session; inventing an entry would
+ *                          manufacture a state parking itself can never produce
  *
- * `sessionId` is OPTIONAL because the gold box is not session-scoped (`parkedByStep`
- * reads every open note, including one from three Sundays ago), so a surface that shows a
- * note need not know which session is running. WITHOUT ONE THE TRAIL IS STILL REPAIRED —
- * `sessionsQuoting` finds every OPEN session whose trail names this note and fixes each,
- * which is the invariant stated directly rather than guessed at. (There is no such thing
- * as "the" current session: sessions are per week and several can be open at once.) A
- * named session is repaired too even if it holds no entry, and is the one echoed back.
+ * `sessionId` is OPTIONAL because the gold box is not session-scoped. Without one the
+ * trail is still repaired: `sessionsQuoting` finds every OPEN session whose trail names
+ * this note. A named session is repaired even if it holds no entry, and is the one echoed
+ * back.
  */
 export async function updateParkedItem(
   tenant: Tenant,
@@ -760,8 +669,8 @@ export async function updateParkedItem(
   const touchTag = input.stepKey !== undefined
   if (!touchNote && !touchTag) return bad400('nothing to change')
 
-  // Same cap and same trim as `parkItem`: an edit must not be able to store a note the
-  // bar could never have parked.
+  // Same cap and trim as `parkItem`: an edit must not store a note the bar could never
+  // have parked.
   let note: string | null = null
   if (touchNote) {
     if (typeof input.note !== 'string') return bad400('a parked item needs a note')
@@ -777,8 +686,8 @@ export async function updateParkedItem(
     stepKey = input.stepKey as string
   }
 
-  // `status = 'open'` for the same reason every other write here checks it: a note that
-  // has been talked through or dropped is answered, and answered is not editable.
+  // `status = 'open'`: a note that has been talked through or dropped is answered, and
+  // answered is not editable.
   const { rows } = await query<ParkedRow>(
     `update planning_parked_items
         set note = coalesce($3::text, note),
@@ -790,15 +699,14 @@ export async function updateParkedItem(
   const row = rows[0]
   if (!row) return { ok: false, status: 404, error: 'NotFound', message: 'loose end not found' }
 
-  // The other half of the tag. Scoped to the session we were handed — the same shape as
-  // `resolveLooseEnd`'s `retire()` — and never hunting through other sessions, whose
-  // trails record what THEY decided at the time.
+  // The other half of the tag, scoped to the session we were handed — the same shape as
+  // `resolveLooseEnd`'s `retire()`.
   const named =
     typeof input.sessionId === 'string' && UUID_RE.test(input.sessionId)
       ? (await getSessionById(tenant.householdId, input.sessionId))?.id ?? null
       : null
-  // The caller's own session first (so the trail it is about to re-render is repaired
-  // even when it holds no entry yet), then every other open trail that quotes the note.
+  // The caller's own session first (its trail is repaired even when it holds no entry),
+  // then every other open trail.
   const targets = new Set(named ? [named] : [])
   for (const s of await sessionsQuoting(tenant.householdId, id)) targets.add(s)
 
@@ -807,8 +715,8 @@ export async function updateParkedItem(
     const current = await listRoutes(sessionId)
     const entry = current.find((r) => r.kind === 'parked' && r.id === id)
     let next = current
-    // NO ENTRY, NO WRITE. A note parked with a tag from step 3's bar has a `step_key` and
-    // no route, and inventing one here would manufacture a state parking cannot produce.
+    // NO ENTRY, NO WRITE — inventing one would manufacture a state parking itself cannot
+    // produce.
     if (entry) {
       next =
         touchTag && row.step_key === null
@@ -825,11 +733,8 @@ export async function updateParkedItem(
   return { ok: true, item: toParked(row), routes }
 }
 
-// ---------------------------------------------------------------------------
-// The read
-// ---------------------------------------------------------------------------
+// ─── The read ──────────────────────────────────────────────────────────────
 
-// Friendly names for the cleared state's "we checked…" line, in read order.
 const SOURCE_LABELS: [ModuleKey, string][] = [
   ['chores', 'chores'],
   ['lists', 'lists'],
@@ -845,12 +750,9 @@ export async function getLooseEnds(householdId: string, weekStart: string, sessi
     availableDestinations(householdId),
   ])
   // Which lists count is a second gate BEHIND the module toggle: the module being on says
-  // the household keeps lists, and this says which of them this step is about. Only asked
-  // when the module is on, so a household with lists off pays nothing for the setting.
-  //
-  // The CANDIDATES and the ASKABLE ones are kept apart because the sources line below
-  // needs to tell "this household has no custom lists yet" from "this household ruled
-  // them all out" — the first is vacuous, the second is the setting being used.
+  // the household keeps lists, this says which of them the step is about. CANDIDATES and
+  // ASKABLE are kept apart because the `sources` line below must tell "no custom lists
+  // yet" (vacuous) from "ruled them all out" (the setting being used).
   const listCandidates = enabled(settings, 'lists') ? await planningListCandidates(householdId) : []
   const askableLists = listCandidates.filter((l) => l.relevant).map((l) => l.id)
   const [chores, lists, rhythms, goals, parked, routes, people] = await Promise.all([
@@ -862,9 +764,8 @@ export async function getLooseEnds(householdId: string, weekStart: string, sessi
     sessionId ? listRoutes(sessionId) : Promise.resolve([]),
     peopleById(householdId),
   ])
-  // Chores first, then what's still open on the lists, then the slow-burning
-  // maintenance, then the habits: roughly most-urgent to least, which is the order the
-  // deck walks.
+  // Chores, lists, slow-burning maintenance, then habits: most-urgent to least, the order
+  // the deck walks.
   const notDone = withOwners([...chores, ...lists, ...rhythms, ...goals], people)
   return {
     weekStart,
@@ -873,14 +774,9 @@ export async function getLooseEnds(householdId: string, weekStart: string, sessi
     counts: { notDone: notDone.length, parked: parked.length },
     destinations,
     routes,
-    // "We checked chores, lists, rhythms and goals" — the cleared state's own sentence,
-    // and it has to be true. A household that ruled every one of its lists out was not
-    // asking about lists, so claiming they were checked would be telling the user
-    // something untrue to keep a sentence tidy.
-    //
-    // Having NO custom lists is not that case: the sentence is vacuous rather than false,
-    // and it is what this line has always said. Only a household that used the setting
-    // loses the word.
+    // "We checked chores, lists, rhythms and goals" has to be true: a household that
+    // ruled every list out was not asking about lists. Having NO custom lists is vacuous
+    // rather than false, so it keeps the word.
     sources: SOURCE_LABELS
       .filter(([k]) => enabled(settings, k)
         && (k !== 'lists' || listCandidates.length === 0 || askableLists.length > 0))
@@ -889,19 +785,15 @@ export async function getLooseEnds(householdId: string, weekStart: string, sessi
   }
 }
 
-// ---------------------------------------------------------------------------
-// The two answers that write
-// ---------------------------------------------------------------------------
+// ─── The two answers that write ────────────────────────────────────────────
 
 export interface ResolveInput {
   kind?: unknown
   id?: unknown
   action?: unknown
-  // Optional, and it exists to keep the routes contract honest: an item that has been
-  // settled must not stay in `data.routes`, or a later step would render a row for a
-  // chore its own module already considers done. Given a session, the item's route
-  // entry is retired here. Absent (a resolve from outside a session) there is nothing
-  // to retire.
+  // Keeps the routes contract honest: a settled item must not stay in `data.routes`, or a
+  // later step would render a row its own module considers done. Given a session, its
+  // route entry is retired here.
   sessionId?: unknown
 }
 
@@ -911,8 +803,8 @@ export type ResolveResult =
 
 const ACTIONS: LooseEndAction[] = ['done', 'drop']
 
-// Which optional module owns each kind. `parked` has none — it is ours, and it is the
-// only kind that needs no second gate.
+// Which optional module owns each kind. `parked` has none — it is ours, and needs no
+// second gate.
 const OWNER: Record<LooseEndKind, ModuleKey | null> = {
   chore: 'chores',
   list: 'lists',
@@ -926,9 +818,8 @@ const missing = (): ResolveResult => ({ ok: false, status: 404, error: 'NotFound
 const wrongAction = (kind: string, action: string): ResolveResult =>
   ({ ok: false, status: 400, error: 'BadRequest', message: `a ${kind} cannot be resolved with "${action}"` })
 
-// The exceptions to "step 1 changes nothing": "It's done already" (`done`) and, for a
-// parked note only, "Drop it" (`drop`). Both are writes into the thing that owns the
-// item — the module for a computed one, our own table for a note.
+// The exceptions to "step 1 changes nothing": `done`, and `drop` on a parked note. Both
+// write into the owner.
 export async function resolveLooseEnd(tenant: Tenant, input: ResolveInput): Promise<ResolveResult> {
   const kind = KINDS.find((k) => k === input.kind)
   if (!kind) return bad('kind must be one of chore, list, rhythm, goal, parked')
@@ -937,22 +828,20 @@ export async function resolveLooseEnd(tenant: Tenant, input: ResolveInput): Prom
   if (typeof input.id !== 'string' || !UUID_RE.test(input.id)) return bad('id must be a uuid')
   const id = input.id
   if (action === 'drop' && kind !== 'parked') {
-    // Dropping a computed item would mean deleting another module's data, which is
-    // exactly what routing exists to avoid.
+    // Dropping a computed item would mean deleting another module's data, which is what
+    // routing exists to avoid.
     return wrongAction(kind, 'drop')
   }
 
-  // The module gate, again. `moduleRoutes('weeklyPlanning')` says only that planning is
-  // on; it says nothing about chores or goals, and a session that could write into a
-  // module the household turned off would be a hole straight through the toggle.
+  // `moduleRoutes('weeklyPlanning')` says only that planning is on, so without this a
+  // session could write into a disabled module.
   const owner = OWNER[kind]
   if (owner && !enabled(await householdSettings(tenant.householdId), owner)) {
     return { ok: false, status: 403, error: 'Forbidden', message: `The ${owner} module is not enabled` }
   }
 
-  // A settled item is finished, so it stops being routed anywhere. Doing this on the
-  // WRITE side rather than asking every consumer to re-check four modules is the whole
-  // reason the routes array is a decision log and not a queue.
+  // A settled item stops being routed anywhere. Doing it on the WRITE side is why routes
+  // is a decision log, not a queue.
   const retire = async (): Promise<ResolveResult> => {
     if (typeof input.sessionId === 'string' && UUID_RE.test(input.sessionId)) {
       const session = await getSessionById(tenant.householdId, input.sessionId)
@@ -979,8 +868,8 @@ export async function resolveLooseEnd(tenant: Tenant, input: ResolveInput): Prom
   }
 }
 
-// Each helper returns a ResolveResult only when something went wrong; null means "the
-// module took the write" and the caller reports success.
+// Each helper returns a ResolveResult only on failure; null means the module took the
+// write.
 
 async function resolveChore(tenant: Tenant, id: string): Promise<ResolveResult | null> {
   const { rows } = await query<{ id: string }>(
@@ -991,9 +880,8 @@ async function resolveChore(tenant: Tenant, id: string): Promise<ResolveResult |
   try {
     return (await completeInstance(tenant, id)) ? null : missing()
   } catch (err) {
-    // A chore that wants photo proof can't be completed from here — there is no camera
-    // in a planning session. The read already withholds the answer for these; this is
-    // the honest reply when something asks anyway.
+    // No camera in a planning session. The read withholds the answer; this is the honest
+    // reply if something asks anyway.
     if (err instanceof ProofRequiredError) {
       return { ok: false, status: 400, error: 'ProofRequired', message: 'this chore needs a photo — complete it on the Tasks board' }
     }
@@ -1016,10 +904,9 @@ async function resolveRhythm(tenant: Tenant, id: string): Promise<ResolveResult 
   }
 
   // A scheduling rhythm is satisfied by an event existing, so "it's done already" on an
-  // unbooked period means the period is settled — a skip. skipPeriod validates the
-  // boundary hard and a date that is not one silences nothing while still reporting
-  // success, so the period start is re-derived from the rhythms module's own tiling and
-  // never taken from a client, whose idea of the boundary may be a render old.
+  // unbooked period is a skip. The period start is re-derived from the rhythms module's
+  // own tiling and never taken from a client, whose boundary may be a render old —
+  // `skipPeriod` reports success on a non-boundary date while silencing nothing.
   const today = await todayLocal(tenant.householdId)
   const attention = await listAttention(tenant.householdId, today)
   const item = attention.find((a) => a.kind === 'unscheduled' && a.rhythm.id === id)
@@ -1036,16 +923,13 @@ async function resolveGoal(tenant: Tenant, id: string): Promise<ResolveResult | 
     [tenant.householdId, id]
   )
   if (!rows[0]) return missing()
-  // One, against the household (no person) — the same amount a habit tick is worth
-  // anywhere else. `source` says where it came from so the goal's activity feed can
-  // tell a planning catch-up from a tap on the card.
+  // One, against the household — what a habit tick is worth anywhere else. `source` marks
+  // it as a planning catch-up.
   await logProgress(tenant, id, 1, [null], null, { source: 'weekly_planning' })
   return null
 }
 
 async function resolveParked(tenant: Tenant, id: string, action: LooseEndAction): Promise<ResolveResult | null> {
-  // 'done' is the card's "Talk about it now" — two minutes in the session and the note
-  // is answered. 'drop' is "it was never really a thing".
   const status = action === 'done' ? 'resolved' : 'dropped'
   const { rowCount } = await query(
     `update planning_parked_items

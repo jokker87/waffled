@@ -3,18 +3,14 @@ import { MemoryRouter, Routes, Route } from 'react-router'
 import { StepErrorBoundary } from './StepErrorBoundary'
 import { WeeklyPlanning } from '../WeeklyPlanning'
 
-// Ten steps are built independently, so one of them WILL throw at some point. The claim
-// this file defends is that it costs you that step and nothing else: the counter, the
-// agenda sheet and both footer controls keep working, so you can skip past it or jump
-// elsewhere. Without this, the route-level ScreenBoundary would replace the whole
-// planning screen and strand you.
+// A throwing step must cost you that step and nothing else: counter, agenda sheet and both
+// footer controls keep working. Without this the route-level ScreenBoundary strands you.
 
 function Boom(): never {
   throw new Error('step body exploded')
 }
 
-// The registry is the shell/step seam, so making a step throw is the honest way to
-// simulate a broken step — no shell code is stubbed out.
+// The registry is the shell/step seam, so making a step throw simulates a broken step honestly.
 vi.mock('./registry', async (orig) => {
   const actual = await orig<typeof import('./registry')>()
   return {
@@ -71,11 +67,9 @@ describe('a step body that throws', () => {
     )
 
     expect(await screen.findByText(/Calendar didn't load/)).toBeTruthy()
-    // The chrome — the whole point.
     expect(screen.getByRole('button', { name: /2 of 2/ })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Skip this step' })).toBeTruthy()
     expect(screen.getByRole('button', { name: /Looks right/ })).toBeTruthy()
-    // …and the title still says which step you're on.
     expect(screen.getByText('Calendar')).toBeTruthy()
     err.mockRestore()
   })

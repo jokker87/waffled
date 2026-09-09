@@ -1,12 +1,9 @@
 // Weekly Planning · step 10 "Recap" — read the week back, then it's over.
 //
-// THIS STEP STORES NOTHING: no recap table, no snapshot, no title or id copied at
-// decision time. Every line is resolved on read out of the module that owns the
-// decision, so a decision undone elsewhere changes the line instead of making the
-// record lie. Session-relative counts come from provenance (`created_at >=
-// started_at`), never from the step crumbs, which the shell clears on step change.
-// The full rationale, the grouping, and the three things that only look like
-// decisions: docs/product/weekly-planning-plan.md § "The recap stores nothing".
+// THIS STEP STORES NOTHING: every line is resolved on read out of the module that owns
+// the decision, so a decision undone elsewhere changes the line instead of making the
+// record lie. Session-relative counts come from provenance (`created_at >= started_at`).
+// Full rationale: docs/product/weekly-planning-plan.md § "The recap stores nothing".
 import { query } from '../../../platform/db'
 import { moduleEnabled, type ModuleKey } from '../../../platform/modules'
 import { visibleTo } from '../../events/events'
@@ -18,30 +15,23 @@ import { getGoalsStepView } from './goals'
 import { getFamilyNightBoard } from './familyNight'
 import { listParked } from './looseEnds'
 
-// A day column shows this many events before it reports the rest as a remainder. The
-// strip is seven fixed columns beside two cards: a day that grows without a cap is the
-// Horizon bug again (a grid child whose content pushes it past its box and paints over
-// whatever is under it).
+// Capped because an uncapped column grows past its grid box and paints over the card
+// under it.
 const DAY_CAP = 4
-// How many items a group line names before it stops. The line is a sentence, not a list.
 const DETAIL_CAP = 6
 // The last call is a prompt, not an inbox. `listParked` itself caps at 200.
 const LAST_CALL_CAP = 6
-// Meal-plan mirrors: planning a dinner writes a real event with the household on it, so
-// anything reading `events` naively reports the meal plan twice. The same exclusion
-// meals.ts, kids.ts and goal-calendar.ts already make.
+// Meal-plan mirrors: planning a dinner writes a real event, so anything reading `events`
+// naively reports the meal plan twice. The exclusion meals/kids/goal-calendar make too.
 const MIRROR_ORIGINS = ['meal_plan', 'meal_prep']
 
 export interface RecapDay {
   date: string
-  // The dinner planned for that night, or null. Null when the meals module is off too —
-  // a household that doesn't plan meals gets a week of events, not a row of blanks.
+  // Null when the meals module is off too — a week of events, not a row of blanks.
   meal: string | null
   cook: string | null
-  // `personId` + `participantIds` + `personColor` are the inputs the CLIENT's own
-  // `eventColor` needs, so the week strip is tinted by the same rule as the month view
-  // (family colour when the event covers the household, the owner's colour otherwise).
-  // The colour itself is deliberately not resolved here — see NightEvent.
+  // The inputs the CLIENT's own `eventColor` needs, so the week strip is tinted by the
+  // same rule as the month view. The colour is deliberately not resolved here.
   events: {
     id: string
     title: string
@@ -51,30 +41,22 @@ export interface RecapDay {
     personColor: string | null
     participantIds: string[]
   }[]
-  // Events beyond DAY_CAP, so the column can say "+2 more" without growing.
   more: number
 }
 
 export interface RecapGroup {
-  // The module the decisions live in — the client's react key and its ordering.
   key: string
   label: string
-  // The tally: what the week says now, and what this session changed.
   headline: string
-  // The decisions themselves, named. ' · ' separated, composed here so web and iOS
-  // read the same sentence.
   detail: string
-  // How many decisions this group holds. The header's one number is the sum of these.
   count: number
-  // Where you go to change it. The client links the row there.
   stepKey: string | null
 }
 
 export interface RecapLastCall {
   id: string
   note: string
-  // "Parked by Kevin · 2 weeks ago · passed over 3 times" — composed by listParked, so
-  // this line reads identically in step 1's deck and here.
+  // Composed by listParked, so this line reads identically in step 1's deck and here.
   detail: string | null
 }
 
@@ -90,30 +72,24 @@ export interface RecapLeftAlone {
 
 export interface RecapView {
   weekStart: string
-  // The session's finish time, or null while it is still being decided. The shell owns
-  // the saved screen; this is here so any surface reading the record can date it.
   savedAt: string | null
   days: RecapDay[]
   groups: RecapGroup[]
   lastCall: RecapLastCall[]
   lastCallMore: number
   leftAlone: RecapLeftAlone[]
-  // The receipt's three numbers. Derived from the arrays above on every read — never
-  // stored, never added up on the client, so the header and the cards cannot disagree.
+  // Derived on every read — never stored, never added up on the client, so the header
+  // and the cards cannot disagree.
   counts: { decisions: number; deferred: number; parked: number }
 }
 
-// ---------------------------------------------------------------------------
-// Small shared bits
-// ---------------------------------------------------------------------------
+// ─── Small shared bits ─────────────────────────────────────────────────────
 
 const WD = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 const weekdayOf = (iso: string) => WD[new Date(`${iso.slice(0, 10)}T00:00:00Z`).getUTCDay()]
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
 const join = (bits: (string | null | undefined)[]) => bits.filter(Boolean).join(' · ')
 
-// "Saturday 8:00 PM" / "Saturday, all day" — household-local, the same reading
-// connection.ts gives an event's `when`.
 function whenLabel(at: Date | string, allDay: boolean, tz: string): string {
   const d = new Date(at)
   const day = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'long' }).format(d)
@@ -131,25 +107,16 @@ const householdRow = async (householdId: string) => {
 
 const stepTitle = (key: string) => STEPS.find((s) => s.key === key)?.title ?? key
 
-// ---------------------------------------------------------------------------
-// Provenance: what THIS session changed
-// ---------------------------------------------------------------------------
+// ─── Provenance: what THIS session changed ─────────────────────────────────
 
 interface AddedEvent { id: string; title: string; when: string }
 
-// Events added since the session started, still alive, that land in the planned week.
-//
-// PROVENANCE, NOT A COPY. `created_at >= started_at` answers "did this appear during
-// the session?" every time it is asked, so deleting the event takes the line away with
-// it — where a count written down at decision time would go on claiming it forever.
-//
-// It credits anything added during the session window, including from another screen.
-// That is the deliberate trade: the alternative (a crumb) is wrong more often and in a
-// worse way (it silently forgets), and "added while you were planning" is still a true
-// sentence about the week.
-//
-// Recurring events are matched through their occurrences as well as their own start,
-// because a weekly thing added on Sunday for Tuesdays has no `starts_at` in the week.
+// PROVENANCE, NOT A COPY. `created_at >= started_at` answers "did this appear during the
+// session?" every time it is asked, so deleting the event takes the line away with it,
+// where a count written down at decision time would claim it forever. It credits
+// anything added during the window, including from another screen — the deliberate
+// trade against a crumb, which silently forgets. Recurring events are matched through
+// their occurrences too: a weekly thing added on Sunday for Tuesdays has no `starts_at`.
 async function eventsAddedSince(
   householdId: string,
   since: string,
@@ -181,8 +148,7 @@ async function eventsAddedSince(
   return rows.map((r) => ({ id: r.id, title: r.title, when: whenLabel(r.starts_at, r.all_day, tz) }))
 }
 
-// Dinners planned during the session, by night. Same provenance rule on
-// meal_plan_entries: un-plan the night and the line goes with it.
+// Same provenance rule on meal_plan_entries: un-plan the night and the line goes too.
 async function dinnersPlannedSince(householdId: string, since: string, weekStart: string): Promise<{ date: string; title: string | null }[]> {
   const { rows } = await query<{ date: string | Date; title: string | null }>(
     `select e.date, coalesce(r.title, m.name, e.title) as title
@@ -203,9 +169,8 @@ async function dinnersPlannedSince(householdId: string, since: string, weekStart
   return rows.map((r) => ({ date: typeof r.date === 'string' ? r.date.slice(0, 10) : r.date.toISOString().slice(0, 10), title: r.title }))
 }
 
-// Rhythms settled during the session — a completion logged, or a period deliberately
-// skipped. Both are step 1's "It's done already" landing in the rhythms module, and
-// both carry their own `created_at`, so both are provenance rather than bookkeeping.
+// Both a completion and a deliberate skip carry their own `created_at`, so both are
+// provenance rather than bookkeeping.
 async function rhythmsSettledSince(householdId: string, since: string): Promise<string[]> {
   const { rows } = await query<{ title: string }>(
     `select r.title
@@ -223,17 +188,12 @@ async function rhythmsSettledSince(householdId: string, since: string): Promise<
   return rows.map((r) => r.title)
 }
 
-// ---------------------------------------------------------------------------
-// The parking lot
-// ---------------------------------------------------------------------------
+// ─── The parking lot ───────────────────────────────────────────────────────
 
 // Which open notes nobody has tagged. Two reads on purpose: `listParked` composes the
-// history line ("Parked by Kevin · 2 weeks ago · passed over 3 times") and this says
-// which rows are untagged — so the sentence is step 1's, not a second version of it.
-//
+// history line and this says which rows are untagged, so the sentence stays step 1's.
 // `step_key` is always a DESTINATION step, never the step that wrote the note (see
-// 0101's comment), so "untagged" is exactly "nobody has said which step will look at
-// this" — which is what the last call is for.
+// 0101), so "untagged" is exactly "nobody has said which step will look at this".
 async function parkedKeys(householdId: string): Promise<Map<string, string | null>> {
   const { rows } = await query<{ id: string; step_key: string | null }>(
     `select id, step_key from planning_parked_items where household_id = $1 and status = 'open'`,
@@ -242,21 +202,15 @@ async function parkedKeys(householdId: string): Promise<Map<string, string | nul
   return new Map(rows.map((r) => [r.id, r.step_key]))
 }
 
-// ---------------------------------------------------------------------------
-// The read
-// ---------------------------------------------------------------------------
+// ─── The read ──────────────────────────────────────────────────────────────
 
-// One group's definition: which module has to be on for it to exist, and which step
-// owns it (where a row links to, and whose "done with nothing to show" becomes a
-// left-alone row).
+// Which module has to be on for a group to exist, and which step owns it.
 interface GroupSpec {
   key: string
   stepKey: string
   requires?: ModuleKey
 }
 const GROUP_SPECS: GroupSpec[] = [
-  // Three steps write events; one group, because one place is where you'd go to change
-  // any of them.
   { key: 'calendar', stepKey: 'calendar' },
   { key: 'meals', stepKey: 'meals', requires: 'meals' },
   { key: 'tasks', stepKey: 'tasks', requires: 'chores' },
@@ -269,18 +223,16 @@ export async function getRecap(tenant: Tenant, weekStart: string, session: Sessi
   const householdId = tenant.householdId
   const { settings, tz } = await householdRow(householdId)
   const on = (k: ModuleKey) => moduleEnabled(settings, k)
-  // No session ⇒ nothing has been decided, so every provenance window is empty. The
-  // week strip still reads, which is what makes the step renderable before a session
-  // exists (the same courtesy horizon.ts extends its park bar).
+  // No session ⇒ every provenance window is empty. The week strip still reads, which is
+  // what makes the step renderable before a session exists.
   const since = session?.startedAt ?? null
 
   const steps = await resolveSteps(householdId, session?.id ?? null)
   const byKey = new Map(steps.map((s) => [s.key, s]))
 
   const [week, tasks, goals, night, kids, parked, parkedTags] = await Promise.all([
-    // The seven columns come from the MEALS step's own read: it is the one place that
-    // already buckets a household-local day and drops the meal-plan mirrors. A second
-    // week read here would be the thing to drift.
+    // The seven columns come from the MEALS step's own read: the one place that already
+    // buckets a household-local day and drops the mirrors. A second read would drift.
     mealsStepView(tenant, weekStart),
     on('chores') ? getTasksBoard(householdId, weekStart) : null,
     on('goals') && session ? getGoalsStepView(tenant, session.id) : null,
@@ -318,7 +270,6 @@ export async function getRecap(tenant: Tenant, weekStart: string, session: Sessi
   const groups: RecapGroup[] = []
   const leftAlone: RecapLeftAlone[] = []
 
-  // ── Calendar ───────────────────────────────────────────────────────────────
   const weekEvents = week.nights.reduce((n, d) => n + d.events.length, 0)
   if (addedEvents.length) {
     groups.push({
@@ -331,7 +282,6 @@ export async function getRecap(tenant: Tenant, weekStart: string, session: Sessi
     })
   }
 
-  // ── Meals + Lists ──────────────────────────────────────────────────────────
   if (mealsOn) {
     const planned = 7 - week.emptyDates.length
     const trip = week.shopping
@@ -357,19 +307,16 @@ export async function getRecap(tenant: Tenant, weekStart: string, session: Sessi
     }
   }
 
-  // ── Chores + Rhythms ───────────────────────────────────────────────────────
   if (tasks) {
-    // A chore is a decision when it has BOTH an owner and a day in the week — the
-    // step's own question ("who's doing what?") answered. A carried-over one-off counts:
-    // it arrives in the week without belonging to a day in it, and somebody owns it.
+    // A chore is a decision when it has BOTH an owner and a day in the week. A carried-over
+    // one-off counts: it arrives without belonging to a day in the week, and somebody owns it.
     const owned = tasks.people.flatMap((p) => p.chores.filter((c) => c.days.length > 0 || c.carriedOver))
     const grabs = tasks.unassigned.filter((c) => c.days.length > 0 || c.carriedOver).length
     const count = owned.length + rhythms.length
     if (count) {
       groups.push({
         key: 'tasks',
-        // Only claims the modules it actually read. With rhythms off there is no rhythm
-        // line and the label must not promise one.
+        // With rhythms off there is no rhythm line, and the label must not promise one.
         label: on('rhythms') ? 'Chores + Rhythms' : 'Chores',
         headline: join([
           `${plural(owned.length, 'task')} with an owner and a day`,
@@ -383,11 +330,9 @@ export async function getRecap(tenant: Tenant, weekStart: string, session: Sessi
     }
   }
 
-  // ── Goals ──────────────────────────────────────────────────────────────────
   if (goals) {
     // `settled` is THIS session's answer. A group carrying `focusGoalId` without it is
-    // showing an already-featured goal so nobody re-picks it — a flag we found, not a
-    // decision, and counting it would star a tab nobody opened.
+    // showing an already-featured goal so nobody re-picks it — a flag, not a decision.
     const withFocus = goals.groups.filter((g) => g.settled && g.focusGoalId)
     const noFocus = goals.groups.filter((g) => g.settled && !g.focusGoalId)
     if (withFocus.length) {
@@ -403,8 +348,6 @@ export async function getRecap(tenant: Tenant, weekStart: string, session: Sessi
         stepKey: 'goals',
       })
     }
-    // "Nothing this week" is an ANSWER — the design's own example of a deliberate
-    // non-answer ("Lottie needed no goal focus").
     for (const g of noFocus) {
       leftAlone.push({
         key: `goal:${g.listId}`,
@@ -419,17 +362,13 @@ export async function getRecap(tenant: Tenant, weekStart: string, session: Sessi
     }
   }
 
-  // ── Family Night ───────────────────────────────────────────────────────────
   if (night) {
-    // Two different skips, and only one row. Calling the GATHERING off (the occurrence)
-    // and skipping the STEP are independent — do both and this card would say "Family
-    // night" twice and count it twice in `deferred`. The step's own skip wins, because
-    // the loop below already renders it.
+    // Calling the GATHERING off and skipping the STEP are independent; do both and this
+    // card would say "Family night" twice and count it twice in `deferred`. The step's own
+    // skip wins, because the loop below already renders it.
     if (night.status === 'skipped' && byKey.get('familyNight')?.status !== 'skipped') {
-      // Called off, and that is all it says. The rotation is positional — it counts
-      // occurrences, not who actually did what — so a skipped week does NOT hold
-      // anybody's turn, and a line promising it would be a promise the software can't
-      // keep (see familyNight.ts).
+      // The rotation is positional — it counts occurrences, not who did what — so a skipped
+      // week does NOT hold anybody's turn (see familyNight.ts).
       leftAlone.push({
         key: 'familyNight:skipped',
         label: stepTitle('familyNight'),
@@ -449,8 +388,6 @@ export async function getRecap(tenant: Tenant, weekStart: string, session: Sessi
           headline: join([`${weekdayOf(night.date)} ${night.time}`, night.theme]),
           detail: join([
             ...pinned.slice(0, DETAIL_CAP).map((p) => `${p.label} · ${p.personName}`),
-            // Named as unsettled rather than as a decision: the rotation suggests these,
-            // nobody chose them, and nothing is written down.
             rotating ? `${plural(rotating, 'part')} left on rotation` : null,
           ]),
           count: pinned.length,
@@ -460,7 +397,6 @@ export async function getRecap(tenant: Tenant, weekStart: string, session: Sessi
     }
   }
 
-  // ── Kids ───────────────────────────────────────────────────────────────────
   if (kids.length) {
     groups.push({
       key: 'kids',
@@ -472,10 +408,8 @@ export async function getRecap(tenant: Tenant, weekStart: string, session: Sessi
     })
   }
 
-  // ── Left alone on purpose ──────────────────────────────────────────────────
   // A SKIPPED step is a decision and belongs on the record. A PENDING one is simply
-  // unreached, and an unavailable one was never part of this household's session — so
-  // neither appears at all.
+  // unreached, and an unavailable one was never part of this household's session.
   for (const s of steps) {
     if (!s.available || s.key === 'recap') continue
     if (s.status !== 'skipped') continue
@@ -488,10 +422,8 @@ export async function getRecap(tenant: Tenant, weekStart: string, session: Sessi
     })
   }
 
-  // A step ANSWERED whose group turned out to hold nothing: read, and left as it stood.
-  // Only checked for steps that have a group — for the three that don't (intake, the
-  // horizon scan, connection) there is no honest way to say "nothing changed", so
-  // nothing is said.
+  // Only checked for steps that HAVE a group — for intake, the horizon scan and connection
+  // there is no honest way to say "nothing changed", so nothing is said.
   const has = new Set(groups.map((g) => g.key))
   for (const spec of GROUP_SPECS) {
     if (has.has(spec.key)) continue
@@ -508,15 +440,11 @@ export async function getRecap(tenant: Tenant, weekStart: string, session: Sessi
     })
   }
 
-  // Notes tagged for a step that will look at them: deferred on purpose, and named by
-  // where they are going rather than counted as a loss.
   const tagged = new Map<string, number>()
   for (const key of parkedTags.values()) if (key) tagged.set(key, (tagged.get(key) ?? 0) + 1)
   for (const [key, n] of tagged) {
     const s = byKey.get(key)
-    // A note whose step has already gone by in this session (or isn't running at all)
-    // waits for the next session — which is precisely the design's "parked for next
-    // Sunday". One that is still ahead is waiting at that step.
+    // A note whose step has gone by (or isn't running) waits for the next session.
     const passed = !s?.available || s.status !== 'pending'
     leftAlone.push({
       key: `parked:${key}`,
@@ -527,7 +455,6 @@ export async function getRecap(tenant: Tenant, weekStart: string, session: Sessi
     })
   }
 
-  // ── The last call ──────────────────────────────────────────────────────────
   const untagged = parked.filter((p) => parkedTags.get(p.id) === null)
   const lastCall = untagged.slice(0, LAST_CALL_CAP).map((p) => ({ id: p.id, note: p.title, detail: p.detail }))
 
@@ -547,8 +474,6 @@ export async function getRecap(tenant: Tenant, weekStart: string, session: Sessi
   }
 }
 
-// What "answered, and nothing came of it" means per group — a real outcome in the
-// design's words, not an apology for an empty list.
 const NOTHING_CHANGED: Record<string, string> = {
   calendar: 'Read back as it stands — nothing was added',
   meals: 'Nothing new planned tonight, and no shopping trip claimed',
@@ -558,19 +483,14 @@ const NOTHING_CHANGED: Record<string, string> = {
   kids: 'Nobody was read back tonight',
 }
 
-// ---------------------------------------------------------------------------
-// Kids
-// ---------------------------------------------------------------------------
+// ─── Kids ──────────────────────────────────────────────────────────────────
 
-// The kids' two answers, read out of the KIDS step's own `data.kids` — which is where
-// they live: they refer to a goal, a chore or free text, so the answer itself has no
-// module row of its own.
+// Read out of the KIDS step's own `data.kids`: the answers refer to a goal, a chore or
+// free text, so they have no module row of their own.
 //
-// Deliberately NOT `getKidsStepView`: that builds every card's option lists (four
-// modules, the reward ledger, the week's events) to hand back the same two fields, and
-// it does not drop an answer whose referent has gone — the label is a snapshot by
-// design. Joining `persons` here is what keeps the line honest instead: a child who has
-// left the household stops being read back.
+// Deliberately NOT `getKidsStepView`: that builds every card's option lists to hand back
+// the same two fields, and it keeps an answer whose referent has gone. Joining `persons`
+// here is what stops a child who has left the household being read back.
 async function kidsReadBack(householdId: string, sessionId: string): Promise<{ name: string; line: string }[]> {
   const { rows } = await query<{ data: { kids?: unknown } | null }>(
     `select data from planning_session_steps where session_id = $1 and step_key = 'kids'`,
@@ -579,8 +499,7 @@ async function kidsReadBack(householdId: string, sessionId: string): Promise<{ n
   const raw = rows[0]?.data?.kids
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return []
   const answers = raw as Record<string, { focus?: { label?: unknown } | null; forward?: { label?: unknown } | null }>
-  // Both halves, or it isn't a read-back — half an answer is not the thing they'll
-  // remember (the kids step's own `settled` rule).
+  // Both halves, or it isn't a read-back (the kids step's own `settled` rule).
   const settled = Object.entries(answers).filter(
     ([, v]) => typeof v?.focus?.label === 'string' && typeof v?.forward?.label === 'string'
   )
@@ -600,9 +519,7 @@ async function kidsReadBack(householdId: string, sessionId: string): Promise<{ n
 
 // The crumb the recap hands the session record when the week is saved.
 //
-// INTEGERS ONLY, and that is the whole of the pointer rule applied to storage: the
-// receipt may freeze how MANY decisions were made tonight — a statement about the
-// session, which stays true forever — but never WHAT they were, because the things
-// themselves are pointers and the modules own them. A title stored here is a copy that
-// starts going stale the moment somebody edits it.
+// INTEGERS ONLY: the receipt may freeze how MANY decisions were made tonight — a
+// statement about the session, which stays true — but never WHAT they were, because the
+// modules own those. A title stored here goes stale the moment somebody edits it.
 export const recapCrumb = (v: RecapView) => ({ counts: v.counts })

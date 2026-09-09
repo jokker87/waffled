@@ -3,27 +3,20 @@ import Testing
 import UniformTypeIdentifiers
 @testable import Waffled
 
-// Weekly Planning · step 8 (Tasks).
+// Weekly Planning · step 8 (Tasks). Two things here are worth more than the rest:
 //
-// TWO THINGS HERE ARE WORTH MORE THAN THE REST:
-//
-//  1. A reassignment is TWO writes, not one — the chore PATCH plus an assign for EVERY
-//     entry in `pendingInstanceIds`. Miss the second half and the move "doesn't stick",
-//     because the Chores board keeps showing the old name for days already behind us.
-//     And the take-back direction must send an EXPLICIT null: a PATCH with the key left
-//     out means "change nothing", so `if let personId` would make it a silent no-op.
-//  2. The verb this step lends the shell's parked-note banner must report `false` when
-//     the composer is cancelled. Settling the note on a cancel throws away the only
-//     record that the thing still needs doing.
+//  1. A reassignment is TWO writes — the chore PATCH plus an assign for EVERY entry in
+//     `pendingInstanceIds`. Miss the second half and the move "doesn't stick". The take-back
+//     direction must send an EXPLICIT null: a PATCH with the key left out means "change
+//     nothing", so `if let personId` would make it a silent no-op.
+//  2. The verb this step lends the shell's parked-note banner must report `false` when the
+//     composer is cancelled, or the only record that the thing still needs doing is lost.
 
 private enum PlanningTasksFailure: Error { case rejected }
 
 // MARK: - The board, VERBATIM off the wire
-//
 // Field-for-field what `getTasksBoard` returns and what
-// `apps/api/test/weekly-planning-tasks.integration.test.ts` asserts against: the fixture
-// household (Kevin the owner, Wally and Lottie), a recurring weekly chore with two open
-// instances, a carried-over one-off, and one task nobody has taken.
+// `apps/api/test/weekly-planning-tasks.integration.test.ts` asserts against.
 private let boardJSON = Data("""
 {
   "weekStart": "2026-09-06",
@@ -65,7 +58,7 @@ private func decodedBoard() throws -> WaffledAPI.PlanningTasksBoard {
     try WaffledAPI.decoder.decode(WaffledAPI.PlanningTasksBoard.self, from: boardJSON)
 }
 
-/// One card, decoded — the fixtures are built the way the app gets them rather than by a
+/// One card, decoded — fixtures are built the way the app gets them rather than by a
 /// memberwise initializer, so a wire-shape change breaks the test too.
 private func chore(_ json: String) throws -> WaffledAPI.PlanningTasksChore {
     try WaffledAPI.decoder.decode(WaffledAPI.PlanningTasksChore.self, from: Data(json.utf8))
@@ -132,8 +125,7 @@ private func model(_ feed: TasksBoardFeed) -> PlanningTasksModel {
         #expect(plan.choreId == "c-trash")
         #expect(plan.patch == ["personId": .string("p-lottie")])
         // ALL of them, not just the first. `updateChore` only cascades from today
-        // forward, so the days already behind us have to be moved by hand — and this is
-        // the half that gets forgotten, which is why a reassignment "doesn't stick".
+        // forward, so the days already behind us have to be moved by hand.
         #expect(plan.instanceIds == ["i-trash-mon", "i-trash-thu"])
         #expect(plan.personId == "p-lottie")
     }
@@ -169,7 +161,6 @@ private func model(_ feed: TasksBoardFeed) -> PlanningTasksModel {
         var reported: Bool?
         model.beginHandoff(note: "book the sitter") { reported = $0 }
 
-        // It opens the strip's own composer — nobody prefilled — seeded with the note.
         guard case let .add(personId, note)? = model.composer else {
             Issue.record("the handoff didn't open the add composer")
             return
@@ -178,13 +169,12 @@ private func model(_ feed: TasksBoardFeed) -> PlanningTasksModel {
         #expect(note == "book the sitter")
         #expect(reported == nil, "nothing has been decided yet")
 
-        // Closed without saving.
         let saved = model.composerDismissed()
 
         #expect(saved == false)
         // THE POINT: settling the note here would throw away the only record that the
-        // thing still needs doing, on the strength of somebody opening a box and
-        // closing it again.
+        // thing still needs doing, on the strength of somebody opening a box and closing
+        // it again.
         #expect(reported == false)
         #expect(feed.saves.isEmpty)
     }
@@ -219,10 +209,9 @@ private func model(_ feed: TasksBoardFeed) -> PlanningTasksModel {
         let error = await model.saveFromComposer(choreId: nil, body: [:])
 
         // A message rather than nil, so the sheet stays open and says why instead of
-        // dismissing on a silent failure.
+        // dismissing.
         #expect(error != nil)
         #expect(reported == nil)
-        // …and if the reader then gives up, the note is still unfinished.
         #expect(model.composerDismissed() == false)
         #expect(reported == false)
     }
@@ -253,17 +242,13 @@ private func model(_ feed: TasksBoardFeed) -> PlanningTasksModel {
         #expect(model.loaded)
     }
 
-    // A FAILED HAND-OUT RE-READS THE BOARD, and this test used to assert the opposite.
+    // A FAILED HAND-OUT RE-READS THE BOARD. Handing a chore over is TWO writes (the chore
+    // definition, then each pending instance), so a throw from the second leaves the
+    // first already applied — "nothing moved" is not a premise this can rely on.
     //
-    // It expected `fetchCount == 1` — no refetch — on the premise that a failure means
-    // nothing moved. That premise is false: handing a chore over is TWO writes (the chore
-    // definition, then each pending instance), so a throw from the second leaves the first
-    // already applied. The old expectation, the old comment and the old message shown to
-    // the user all asserted the same falsehood, which is why the board kept a stale column.
-    //
-    // The tally still does NOT move: it counts what this session decided, and a half-landed
-    // write decided nothing. Only the board is re-read, because only the server knows which
-    // half took.
+    // The tally still does NOT move: it counts what this session decided, and a
+    // half-landed write decided nothing. Only the board is re-read, because only the
+    // server knows which half took.
     @Test func aFailedHandOutRereadsTheBoardAndTalliesNothing() async throws {
         let feed = TasksBoardFeed(try decodedBoard())
         feed.handOutFails = true
@@ -350,7 +335,6 @@ private func model(_ feed: TasksBoardFeed) -> PlanningTasksModel {
         // A one-off dated outside the week still says which day it is for.
         #expect(PlanningTasksFormat.dayChip(try card(cadence: "once", dueOn: "2026-09-21")) == "Sep 21")
         #expect(PlanningTasksFormat.dayChip(try card(cadence: "once")) == "No day set")
-        // Midnight is a time, and noon is pm.
         #expect(PlanningTasksFormat.shortTime("00:00") == "12am")
         #expect(PlanningTasksFormat.shortTime("12:05") == "12:05pm")
         #expect(PlanningTasksFormat.shortTime(nil) == "")
@@ -389,8 +373,8 @@ private func model(_ feed: TasksBoardFeed) -> PlanningTasksModel {
         #expect(instance.choreTitle == "Take out the trash")
         // The column IS the assignee — a chore's "Who" is not on the board payload.
         #expect(instance.personId == "p-wally")
-        // An INT, because the DTO decodes rewardAmount with `(try? Int.self) ?? 0`:
-        // encoding a double would decode as zero, and Save would then wipe the reward.
+        // An INT, because the DTO decodes rewardAmount with `(try? Int.self) ?? 0`: a
+        // double would decode as zero, and Save would then wipe the reward.
         #expect(instance.rewardAmount == 3)
         #expect(instance.rewardCurrency == "stars")
         #expect(instance.rrule == "FREQ=WEEKLY;BYDAY=MO,TH")
@@ -413,8 +397,7 @@ private func model(_ feed: TasksBoardFeed) -> PlanningTasksModel {
     @Test func aFractionalRewardSurvivesTheBridgeAsAWholeNumber() throws {
         let sitter = try #require(try decodedBoard().unassigned.first)
         let instance = try #require(sitter.asChoreInstance(owner: nil))
-        // 1.5 stars is not a thing any household has, but it must not decode as 0 —
-        // which is what an unrounded double would do.
+        // 1.5 stars is not a thing any household has, but it must not decode as 0.
         #expect(instance.rewardAmount == 2)
     }
 
@@ -433,11 +416,9 @@ private func model(_ feed: TasksBoardFeed) -> PlanningTasksModel {
     }
 
     // ── Dragging a card onto a person ───────────────────────────────────────────
-    //
-    // Drag is an ADDITION to tapping a face, never a replacement — reaching for a drag
-    // is not a gesture everybody can make. So a drop resolves to the very same hand-out:
-    // `give` stays the one path both directions travel, or a drop could do something a
-    // tap can't undo.
+    // Drag is an ADDITION to tapping a face, never a replacement, so a drop resolves to
+    // the very same hand-out: `give` stays the one path both directions travel, or a drop
+    // could do something a tap can't undo.
 
     @Test func aDropResolvesAgainstTheBoardRatherThanTheGestureThatStartedIt() async throws {
         let feed = TasksBoardFeed(try decodedBoard())
@@ -465,7 +446,6 @@ private func model(_ feed: TasksBoardFeed) -> PlanningTasksModel {
         #expect(feed.handOuts.map(\.choreId) == ["c-sitter"])
         #expect(feed.handOuts.map(\.personId) == ["p-wally"])
         #expect(model.assigned == 1)
-        // Re-read rather than bookkeeping — a column is the WEEK, and the server owns it.
         #expect(feed.fetchCount == 2)
     }
 
@@ -479,7 +459,7 @@ private func model(_ feed: TasksBoardFeed) -> PlanningTasksModel {
 
         #expect(wrote)
         // EVERY MOVE IS REVERSIBLE by the same gesture that made it, or drag would be a
-        // one-way door the 🙌 has to clean up after.
+        // one-way door.
         #expect(feed.handOuts.map(\.personId) == [String?.none])
         #expect(model.assigned == 0)
     }
@@ -490,11 +470,10 @@ private func model(_ feed: TasksBoardFeed) -> PlanningTasksModel {
         await model.load(weekStart: "2026-09-06")
 
         // Wally's card, dropped on Wally. `give` tallies UNCONDITIONALLY, so letting this
-        // through would spend a PATCH *and* inflate `assigned` — the crumb the recap
-        // reports — for a gesture that moved nothing.
+        // through would spend a PATCH *and* inflate `assigned` for a gesture that moved
+        // nothing.
         let onOwner = await model.drop(choreId: "c-trash", onto: .person("p-wally"),
                                        weekStart: "2026-09-06")
-        // Same in the strip: a card nobody has, dropped back where it already is.
         let onStrip = await model.drop(choreId: "c-sitter", onto: .upForGrabs,
                                        weekStart: "2026-09-06")
 
@@ -523,9 +502,8 @@ private func model(_ feed: TasksBoardFeed) -> PlanningTasksModel {
     }
 
     @Test func theDragPayloadIsNotTextSoItCannotBePastedIntoAField() throws {
-        // A `.draggable(String)` payload is accepted by EVERY TextField in the app —
-        // this bit us on the recipe ingredient rows, where the dragged id got pasted in
-        // as text. Conforming to public.data means only this step's drop targets take it.
+        // A `.draggable(String)` payload is accepted by EVERY TextField in the app.
+        // Conforming to public.data means only this step's drop targets take it.
         #expect(UTType.waffledPlanningTask.identifier == "app.waffled.planning-task")
         #expect(!UTType.waffledPlanningTask.conforms(to: .text))
 

@@ -26,9 +26,7 @@ describe('DEFAULT_PERMISSIONS', () => {
       'reward.approve',
       'reward.grant',
       'goal.manage',
-      // Not "run the weekly planning session" — anybody may do that. This is the
-      // household-wide choices the session offers, currently which of your lists its
-      // first step asks about.
+      // Not "run the weekly planning session" — anybody may do that. See lib/api/permissions.ts.
       'planning.manage',
     ])
     expect(DEFAULT_PERMISSIONS.adult['goal.manage']).toBe(true)
@@ -50,7 +48,6 @@ describe('getPermissions', () => {
   it('deep-merges an override cell, leaving everything else at the default', () => {
     const merged = getPermissions({ permissions: { teen: { 'chore.approve': true } } })
     expect(merged.teen['chore.approve']).toBe(true)
-    // siblings untouched
     expect(merged.teen['chore.manage']).toBe(false)
     expect(merged.teen['reward.manage']).toBe(false)
     expect(merged.adult).toEqual(DEFAULT_PERMISSIONS.adult)

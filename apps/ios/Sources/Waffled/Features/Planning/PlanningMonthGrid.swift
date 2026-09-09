@@ -2,24 +2,15 @@ import SwiftUI
 
 // The month grid the Horizon scan draws, and the pure arithmetic behind it.
 //
-// WHY THIS FILE EXISTS AT ALL — and it is the one place this port hand-rolls something.
-// The web step renders the shipped `MonthView` component; iOS's equivalent
-// (`CalendarView.monthCells` / `monthCell`) is `private` to `CalendarView`, and this
-// change may not edit that file. So the grid is COPIED, deliberately down to the numbers:
-// the same 42 cells, the same household-first-day rotation, the same 44pt cell, the same
-// dot row and countdown badge, the same selection ring. It should be EXTRACTED into a
-// shared view and both call sites pointed at it — see the note in the hand-off.
-//
-// The chips-and-"+N more" argument from the web does not port, and it should not: the web
-// caps its month's height and draws two event chips per day because a flex child there
-// SHRINKS to fit there, and squashed chips are worse than none. An iOS cell is a fixed 44pt box
-// with a dot row — there is no chip that can be compressed — and "+N more" is already the whole
-// cell: tapping a day selects it, and the panel underneath lists everything on it. Same
-// behaviour, one fewer thing to get wrong.
+// WHY IT EXISTS — the one place this port hand-rolls something. iOS's equivalent
+// (`CalendarView.monthCells` / `monthCell`) is `private` to a file this change may not
+// edit, so the grid is COPIED, deliberately down to the numbers, and should be EXTRACTED
+// into a shared view. The web's chips-and-"+N more" does not port: an iOS cell is a fixed
+// 44pt box with a dot row, and tapping a day already lists everything on it in the panel
+// underneath.
 
 /// One day cell, fully resolved BEFORE the grid renders. Date maths, day-key formatting
-/// and colour resolution all happen once per month build rather than 42× per render — the
-/// project's "keep date math out of the render path" rule, which matters most here.
+/// and colour resolution happen once per month build rather than 42× per render.
 struct PlanningMonthCell: Identifiable, Equatable, Sendable {
     /// `YYYY-MM-DD`, household-local.
     let key: String
@@ -51,11 +42,9 @@ enum PlanningMonth {
         return "\(names[month - 1]) \(year)"
     }
 
-    /// The month a `YYYY-MM-DD` week start falls in, read off the STRING.
-    ///
-    /// Never through a `Date`: a week start is a calendar label, and parsing it in the
-    /// device's zone is how a household in a negative offset gets the previous month back
-    /// on the 1st. Slicing has no timezone at all.
+    /// The month a `YYYY-MM-DD` week start falls in, read off the STRING. Never through a
+    /// `Date`: a week start is a calendar label, and parsing it in the device's zone is
+    /// how a household in a negative offset gets the previous month back on the 1st.
     static func month(of weekStart: String) -> (year: Int, month: Int)? {
         let parts = weekStart.split(separator: "-")
         guard parts.count >= 2, let y = Int(parts[0]), let m = Int(parts[1]), (1...12).contains(m) else {
@@ -71,7 +60,7 @@ enum PlanningMonth {
     }
 
     /// The 42 cells of the grid, resolved. `eventsByDay` is `SyncManager`'s prebuilt index
-    /// — an O(1) lookup per day rather than 42 scans of every event in the mirror.
+    /// — an O(1) lookup per day rather than 42 scans of the mirror.
     static func cells(
         year: Int,
         month: Int,
@@ -117,8 +106,7 @@ enum PlanningMonth {
 }
 
 /// The grid itself: weekday headings rotated to the household's first day, then 42 cells.
-/// Every cell is a day-select button — the countdown badge is an indicator, not a control,
-/// and tapping the day brings the whole day up in the panel underneath.
+/// Every cell is a day-select button — the countdown badge is an indicator, not a control.
 struct PlanningMonthGrid: View {
     let cells: [PlanningMonthCell]
     let firstDay: HouseholdWeekStart

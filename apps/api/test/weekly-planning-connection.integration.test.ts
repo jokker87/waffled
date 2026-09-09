@@ -1,13 +1,10 @@
 // Weekly Planning · step 5 (Connection) — against a real Postgres (Testcontainers).
 //
-// The step stores nothing and has no write route, so these are two reads that must be
-// true of the real calendar. Three ways it could look right and be wrong:
-//   1. EXACTLY THOSE TWO — an event with them AND someone else is reported separately
-//      (`togetherThisWeek`), not as their time together.
-//   2. A RECURRING one counts. Saturday's yard work lives in event_occurrences, so a
-//      bare `select … from events` would miss it; the fixture creates it through
-//      POST /api/events so a regression that stops reading occurrences fails here.
-//   3. THE SLOTS ARE THE WEEK'S OWN GAPS — never a clock time this file made up.
+// The step stores nothing and has no write route, so these are two reads that must be true of the
+// real calendar. Three ways it could look right and be wrong: an event with them AND someone else
+// must be reported separately (`togetherThisWeek`); a RECURRING one counts, and it lives in
+// event_occurrences, so a bare `select … from events` would miss it; and the slots are the week's
+// own gaps, never a clock time this file made up.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from './helpers/pg'
 import jwt from 'jsonwebtoken'
@@ -31,9 +28,8 @@ function mint(sub: string): string {
   return jwt.sign({}, SECRET, { algorithm: 'HS256', subject: sub, issuer: 'waffled-local', audience: 'waffled-api', expiresIn: '1h' })
 }
 
-// lambda-api reads the query off `queryStringParameters`, NOT off the path — a `?x=y`
-// left in `path` is silently invisible to the handler. Split it here, as the shell's
-// weekly-planning.integration.test.ts does.
+// lambda-api reads the query off `queryStringParameters`, NOT off the path — a `?x=y` left in
+// `path` is silently invisible to the handler.
 function call(method: string, path: string, token?: string, body?: unknown) {
   const headers: Record<string, string> = {}
   if (token) headers.authorization = `Bearer ${token}`
@@ -63,9 +59,9 @@ interface Pairing {
 }
 interface Board { weekStart: string; pairings: Pairing[] }
 
-// The week under test. Deliberately TWO weeks past the session's default so every
-// fixture day is in the future: slots on a day that has already gone by are dropped,
-// and a test whose week straddles "now" would pass or fail depending on the clock.
+// The week under test. Deliberately TWO weeks past the session's default so every fixture day is
+// in the future: slots on a day already gone by are dropped, and a week straddling "now" would
+// pass or fail depending on the clock.
 let week: string
 const day = (i: number) => DateTime.fromISO(week, { zone: TZ }).plus({ days: i }).toISODate()!
 /** An instant on one of the week's days, in the HOUSEHOLD's zone, not the runner's. */
@@ -101,8 +97,7 @@ beforeAll(async () => {
     `insert into identities (household_id, person_id, provider, auth0_user_id, email_verified) values ($1,$2,'password','dev|kevin',true)`,
     [householdId, kevinId]
   )
-  // A pairing needs more than one person. /api/persons doesn't create logins, so seed
-  // them directly (as the Tasks step's test does).
+  // /api/persons doesn't create logins, so the extra people are seeded directly.
   const rest = await query<{ id: string; name: string }>(
     `insert into persons (household_id, name, member_type, sort_order)
      values ($1,'Kelly','adult',1), ($1,'Wally','kid',2), ($1,'Lottie','kid',3) returning id, name`,
@@ -112,11 +107,8 @@ beforeAll(async () => {
   wallyId = rest.rows.find((r) => r.name === 'Wally')!.id
   lottieId = rest.rows.find((r) => r.name === 'Lottie')!.id
 
-  // The session lives behind its own module toggle, like every other planning route.
   expect((await call('PATCH', '/api/household/modules', kevin, { weeklyPlanning: true })).statusCode).toBe(200)
 
-  // Learn the session's default week from the server (never compute one here), then
-  // plan two weeks past it.
   const first = json(await call('GET', '/api/weekly-planning/connection', kevin)) as Board
   week = DateTime.fromISO(first.weekStart, { zone: TZ }).plus({ weeks: 2 }).toISODate()!
 
@@ -127,17 +119,15 @@ beforeAll(async () => {
   await addEvent({ title: 'Scouts', startsAt: at(3, '18:30'), endsAt: at(3, '19:30'), participantIds: [wallyId] })
   // Thu: Kevin is out past the cutoff, so Thursday offers nothing to a pair with him in it.
   await addEvent({ title: 'Late meeting', startsAt: at(4, '19:00'), endsAt: at(4, '22:30'), participantIds: [kevinId] })
-  // Sat: the important one — a WEEKLY series whose people are exactly Kevin and Wally.
-  // Created through the route so the master really expands into event_occurrences.
+  // Sat: a WEEKLY series whose people are exactly Kevin and Wally, created through the route so
+  // the master really expands into event_occurrences.
   await addEvent({
     title: 'Yard work', startsAt: at(6, '13:00'), endsAt: at(6, '15:00'),
     rrule: 'FREQ=WEEKLY;BYDAY=SA', participantIds: [kevinId, wallyId],
   })
-  // A one-person event: an owner and no participants. Never a pairing, whoever else is free.
   await addEvent({ title: 'Haircut', startsAt: at(5, '09:00'), endsAt: at(5, '10:00'), personId: kellyId })
 
   // ── History ─────────────────────────────────────────────────────────────────
-  // The last time it was just the two of them, well before the planned week.
   await addEvent({
     title: 'Date night',
     startsAt: DateTime.fromISO(`${week}T19:00`, { zone: TZ }).minus({ days: 45 }).toISO()!,
@@ -155,9 +145,8 @@ describe('weekly planning · connection', () => {
   it('answers with the week it was asked for, and a pairing for every pair in the house', async () => {
     const b = await board()
     expect(b.weekStart).toBe(week)
-    // Four people ⇒ six pairs. The step DRAWS three; the server ranks them all and lets
-    // the client take the top of the list, so "which three" is a layout decision rather
-    // than something the API quietly decides for both platforms.
+    // Four people ⇒ six pairs. The step DRAWS three; the server ranks them all, so "which three"
+    // is a layout decision rather than something the API decides for both platforms.
     expect(b.pairings).toHaveLength(6)
     expect(find(b, 'Kevin and Kelly').personIds).toEqual([kevinId, kellyId])
   })
@@ -171,8 +160,6 @@ describe('weekly planning · connection', () => {
   it('does not count an event that has a third person on it', async () => {
     const p = find(await board(), 'Kevin and Kelly')
     expect(p.alreadyThisWeek).toHaveLength(0)
-    // …but it is reported, because "you're both there and it still isn't that" is the
-    // most useful thing the row can say.
     expect(p.togetherThisWeek.map((e) => e.title)).toEqual(['Dinner at the Hales'])
   })
 
@@ -199,14 +186,13 @@ describe('weekly planning · connection', () => {
     const kk = find(b, 'Kevin and Kelly')
     expect(kk.lastTogetherOn).toBe(DateTime.fromISO(week, { zone: TZ }).minus({ days: 45 }).toISODate())
     expect(kk.lastTogetherTitle).toBe('Date night')
-    // Nobody else has ever had time alone together, and the row has to be able to say so.
     expect(find(b, 'Kevin and Lottie').lastTogetherOn).toBeNull()
   })
 
   it('ranks the pairings by how long it has been, not by who is on the calendar most', async () => {
     const b = await board()
-    // Never-alone-together outranks 45-days-ago; among the never pairs, the ones the
-    // week already throws together (Monday's dinner) come first.
+    // Never-alone-together outranks 45-days-ago; among those, the ones the week already throws
+    // together come first.
     expect(b.pairings.map((p) => p.who)).toEqual([
       'Kevin and Wally',
       'Kelly and Wally',
@@ -221,22 +207,17 @@ describe('weekly planning · connection', () => {
     const p = find(await board(), 'Kevin and Kelly')
     const byDate = new Map(p.slots.map((s) => [s.date, s]))
 
-    // Sunday has nothing on it: an open day, and NO time — the event modal's own
-    // picker decides that, rather than this file guessing an evening.
+    // Sunday has nothing on it: an open day, and NO time — the event modal's own picker decides.
     expect(byDate.get(day(0))).toMatchObject({ kind: 'open', startsAt: null })
-    // "the chips that are there 'sat open' what does that mean?" — one word carrying
-    // "this day has nothing on it at all", next to a sibling chip that spells its own
-    // meaning out ("Thu after 9:00 PM"). Says what it means now.
+    // One word carrying "nothing on it at all" was unreadable beside "Thu after 9:00 PM".
     expect(byDate.get(day(0))!.label).toBe(`${DateTime.fromISO(day(0)).toFormat('EEE')} · free all day`)
 
-    // Monday's gap opens when Monday's last event ends.
     expect(byDate.get(day(1))).toMatchObject({ kind: 'after', afterTitle: 'Dinner at the Hales' })
     expect(Date.parse(byDate.get(day(1))!.startsAt!)).toBe(Date.parse(at(1, '20:30')))
 
     // Thursday: Kevin is out until 10:30pm. There is no evening left to offer.
     expect(byDate.has(day(4))).toBe(false)
 
-    // A whole free day beats a sliver at the end of a busy one.
     expect(p.slots[0].kind).toBe('open')
   })
 
@@ -244,7 +225,6 @@ describe('weekly planning · connection', () => {
     const p = find(await board(), 'Kevin and Wally')
     const wed = p.slots.find((s) => s.date === day(3))!
     expect(wed.label).toBe(`${DateTime.fromISO(day(3)).toFormat('EEE')} after Scouts`)
-    // The same evening is wide open for a pairing Wally isn't in.
     const kk = find(await board(), 'Kevin and Kelly')
     expect(kk.slots.find((s) => s.date === day(3))!.kind).toBe('open')
   })
@@ -255,7 +235,6 @@ describe('weekly planning · connection', () => {
     const out = json(res) as { weekStart: string; personIds: string[]; slots: Slot[] }
     expect(out.weekStart).toBe(week)
     expect(out.personIds).toEqual([kevinId, wallyId, lottieId]) // household order, not the order typed
-    // Wednesday is Wally's Scouts night for this trio too.
     expect(out.slots.find((s) => s.date === day(3))).toMatchObject({ kind: 'after', afterTitle: 'Scouts' })
   })
 
@@ -267,9 +246,8 @@ describe('weekly planning · connection', () => {
   })
 
   it('runs in a household with the optional modules off — it has no requiresModule', async () => {
-    // The catalog gives `connection` no requiresModule: a household with chores, goals
-    // and meals switched off still has people in it. Pinned here because the neighbouring
-    // steps DO gate on a second module, and copying one of them would break this.
+    // The catalog gives `connection` no requiresModule: a household with everything else off
+    // still has people in it. Pinned because the neighbouring steps DO gate on a second module.
     await call('PATCH', '/api/household/modules', kevin, { chores: false, goals: false, meals: false })
     try {
       expect((await call('GET', `/api/weekly-planning/connection?weekStart=${week}`, kevin)).statusCode).toBe(200)
@@ -290,11 +268,8 @@ describe('weekly planning · connection', () => {
 })
 
 describe('connection · linking a time the two of them already share', () => {
-  // "I want to be able to select an existing event that has both people on it."
-  //
-  // The link is the ANSWER to a pairing, so it has to outlive the render that made it —
-  // but recording it is NOT answering the step. That distinction is the whole of this
-  // block: the same rule the Goals step already follows for its own mid-step write.
+    // The link is the ANSWER to a pairing, so it has to outlive the render that made it — but
+    // recording it is NOT answering the step. Same rule the Goals step follows.
   let sid: string
 
   const link = (links: Record<string, string>, session = sid) =>
@@ -317,10 +292,9 @@ describe('connection · linking a time the two of them already share', () => {
   })
 
   it('does NOT answer the step', async () => {
-    // `status` is what every reader gates on, and a link must not move it. (`decidedAt`
-    // is NOT NULL in this schema, so a row created by a mid-step write does carry a
-    // timestamp it hasn't earned — there is no way to spell "not decided yet". What
-    // matters, and what the next test pins, is that a link never MOVES one.)
+    // `status` is what every reader gates on, and a link must not move it. (`decidedAt` is NOT
+    // NULL here, so a mid-step write carries a timestamp it hasn't earned; what matters is that a
+    // link never MOVES one.)
     const step = await stepRow()
     expect(step.status).toBe('pending')
   })
@@ -339,7 +313,6 @@ describe('connection · linking a time the two of them already share', () => {
     const after = await stepRow()
     expect(after.status).toBe('done')
     expect(after.decidedAt).toBe(before.decidedAt)
-    // …and the crumb the primary wrote is still there beside the new link.
     expect(after.data).toMatchObject({ added: 0, alreadyCounted: 0 })
     expect(after.data.links).toMatchObject({ [`${kevinId}-${wallyId}`]: 'evt-2' })
   })

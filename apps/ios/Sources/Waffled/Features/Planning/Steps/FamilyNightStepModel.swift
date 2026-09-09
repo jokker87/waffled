@@ -2,44 +2,35 @@ import Foundation
 import Observation
 
 // Weekly Planning · step 4 (Family night) — the step's model and its pure formatting.
-//
-// Ported from `apps/web/src/kiosk/planning/steps/FamilyNightStep.tsx`, which keeps the
-// same state in a module-scoped store because its Body and FooterExtra are sibling
-// trees. iOS has no FooterExtra for this step (the seam routes one only for Meals), so
-// the state is an ordinary `@Observable` owned by the view — see FamilyNightStep.swift.
+// Ported from `apps/web/src/kiosk/planning/steps/FamilyNightStep.tsx`.
 //
 // EVERY WRITE IS FOLLOWED BY A RE-READ rather than a local patch: the server owns which
-// parts are on rotation, so guessing here is how this screen and the Today card start
-// naming different people for the same night.
-//
-// A SKIPPED WEEK STILL TAKES ITS TURN. The module's rotation is a COUNT of occurrences
-// and does not exclude skipped ones, so calling a week off moves everybody on a place.
-// That was raised once as a bug and settled the other way as a product call — the skip
-// bar says it out loud rather than letting the rotation shift silently. Do not "fix" it.
+// parts are on rotation. A SKIPPED WEEK STILL TAKES ITS TURN — the rotation is a COUNT
+// of occurrences and does not exclude skipped ones, so calling a week off moves
+// everybody on a place. That is a product call, and the skip bar says it out loud. Do
+// not "fix" it.
 
 // MARK: - Formatting
 
 /// Pure strings, computed ONCE PER LOAD in the model and looked up O(1) by the view —
-/// the project's "keep date math out of the render path" rule. Formatters are
-/// `static let` for the same reason.
+/// the project's "keep date math out of the render path" rule. Formatters are `static
+/// let` likewise.
 enum PlanningFamilyNightFormat {
 
-    /// "2026-09-09" → "Wednesday, Sep 9".
-    ///
-    /// UTC + POSIX on the parse: the gathering's date is a calendar LABEL, and a device
-    /// in a negative offset parsing it in local time gets the 8th back out. (The web
-    /// pins a noon local time for the same reason.)
+    /// "2026-09-09" → "Wednesday, Sep 9". UTC + POSIX on the parse: the gathering's date
+    /// is a calendar LABEL, and a device in a negative offset parsing it locally gets
+    /// the 8th back.
     static func longDate(_ ymd: String) -> String {
         guard let d = isoDay.date(from: ymd) else { return ymd }
         return longDay.string(from: d)
     }
 
-    /// "17:00" → "5:00 PM". Shared with the Today card's own clock so the two surfaces
-    /// say the hour the same way.
+    /// "17:00" → "5:00 PM". Shared with the Today card's clock so the two say the hour
+    /// alike.
     static func clockTime(_ hhmm: String) -> String { FamilyNightFormat.timeLabel(hhmm) }
 
-    /// The line under a part's label — the screen's entire job in one sentence: is this
-    /// the rotation's guess, or did somebody decide?
+    /// The line under a part's label — is this the rotation's guess, or did somebody
+    /// decide?
     static func suggestion(_ part: WaffledAPI.PlanningFamilyNightPart) -> String {
         guard let name = part.personName else { return "nobody yet" }
         return part.pinned
@@ -47,9 +38,9 @@ enum PlanningFamilyNightFormat {
             : "suggested · \(name), next in the rotation"
     }
 
-    /// Placeholders for the three parts every household starts with, keyed by the DEFAULT
-    /// slugs only — a household that renames or adds parts falls through to the generic
-    /// question, built from its own label.
+    /// Placeholders for the three default parts, keyed by the DEFAULT slugs only — a
+    /// household that renames or adds parts falls through to the generic question built
+    /// from its own label.
     static func detailHint(_ part: WaffledAPI.PlanningFamilyNightPart) -> String {
         switch part.partId {
         case "activity": return #"optional — "charades, kids vs parents""#
@@ -59,8 +50,8 @@ enum PlanningFamilyNightFormat {
         }
     }
 
-    /// Step a plain `YYYY-MM-DD` by whole days, in UTC — the week's last day for the
-    /// event picker's range. A date here is a label, never an instant.
+    /// Step a plain `YYYY-MM-DD` by whole days, in UTC. A date here is a label, never an
+    /// instant.
     static func plusDays(_ ymd: String, _ days: Int) -> String {
         guard let d = isoDay.date(from: ymd) else { return ymd }
         return isoDay.string(from: d.addingTimeInterval(Double(days) * 24 * 60 * 60))
@@ -84,13 +75,12 @@ enum PlanningFamilyNightFormat {
 
 // MARK: - The crumb
 
-/// What this sitting DECIDED, for the session record — which parts somebody chose by
-/// hand, and whether the week was called off. NOT a copy of the module: the recap reads
-/// through to familyNight itself for the detail.
+/// What this sitting DECIDED, for the session record. NOT a copy of the module: the
+/// recap reads through to familyNight itself for the detail.
 ///
-/// The keys mirror `planningFamilyNightDecision` on the web VERBATIM, because both
-/// platforms write into the same `weekly_planning_steps.data` and the recap reads back
-/// whatever either one wrote. Divergent keys would break the recap on one platform only.
+/// The keys mirror `planningFamilyNightDecision` on the web VERBATIM — both platforms
+/// write into the same `weekly_planning_steps.data`, so divergent keys break the recap
+/// on one only.
 enum PlanningFamilyNightDecision {
     static func crumb(_ board: WaffledAPI.PlanningFamilyNightBoard?) -> [String: JSONValue] {
         [
@@ -106,7 +96,7 @@ enum PlanningFamilyNightDecision {
 @Observable
 final class PlanningFamilyNightModel {
     /// Every network op is injected as a closure with a `WaffledAPI()`-backed default —
-    /// the test seam this app uses everywhere (see `FamilyNightModel`).
+    /// the test seam this app uses everywhere.
     typealias FetchBoard = (_ weekStart: String) async throws -> WaffledAPI.PlanningFamilyNightBoard
     typealias SaveOccurrence = (_ body: [String: JSONValue]) async throws -> Void
     typealias FetchWeekEvents = (_ from: String, _ to: String) async throws -> [WaffledAPI.PlanningWeekEvent]
@@ -129,18 +119,15 @@ final class PlanningFamilyNightModel {
     /// A write is in flight. Separate from the shell's own `busy`.
     private(set) var busy = false
     /// Bumped on every applied board, so the view knows when to re-hand the shell its
-    /// crumb without diffing a whole board.
+    /// crumb.
     private(set) var rev = 0
 
     // Derived once per load — never recomputed in the render path.
     private(set) var rows: [PartRow] = []
-    /// "every Wednesday".
     private(set) var recurrence = ""
-    /// "Wednesday, Sep 9 · 5:00 PM".
     private(set) var when = ""
 
-    /// The week's events for "Link an event". Fetched only when the picker is opened —
-    /// the way to not pay for a list nobody asked for is to not ask for it.
+    /// The week's events for "Link an event". Fetched only when the picker is opened.
     private(set) var weekEvents: [WaffledAPI.PlanningWeekEvent] = []
     private(set) var weekEventsLoaded = false
 
@@ -170,13 +157,12 @@ final class PlanningFamilyNightModel {
     /// The crumb for the shell, rebuilt from whatever is currently on screen.
     var crumb: [String: JSONValue] { PlanningFamilyNightDecision.crumb(board) }
 
-    /// The gathering's date — what every write is scoped to, and what makes a pin
-    /// "for this week only" true rather than aspirational.
+    /// The gathering's date — what every write is scoped to, and what makes a pin "for
+    /// this week only" true rather than aspirational.
     var date: String? { board?.date }
 
-    /// Read the week. A FAILED fetch keeps the board that was already there (never blank
-    /// a screen that had data) but still counts as loaded, so the step doesn't sit on
-    /// "Reading…" forever.
+    /// Read the week. A FAILED fetch keeps the board that was already there but still
+    /// counts as loaded, so the step doesn't sit on "Reading…" forever.
     func load(weekStart: String) async {
         do {
             apply(try await fetchBoard(weekStart))
@@ -188,11 +174,9 @@ final class PlanningFamilyNightModel {
         loaded = true
     }
 
-    /// Post one of `PlanningFamilyNightBody`'s bodies, then re-read.
-    ///
-    /// A FAILED WRITE DOES NOT REFETCH AND DOES NOT MUTATE: nothing moved, so putting a
-    /// fresh read on screen would only invite the reader to wonder what changed.
-    /// Returns true when the write landed, so the caller knows whether to tell the shell.
+    /// Post one of `PlanningFamilyNightBody`'s bodies, then re-read. A FAILED WRITE DOES
+    /// NOT REFETCH AND DOES NOT MUTATE: nothing moved, so a fresh read would only invite
+    /// the reader to wonder what changed. Returns true when the write landed.
     @discardableResult
     func write(_ body: [String: JSONValue], weekStart: String) async -> Bool {
         guard !busy else { return false }
@@ -206,14 +190,13 @@ final class PlanningFamilyNightModel {
             return false
         }
         // The write landed. A re-read that fails afterwards leaves the previous board up
-        // rather than blanking it — same contract as `load`.
+        // — same contract as `load`.
         if let fresh = try? await fetchBoard(weekStart) { apply(fresh) }
         return true
     }
 
-    /// The week's events, for the picker. Loaded lazily and kept, so re-opening the
-    /// picker doesn't re-fetch. Meal-plan mirrors are dropped: nobody would call a
-    /// dinner family night, and offering one would put a meal where an evening goes.
+    /// The week's events, for the picker. Loaded lazily and kept. Meal-plan mirrors are
+    /// dropped: offering one would put a dinner where an evening goes.
     func loadWeekEvents(weekStart: String) async {
         guard !weekEventsLoaded else { return }
         let last = PlanningFamilyNightFormat.plusDays(weekStart, 6)

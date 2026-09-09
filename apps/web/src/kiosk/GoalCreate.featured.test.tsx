@@ -3,13 +3,9 @@ import { MemoryRouter, Routes, Route } from 'react-router'
 import { GoalCreate } from './GoalCreate'
 import { TopbarSlotProvider, useTopbarSlots } from './topbar-slot'
 
-// `?featured=1` — the one param that pre-picks a tier.
-//
-// Weekly Planning's Goals step sends it when the week's focus doesn't exist yet ("＋ New
-// goal for this week"), so the goal you came here to make comes back already pinned to
-// the group you came from rather than needing a second trip through the picker. It is
-// deliberately narrow and additive: with the param absent, the editor still opens on
-// Normal, which is the tier the app has always defaulted to.
+// `?featured=1` — the one param that pre-picks a tier, sent by Weekly Planning's Goals
+// step so a new goal comes back already pinned. Narrow and additive: with the param
+// absent the editor still opens on Normal.
 
 const lists = [
   {
@@ -26,10 +22,9 @@ const me = { id: 'p1', name: 'Kevin', memberType: 'adult', isAdmin: true, capabi
 
 let posted: Record<string, unknown> | null = null
 
-// `householdDelay` staggers the two independent fetches this editor makes at mount.
-// It is not decoration: with both resolving in the same tick their state updates batch
-// into one render and the "is this list a legal target?" effect never sees a half-loaded
-// viewer — which is precisely how the bug below shipped green.
+// `householdDelay` staggers the editor's two independent mount fetches. Not decoration:
+// resolving both in one tick batches their state updates, so the "is this list a legal
+// target?" effect never sees a half-loaded viewer and the bug below tests green.
 function mockApi(householdDelay = 0, capabilities: string[] = ['goal.manage']) {
   posted = null
   globalThis.fetch = vi.fn(async (url: string, init?: RequestInit) => {
@@ -49,8 +44,7 @@ function mockApi(householdDelay = 0, capabilities: string[] = ['goal.manage']) {
   }) as unknown as typeof fetch
 }
 
-// The editor's Cancel/Create live in the topbar slot, so the harness has to render it
-// — otherwise there is no way to press Create and the POST body goes untested.
+// Cancel/Create live in the topbar slot, so the harness must render it to press Create.
 function Topbar() {
   const { full } = useTopbarSlots()
   return <div data-testid="topbar">{full}</div>
@@ -98,22 +92,15 @@ describe('GoalCreate · ?featured=1', () => {
   })
 })
 
-// Why the group the caller sent wasn't sticking.
-//
-// The editor makes two independent fetches at mount — the goal lists, and the household
-// (which is where the viewer's capabilities live). Whether you may target a *shared*
-// group depends on `goal.manage`, so the effect that neutralizes an illegal `?list=`
-// treats "viewer not loaded yet" as "viewer holds nothing". When the lists win the race,
-// that effect fires against a viewer we simply don't know yet and clears a perfectly
-// legal prefill — permanently, because nothing re-applies the param once the household
-// lands. The gate is now "wait until the household has answered", which is the only
-// moment a capability check can honestly be made.
+// Targeting a *shared* group depends on `goal.manage`, and the effect that neutralizes an
+// illegal `?list=` reads "viewer not loaded yet" as "viewer holds nothing" — so if the
+// lists win the mount race it clears a legal prefill permanently. The gate must be "wait
+// until the household has answered", the only moment a capability check is honest.
 describe('GoalCreate · the ?list= prefill survives the load order', () => {
   it('keeps the group when the household answers after the lists', async () => {
     mockApi(30)
     renderAt('/goals/new?list=l-family&featured=1')
-    // Wait for the viewer to land — before that the chip isn't even offered, because a
-    // capability-less viewer gets no shared groups in the picker.
+    // Before the viewer lands the chip isn't offered at all.
     const chip = await screen.findByRole('button', { name: /Family/ })
     expect(chip).toHaveClass('on')
 
@@ -123,11 +110,8 @@ describe('GoalCreate · the ?list= prefill survives the load order', () => {
     expect(posted).toMatchObject({ goalListId: 'l-family', isFeatured: true })
   })
 
-  // The inverse, and the reason the gate is "wait" and not "skip": a slow household must
-  // DELAY the capability check, never cancel it. Without goal.manage, "Family" is two
-  // people and not this viewer's to assign — so the prefill still has to be thrown away,
-  // just a moment later. The sequence is what proves it: Create goes live while the
-  // viewer is unknown, then dies the instant they turn out not to hold the capability.
+  // Why the gate is "wait" and not "skip": a slow household DELAYS the capability check,
+  // never cancels it, so an illegal prefill is still thrown away — just a moment later.
   it('still clears a group this viewer may not target, once the household says so', async () => {
     mockApi(30, [])
     renderAt('/goals/new?list=l-family&featured=1')
@@ -139,13 +123,9 @@ describe('GoalCreate · the ?list= prefill survives the load order', () => {
   })
 })
 
-// The embedded editor — the same component, no route.
-//
-// Weekly Planning's Goals step renders this inside a modal over the week rather than
-// navigating to /goals/new, because leaving the page abandons the session. `embed` is
-// purely additive: it fixes the group (so the answer can't drift off the tab the family
-// is looking at), reports back instead of navigating, and leaves every route behaviour
-// above untouched.
+// The embedded editor — the same component, no route. Weekly Planning's Goals step renders
+// it in a modal because navigating to /goals/new abandons the session. `embed` fixes the
+// group, reports back instead of navigating, and leaves route behaviour untouched.
 describe('GoalCreate · embedded', () => {
   it('fixes the group, hides the picker, and reports back instead of navigating', async () => {
     const onCreated = vi.fn()
@@ -162,16 +142,13 @@ describe('GoalCreate · embedded', () => {
     expect(locked).toHaveTextContent('Family')
     expect(screen.queryByRole('button', { name: /＋ New group/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^Family/ })).not.toBeInTheDocument()
-    // It never takes over the app topbar — the modal renders the bar itself.
     expect(screen.getByTestId('topbar')).toBeEmptyDOMElement()
-    // …and `featured=1`'s meaning still holds without the URL.
     expect(screen.getByRole('button', { name: /📌 Pinned/ })).toHaveClass('on')
 
     fireEvent.change(screen.getByPlaceholderText('e.g. 750 Hours Outside'), { target: { value: 'Walk after dinner' } })
     fireEvent.click(screen.getByRole('button', { name: 'Create goal' }))
     await waitFor(() => expect(onCreated).toHaveBeenCalled())
     expect(posted).toMatchObject({ title: 'Walk after dinner', goalListId: 'l-family', isFeatured: true })
-    // The route's Cancel is a route concept ("back to /goals") — not offered here.
     expect(screen.queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument()
   })
 })

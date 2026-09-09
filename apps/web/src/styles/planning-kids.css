@@ -1,50 +1,24 @@
 /* Weekly Planning · step 9 — Kids (planning/steps/KidsStep.tsx).
 
-   THE ONE STEP THE KIDS THEMSELVES READ, and every size below follows from that: a
-   nine-year-old and a six-year-old are standing at the board, so the type is bigger
-   than anywhere else in the session and the two cards sit side by side on one screen —
-   no per-kid navigation for a family of two.
+   THE ONE STEP THE KIDS THEMSELVES READ: a nine-year-old and a six-year-old are standing at
+   the board, so the type is bigger than anywhere else in the session and the two cards sit
+   side by side. Built on planning.css's tokens — never hardcode a hex here.
 
-   Built on the same tokens as planning.css, so dark mode comes for free.
-   NEVER hardcode a hex here.
-
-   VOCABULARY
-     Frame   — .wpk .wpk-title .wpk-note
-     Picker  — .wpk-tabs .wpk-tab (.on) .wpk-tab-face .wpk-tab-n  (PHONE ONLY)
-     Card    — .wpk-cards .wpk-card (.on) .wpk-h .wpk-face .wpk-id .wpk-nm .wpk-ag
-               .wpk-stars .wpk-sec .wpk-lab
-     Week    — .wpk-chips .wpk-chip (.late) .wpk-chip-t .wpk-chip-n
-     Focus   — .wpk-opts .wpk-opt (.on .more .wpk-opt-own) .wpk-opt-e .wpk-opt-main .wpk-opt-t
-               .wpk-opt-s .wpk-routed .wpk-opt-num .wpk-num .wpk-den
-     Forward — .wpk-fwd .wpk-fchip (.on .more .wpk-fchip-own)
-     Said    — .wpk-said .wpk-said-e .wpk-said-b .wpk-big .wpk-cap
-     Typing  — .wpk-type .wpk-type-f
-
-   The segmented picker below RESTATES .wpg-tabs / .wpg-tab from planning-goals.css
-   rather than sharing them: the two are meant to be the same control (v4 describes the
-   Goals step as borrowing this one — Goals just shipped first), but a step may only
-   edit its own stylesheet. Promoting it to a shared component is a shell change; see
-   the step's report. Keep the two in step by hand until then.
-
-   Person avatars are the household's real `avatarEmoji` on a tint of their own
-   `colorHex`, the way the Tasks step's .wpt-face does it — there is no shared
-   person-avatar component on web.
-*/
+   The segmented picker below RESTATES .wpg-tabs / .wpg-tab from planning-goals.css rather
+   than sharing them: the two are meant to be one control, but a step may only edit its own
+   stylesheet. Keep them in step by hand until it is promoted to a shared component. */
 
 .wpk { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
 .wpk-note { color: var(--ink-3); font-weight: 600; max-width: 58ch; line-height: 1.55; margin: auto 0; }
 
-/* The kids' NAMES are the heading. The step catalog's title is the word "Kids" and is
-   server-owned, so the names have to live in the body — which is where they belong
-   anyway: this card is addressed to the child standing in front of it. */
+/* The kids' NAMES are the heading — this card is addressed to the child in front of it. */
 .wpk-title {
   font-family: var(--serif); font-size: 22px; font-weight: 600; letter-spacing: -0.02em;
   color: var(--ink); margin: 0;
 }
 
 /* ── The per-kid picker · PHONE ONLY ────────────────────────────────────────── */
-/* On anything wider, both cards are on screen and a picker would be a control that
-   changes nothing. */
+/* On anything wider both cards are on screen, and a picker would change nothing. */
 .wpk-tabs { display: none; }
 .wpk-tab {
   display: inline-flex; align-items: center; gap: 8px;
@@ -74,7 +48,6 @@
   display: grid; place-items: center; font-size: 28px; line-height: 1;
 }
 .wpk-id { flex: 1; min-width: 0; }
-/* Their name, at the size a name deserves when it is the title of the card. */
 .wpk-nm { font-family: var(--serif); font-size: 24px; font-weight: 600; letter-spacing: -0.02em; color: var(--ink); }
 .wpk-ag { margin-top: 1px; font-size: 12.5px; font-weight: 650; color: var(--ink-3); }
 .wpk-stars {
@@ -98,8 +71,7 @@
 }
 .wpk-chip-t { flex: none; font-size: 12px; font-weight: 750; color: var(--ink-3); }
 .wpk-chip-n { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* Still open from before the week. The alarm colour, quietly — a kid reading their own
-   card should notice it without being told off by it. */
+/* Still open from before the week. The alarm colour, quietly. */
 .wpk-chip.late { background: var(--danger-t, var(--panel)); }
 .wpk-chip.late .wpk-chip-t { color: var(--danger); }
 
@@ -116,16 +88,14 @@
 .wpk-opt:hover:not(:disabled) { border-color: var(--line); }
 .wpk-opt:disabled { opacity: 0.55; cursor: default; }
 .wpk-opt.on { border-color: var(--primary); background: var(--primary-t); }
-/* `:hover:not(:disabled)` outscores `.on`, so without this the chosen option loses its
-   border the moment the cursor crosses it. */
+/* `:hover:not(:disabled)` outscores `.on`, so without this the chosen option loses its border
+   the moment the cursor crosses it. */
 .wpk-opt.on:hover:not(:disabled) { border-color: var(--primary); }
-/* The escape hatch. Deliberately the quietest thing in the list and deliberately last:
-   the whole design is that a kid recognises their week rather than invents it. */
+/* The escape hatch. Deliberately the quietest thing in the list and deliberately last. */
 .wpk-opt.more { background: transparent; border-style: dashed; color: var(--ink-3); font-weight: 700; justify-content: center; }
 
-/* Their own words, chosen. It is an ANSWER now, so it takes `.on`'s border and tint
-   rather than `.more`'s dashed grey — but it still has no emoji and no number, so it
-   keeps the escape hatch's centring instead of leaving two empty columns. */
+/* Their own words, chosen: an ANSWER now, so it takes `.on`'s border and tint but keeps the
+   escape hatch's centring. */
 .wpk-opt.wpk-opt-own { justify-content: center; font-weight: 700; }
 
 .wpk-opt-e { flex: none; font-size: 26px; line-height: 1; }
@@ -159,8 +129,7 @@
 .wpk-fchip-n { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ── The read-back ──────────────────────────────────────────────────────────── */
-/* "The part they'll actually remember" — so it gets the weight of a statement, not the
-   weight of a status line. */
+/* A statement, not a status line — "the part they'll actually remember". */
 .wpk-said {
   display: flex; align-items: center; gap: 16px; min-width: 0;
   background: var(--panel); border-radius: var(--r-md); padding: 18px;
@@ -174,10 +143,8 @@
 .wpk-cap { margin-top: 5px; font-size: 12.5px; font-weight: 650; color: var(--ink-3); }
 
 /* ── The escape hatch's form ────────────────────────────────────────────────── */
-/* `.field` is the app's own text control (kiosk.css) — the box, the focus ring and the
-   type size all come from there. This used to be `className="input"`, which is not a
-   class this app defines, so it rendered as a bare browser input with the browser's own
-   blue focus ring sitting next to the app's controls. */
+/* `.field` is the app's own text control (kiosk.css): the box, the focus ring and the ink all
+   come from there, so this never grows a second control next to the app's own. */
 .wpk-type { display: flex; gap: 8px; align-items: center; }
 .wpk-type-f { flex: 1; min-width: 0; padding: 0; }
 .wpk-type-f input { width: 100%; }
@@ -189,8 +156,7 @@
     padding-bottom: 14px; border-bottom: 1px solid var(--hair);
   }
   .wpk-cards { grid-template-columns: 1fr; }
-  /* BOTH cards stay in the DOM — the picker only decides which one is on screen, so
-     nothing is lost (or refetched) by switching, and the desktop layout above is the
-     same markup rather than a second one. */
+  /* BOTH cards stay in the DOM — the picker only decides which is on screen, so the two sizes
+     render the same markup. */
   .wpk-card:not(.on) { display: none; }
 }

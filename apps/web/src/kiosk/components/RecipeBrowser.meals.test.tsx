@@ -5,8 +5,8 @@ import type { Recipe, Meal } from '../../lib/api'
 
 // The picker fills a meal-plan slot. A whole saved plate can go on Tuesday dinner
 // without a builder round-trip (decision 11), so the browser lists saved meals
-// beside recipes — but only when the caller can actually act on one, because the
-// date lives in the caller's closure, not in this component.
+// beside recipes — but only when the caller can act on one, because the date lives
+// in the caller's closure.
 const listMock = vi.fn(async (_q?: string): Promise<Meal[]> => mealsRef.current)
 const mealsRef: { current: Meal[] } = { current: [] }
 
@@ -133,9 +133,9 @@ describe('RecipeBrowser — saved meals in the slot picker', () => {
 })
 
 // `onFreeText` is a render contract, not a passive hook: it grows one more card in
-// the grid, and only while the search box has something in it. It exists so a caller
-// that must be able to plan a dish nobody saved ("Grandma's lasagne") can do it
-// through THIS search box instead of standing a second text field beside it.
+// the grid, and only while the search box has something in it — so a caller that
+// must plan a dish nobody saved can do it through THIS box instead of a second text
+// field beside it.
 describe('RecipeBrowser — planning what was typed', () => {
   const type = (v: string) => fireEvent.change(document.querySelector('.picker-search input')!, { target: { value: v } })
 
@@ -148,7 +148,6 @@ describe('RecipeBrowser — planning what was typed', () => {
   it('offers it only once something is typed, and hands back exactly that', () => {
     const picked: string[] = []
     renderBrowser({ onPick: () => {}, onFreeText: (t) => picked.push(t) })
-    // Nothing typed, nothing offered — the grid is the library.
     expect(screen.queryByText(/plan it as typed/i)).not.toBeInTheDocument()
 
     type("  Grandma's lasagne  ")
@@ -164,7 +163,6 @@ describe('RecipeBrowser — planning what was typed', () => {
   it('replaces the "no recipes" line rather than sitting under it', () => {
     renderBrowser({ recipes: [], onPick: () => {}, onFreeText: () => {} })
     type('zzz')
-    // One answer to "there is nothing here", not two.
     expect(screen.getByText(/plan it as typed/i)).toBeInTheDocument()
     expect(document.querySelector('.picker-empty')).toBeNull()
   })

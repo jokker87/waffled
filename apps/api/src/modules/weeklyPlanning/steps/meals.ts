@@ -1,14 +1,8 @@
 // Weekly Planning · step 7 (Meals) — service logic. Routes in ./meals.routes.ts.
 //
-// THIS STEP STORES NOTHING OF ITS OWN. It is a read over the existing meal plan and
-// the existing grocery board, and its two writes go through the same paths the Meals
-// screen uses. The only thing the session records is a crumb on
-// planning_session_steps.data ("these three nights were auto-filled and can still be
-// undone"), which the client sets — never a copy of the plan.
-//
-// The design's argument for this shape: "Same seven columns as Calendar, so it reads as
-// the same week. Each night shows the events above the dish, because that's the only
-// context that matters here."
+// THIS STEP STORES NOTHING OF ITS OWN: a read over the existing meal plan and grocery
+// board, with both writes going through the paths the Meals screen uses. The session records
+// only a crumb on planning_session_steps.data, which the client sets.
 import { query } from '../../../platform/db'
 import { moduleEnabled } from '../../../platform/modules'
 import { assertRecipeInHousehold } from '../../../platform/household-refs'
@@ -33,31 +27,18 @@ import { createChore, updateChore, softDeleteChore } from '../../chores/chores.s
 import { groceryBoard, rebuildGroceryFromWeek } from '../../lists/lists.service'
 import type { PlanCard } from '../../meals/meals.types'
 
-// The step plans dinners. Breakfast and lunch belong to the Meals screen — a session
-// step that asked about twenty-one slots would be a spreadsheet, not a decision.
+// The step plans DINNERS; a step asking about twenty-one slots would be a spreadsheet.
 const MEAL_TYPE = 'dinner'
 
-// A meal's own mirror event (origin='meal_plan') and its thaw reminder
-// (origin='meal_prep') are the *output* of this plan, so showing them as the night's
-// context would put "Dinner · Pasta bake" directly above the Pasta bake card.
+// A meal's own mirror event and its thaw reminder are the OUTPUT of this plan, so as
+// context they would sit above the card they came from.
 const MIRROR_ORIGINS = new Set(['meal_plan', 'meal_prep'])
 
-// The shopping trip is a REAL chore, so it shows up on the Tasks board as a genuine
-// assignment ("Groceries · from the Meals step · Sat 9am") rather than as a label this
-// step invented. It gets no table and no column of its own — the chore IS the record.
-//
-// WHICH chore, then? Identity is server-side and derived, because a crumb on the
-// session can't be trusted to be there: it is only persisted when the step is
-// ANSWERED, so assigning a shopper and walking away would lose the pointer and the
-// next visit would create a second trip. The key is:
-//
-//   the household's non-deleted, ONE-OFF (rrule is null) chore titled exactly
-//   GROCERY_CHORE_TITLE whose single instance is due inside the planned week.
-//
-// A caller may also pass the `choreId` the view just handed it, which wins when it
-// still resolves to a one-off chore of this household — so renaming the chore on the
-// Tasks board doesn't orphan it and cause a duplicate. Between the two, revisiting the
-// step, changing the shopper and changing the day all land on the same one row.
+// The shopping trip is a REAL chore, so it appears on the Tasks board as a genuine
+// assignment. It gets no table of its own — the chore IS the record — and its identity is
+// derived server-side, because the session crumb is only persisted when the step is
+// ANSWERED: the household's non-deleted ONE-OFF chore titled exactly GROCERY_CHORE_TITLE
+// whose instance is due inside the week. A caller's `choreId` hint wins while it resolves.
 const GROCERY_CHORE_TITLE = 'Groceries'
 const GROCERY_CHORE_EMOJI = '🛒'
 
@@ -72,39 +53,27 @@ export interface NightEvent {
   title: string
   startsAt: string
   allDay: boolean
-  // The colour INPUTS, not a colour. Whether an event paints in the household's family
-  // colour or its owner's is `eventColor`'s decision, and that lives on the client next
-  // to the calendar it has to match — resolving it here would give the recap's week strip
-  // and the month view two rules that could drift.
+  // The colour INPUTS, not a colour: painting family-vs-owner is the client's call.
   personId: string | null
   personName: string | null
   personColor: string | null
   participantIds: string[]
 }
 
-// The dish on a night, already resolved for display: a recipe-backed slot reads its
-// recipe's title, a plate-backed one its plate's name, and a placeholder
-// ("Leftovers", "Eating out") its own text.
+// The dish on a night, resolved for display: a recipe's title, a plate's name, or text.
 export interface NightDinner {
   entryId: string
-  // What to SHOW: the recipe's title, the plate's name, or the slot's own text. The
-  // slot's STORED title is deliberately not on the wire: the only thing that compares
-  // it is the undo guard, and a claim a client rebuilt from this view would be checked
-  // against the very row it was read from — proving nothing.
+  // What to SHOW. The slot's STORED title is deliberately not on the wire: only the undo
+  // guard compares it, and a claim rebuilt from this view would prove nothing.
   title: string | null
   emoji: string | null
   recipeId: string | null
   mealId: string | null
   imageUrl: string | null
-  // Who's cooking — meal_plan_entries.cook_person_id, so this is real data, not a
-  // guess. It's the dish tile's attribution line when it's there.
   cookName: string | null
   cookAvatar: string | null
   cookColor: string | null
-  // Total hands-on + cook time, when the recipe knows it. The tile's fallback
-  // sub-line: the design puts a short note there ("uses the beef"), but those come
-  // from the LLM's transient suggestion and the plan stores none, so the honest
-  // substitute is what the recipe itself says.
+  // Total hands-on + cook time when the recipe knows it — the tile's fallback sub-line.
   minutes: number | null
 }
 
@@ -115,21 +84,16 @@ export interface MealsNight {
 }
 
 export interface MealsStepView {
-  // The week these seven columns are about — the server's, snapped and floored.
   weekStart: string
   nights: MealsNight[]
-  // The nights with no dinner, in order. What "plan the rest for me" fills, and the
-  // only thing it is allowed to touch.
+  // The nights with no dinner, in order — the only thing a fill may touch.
   emptyDates: string[]
-  // Groceries are ONE LINE, not a panel: the board already builds itself from this
-  // plan. null when the lists module is off (then there is no line to show).
+  // Groceries are ONE LINE: the board already builds itself from this plan.
   groceries: { items: number; checked: number } | null
-  // Whether the shopping trip can be assigned at all. Meals is gated on `meals`, not
-  // `chores`, so a household with the chores module off gets the plain grocery line
-  // and NO control — the same rule that kept an unsourced shopper pill off the bar.
+  // Meals is gated on `meals`, not `chores`, so a household with chores off gets the plain
+  // line and NO control.
   choresOn: boolean
-  // This week's shopping trip, read back off the chore. null ⇒ no trip planned;
-  // `personId: null` ⇒ planned but up for grabs, which is a real answer.
+  // Read back off the chore. null ⇒ no trip; `personId: null` ⇒ up for grabs, a real answer.
   shopping: ShoppingTrip | null
 }
 
@@ -144,20 +108,14 @@ export interface ShoppingTrip {
   status: string
 }
 
-// What a fill wrote, and everything an undo needs to prove the night is still the one
-// it wrote. `entryId` alone is not enough: upsertEntry's `on conflict do update`
-// preserves the row id, so a hand-edit keeps it — the dish itself is the evidence.
+// What a fill wrote, and everything an undo needs to prove the night is still the one it
+// wrote. `entryId` alone is not enough: upsertEntry's `on conflict do update` preserves the
+// row id, so the dish itself is the evidence.
 //
-// `mealId` IS PART OF THE EVIDENCE, not decoration. A slot holds a recipe, a plate or
-// a bare title, and a plate is `recipe_id NULL` + `meal_id` + THE PLATE'S NAME as the
-// title — so a night this filled with the title "BBQ Sunday" and a night somebody
-// then hand-changed to the PLATE "BBQ Sunday" agree on entryId, recipeId and title.
-// Without meal_id the undo would clear a decision it never made. It is also a strong
-// check rather than a lucky one: scheduling a saved plate COPIES it
-// (POST /api/meals/:id/schedule → copyMeal), so re-picking the same library plate
-// writes a DIFFERENT meal_id and correctly reads as a change.
-// (If scheduling ever becomes copy-on-write — see the roadmap — that last sentence stops
-// holding, but the check itself stays correct: it just loses its second belt.)
+// `mealId` IS PART OF THE EVIDENCE: a plate is `recipe_id NULL` + `meal_id` + the plate's
+// NAME as the title, so a night filled with the title "BBQ Sunday" and one hand-changed to
+// the PLATE of that name agree on everything else, and the undo would clear a decision it
+// never made.
 export interface FilledNight {
   date: string
   entryId: string
@@ -178,15 +136,13 @@ const householdTz = async (householdId: string): Promise<string> => {
   return (rows[0]?.timezone ?? '').trim() || 'UTC'
 }
 
-// Which of the household's local days an event belongs to. Deliberately the same
-// reading as `rangeEvents`' own `(starts_at at time zone h.timezone)::date` filter —
-// bucketing in any other zone would drop an evening event off the night it happens on.
+// Which of the household's local days an event belongs to — deliberately the same reading
+// as `rangeEvents`' own filter, since any other zone drops an evening off its night.
 const localDay = (at: Date | string, tz: string): string =>
   new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(at))
 
-// This week's shopping trip, if there is one. `hintChoreId` is the id the client last
-// saw; it wins when it still names a one-off chore of this household, so a chore
-// renamed on the Tasks board is still found. Otherwise the title+week key finds it.
+// This week's trip. `hintChoreId` wins while it still names a one-off chore of this
+// household; otherwise the title+week key finds it.
 export async function findShoppingTrip(householdId: string, weekStart: string, hintChoreId?: string | null): Promise<ShoppingTrip | null> {
   const weekEnd = addDays(weekStart, 6)
   const { rows } = await query<{
@@ -243,8 +199,7 @@ export async function mealsStepView(tenant: Tenant, weekStart: string, hintChore
     groceryLine(tenant, weekStart),
     choresOn(tenant.householdId),
   ])
-  // Only read the trip when the module that owns it is on — otherwise the bar shows
-  // the plain line and the control is absent rather than dead.
+  // Only read the trip when the module that owns it is on, so the control is absent.
   const shopping = chores ? await findShoppingTrip(tenant.householdId, weekStart, hintChoreId) : null
 
   const dinnerByDate = new Map<string, NightDinner>()
@@ -307,18 +262,16 @@ async function groceryLine(tenant: Tenant, weekStart: string): Promise<{ items: 
   return { items: items.length, checked: items.filter((i) => i.checked).length }
 }
 
-// The grocery list is derived from the plan, so a fill or an undo that changed the
-// plan has to leave the one line true rather than stale. Rebuild keeps existing
-// checks (clear-checks is the destructive one), and it is scoped to this week.
+// The grocery list is derived from the plan, so a fill or undo must leave the line true.
+// Rebuild keeps existing checks and is scoped to this week.
 async function rebuildGroceries(tenant: Tenant, weekStart: string): Promise<void> {
   if (!(await listsOn(tenant.householdId))) return
   await rebuildGroceryFromWeek(tenant, weekStart).catch((err) => console.error('planning meals grocery rebuild failed', err))
 }
 
-// Suggestions for exactly these nights. Mirrors POST /api/meals/plan-week's own
-// fallback: the household's LLM when it has a usable one, the library shuffle
-// otherwise — and the shuffle again if the model call falls over, because a step whose
-// one AI button can fail open is better than one that can fail shut.
+// Suggestions for exactly these nights, mirroring plan-week's fallback: the household's LLM
+// when usable, the library shuffle otherwise — and again if the call falls over, so the one
+// AI button fails open.
 async function suggestFor(tenant: Tenant, weekStart: string, dates: string[]): Promise<PlanCard[]> {
   const input = { start: weekStart, mealType: MEAL_TYPE, dates }
   const ai = await getAiConfig(tenant.householdId)
@@ -348,22 +301,13 @@ export interface FillResult {
   view: MealsStepView
 }
 
-// "Plan the rest for me fills only the empties and marks them so you can undo;
-// overwriting a set night is a tap on that night." So this writes a dinner for every
-// night with none and refuses to touch one that has one — checked once against the
-// view and again immediately before each write, because the suggestion round-trip is
-// the window in which somebody else's tap could land.
+// A fill writes a dinner for every night with none and refuses to touch one that has a
+// dish — checked against the view and again immediately before each write, since the
+// suggestion round-trip is the window in which somebody else's tap could land.
 //
-// `chosen` is a week the family already APPROVED — the cards the shared "Plan my
-// week" planner (apps/web/src/kiosk/components/PlanWeek.tsx) drafted and they hit
-// "Add week" on. Passing them here rather than applying them through
-// POST /api/meals/plan is what keeps the fill's two guarantees intact: only the empty
-// nights are written, and the caller gets back the `FilledNight` receipt the undo
-// guard checks (the stored title is deliberately not on the view's wire, so a client
-// cannot build a trustworthy claim of its own).
-//
-// Without `chosen` this still drafts for itself — the headless fill, which is what
-// iOS parity and any non-interactive caller needs.
+// `chosen` is a week the family already APPROVED in the shared planner; passing it here
+// rather than through POST /api/meals/plan is what keeps both guarantees (empty nights only,
+// and the `FilledNight` receipt the undo checks). Without it this drafts for itself.
 export async function fillEmptyDinners(tenant: Tenant, weekStart: string, chosen?: PlanCard[] | null): Promise<FillResult> {
   const view = await mealsStepView(tenant, weekStart)
   const targets = new Set(view.emptyDates)
@@ -375,14 +319,11 @@ export async function fillEmptyDinners(tenant: Tenant, weekStart: string, chosen
 
   for (const card of cards) {
     if (!targets.has(card.date)) continue
-    // This step plans DINNERS. A card naming another meal is dropped rather than
-    // quietly rewritten into a dinner — silently moving somebody's lunch to 6pm is
-    // worse than not planning it.
+    // This step plans DINNERS. A card naming another meal is dropped, not rewritten.
     if (card.mealType && card.mealType !== MEAL_TYPE) continue
     targets.delete(card.date) // one dish per night, however many the model offered
 
-    // The suggestion may name a library recipe; a bogus id degrades to its title
-    // rather than 400ing the whole fill.
+    // A bogus recipe id degrades to its title rather than 400ing the whole fill.
     let recipeId: string | null = card.recipeId ?? null
     if (recipeId) {
       try {
@@ -404,8 +345,7 @@ export async function fillEmptyDinners(tenant: Tenant, weekStart: string, chosen
       title,
       cookPersonId: null,
     })
-    // The same mirroring POST /api/meals/plan does — without it an auto-filled dinner
-    // would be the one night of the week missing from the calendar.
+    // The same mirroring POST /api/meals/plan does, or the night goes missing from the calendar.
     await syncMealEventForEntry(tenant, entry.id).catch((err) => console.error('meal event sync failed', err))
     await syncPrepReminderForEntry(tenant, entry.id).catch((err) => console.error('prep reminder sync failed', err))
     filled.push({ date: entry.date, entryId: entry.id, recipeId: entry.recipe_id, mealId: entry.meal_id, title: entry.title })
@@ -418,10 +358,8 @@ export async function fillEmptyDinners(tenant: Tenant, weekStart: string, chosen
 
 export interface UndoResult {
   weekStart: string
-  // Nights actually cleared.
   cleared: string[]
-  // Nights left alone because they are no longer what the fill wrote — somebody
-  // decided them since, and an undo has no business overwriting a decision.
+  // Nights left alone because they are no longer what the fill wrote — somebody decided them.
   kept: string[]
   view: MealsStepView
 }
@@ -439,9 +377,8 @@ export async function undoFilledDinners(tenant: Tenant, weekStart: string, claim
 
     const row = await plannedDinner(tenant.householdId, claim.date)
     if (!row) continue // already gone — nothing to undo and nothing kept
-    // Every side is normalized to null: a claim off the wire may simply omit a
-    // field, and `undefined === null` is false — which would make every ordinary
-    // recipe undo look like a change and quietly stop clearing anything.
+    // Every side is normalized to null: a claim off the wire may omit a field, and
+    // `undefined === null` is false — which would make every ordinary undo look like a change.
     const same =
       row.id === claim.entryId &&
       (row.recipe_id ?? null) === (claim.recipeId ?? null) &&
@@ -451,8 +388,7 @@ export async function undoFilledDinners(tenant: Tenant, weekStart: string, claim
       kept.push(claim.date)
       continue
     }
-    // Drop the mirror event and thaw reminder BEFORE clearing the slot, in the order
-    // DELETE /api/meals/plan uses — they're found by the entry that is about to go.
+    // Drop the mirror event and thaw reminder BEFORE clearing the slot, as DELETE does.
     await removeMealEventForEntry(tenant.householdId, row.id).catch((err) => console.error('meal event remove failed', err))
     await removePrepReminderForEntry(tenant.householdId, row.id).catch((err) => console.error('prep reminder remove failed', err))
     if (await clearEntry(tenant, claim.date, MEAL_TYPE)) cleared.push(claim.date)
@@ -475,15 +411,12 @@ export class ShoppingDayOutOfWeekError extends Error {
 }
 
 export interface ShoppingTripInput {
-  // The day of the trip. null ⇒ there is no trip: the chore is removed rather than
-  // left behind as an orphan on somebody's Tasks board.
+  // The day of the trip. null ⇒ no trip: the chore is removed rather than orphaned.
   dueOn: string | null
-  // Who's going. null ⇒ up for grabs, which is a real answer — the same thing the
-  // Tasks step means by "nobody".
+  // Who's going. null ⇒ up for grabs, the same thing the Tasks step means by "nobody".
   personId: string | null
   dueTime: string | null
-  // The chore id the client last saw, so a chore renamed on the Tasks board is still
-  // recognised as this week's trip.
+  // The chore id the client last saw, so a chore renamed on the Tasks board is still found.
   choreId: string | null
 }
 
@@ -493,17 +426,13 @@ export interface ShoppingResult {
   view: MealsStepView
 }
 
-// Create, move, reassign or remove the week's shopping trip — always the SAME chore.
-// Every path here goes through the chores service (createChore / updateChore /
-// softDeleteChore); the one direct write is moving the pending instance's due_on,
-// which updateChore has no field for and which mirrors what it already does to
-// instances when the assignee changes.
+// Create, move, reassign or remove the week's shopping trip — always the SAME chore, through
+// the chores service. The one direct write is the pending instance's due_on.
 export async function setShoppingTrip(tenant: Tenant, weekStart: string, input: ShoppingTripInput): Promise<ShoppingResult> {
   const weekEnd = addDays(weekStart, 6)
   const existing = await findShoppingTrip(tenant.householdId, weekStart, input.choreId)
 
-  // No day ⇒ no trip. Clearing removes the chore instead of leaving one nobody
-  // planned sitting on the board.
+  // No day ⇒ no trip: clearing removes the chore rather than leaving one nobody planned.
   if (!input.dueOn) {
     if (existing) await softDeleteChore(tenant.householdId, existing.choreId)
     return finish(tenant, weekStart, null)
@@ -527,13 +456,11 @@ export async function setShoppingTrip(tenant: Tenant, weekStart: string, input: 
     return finish(tenant, weekStart, chore.id)
   }
 
-  // Reassigning follows through to the pending instance inside updateChore.
   if (existing.personId !== input.personId || existing.dueTime !== input.dueTime) {
     await updateChore(tenant.householdId, existing.choreId, { personId: input.personId, dueTime: input.dueTime })
   }
-  // Moving the day. Only a PENDING instance moves: a trip somebody already did is
-  // history, and rewriting its date would say the shopping happened on a day it
-  // didn't. The (chore_id, due_on) unique index is safe here — a one-off has one.
+  // Only a PENDING instance moves: rewriting a done trip's date would claim the shopping
+  // happened on a day it didn't. The (chore_id, due_on) unique index is safe — a one-off has one.
   if (existing.dueOn !== input.dueOn) {
     await query(
       `update chore_instances set due_on = $3::date
@@ -549,9 +476,8 @@ async function finish(tenant: Tenant, weekStart: string, choreId: string | null)
   return { weekStart, shopping: view.shopping, view }
 }
 
-// The approved week off the wire, shaped into plan cards. Only the four fields the
-// fill actually writes are read — the rest of a PlanCard is display, and trusting a
-// client's `servings` or `note` would be storing a claim nobody checks.
+// Only the four fields the fill writes are read: trusting a client's `servings` or `note`
+// would store a claim nobody checks.
 export function parsePlanCards(raw: unknown): PlanCard[] | null {
   if (!Array.isArray(raw)) return null
   const out: PlanCard[] = []
@@ -573,8 +499,7 @@ export function parsePlanCards(raw: unknown): PlanCard[] | null {
   return out
 }
 
-// Whatever came off the wire, shaped into undo claims. A claim naming no date is
-// dropped here rather than probed against the plan.
+// Whatever came off the wire, shaped into undo claims; a claim naming no date is dropped.
 export function parseFilledNights(raw: unknown): FilledNight[] {
   if (!Array.isArray(raw)) return []
   const out: FilledNight[] = []

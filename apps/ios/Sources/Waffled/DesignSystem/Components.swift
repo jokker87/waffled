@@ -1,10 +1,9 @@
 import SwiftUI
 
-// Reusable Waffled building blocks — the SwiftUI equivalents of waffled.css's
-// `.card`, `.pill`, `.av`, section labels and the AI capture bar.
+// Reusable Waffled building blocks — the SwiftUI equivalents of waffled.css's `.card`,
+// `.pill`, `.av`, section labels and the AI capture bar.
 
-/// A white rounded surface (`.card`). Pass the content; padding/insets are the
-/// caller's choice so it works for both list cards and split media cards.
+/// A white rounded surface (`.card`). Padding/insets are the caller's choice.
 struct WaffledCard<Content: View>: View {
     var padding: CGFloat = 16
     var radius: CGFloat = WF.rLG
@@ -44,12 +43,9 @@ struct Pill: View {
     }
 }
 
-/// The canonical full-width primary call-to-action — modeled on `PlanApplyBar`'s
-/// button (size-16 bold white label, `.vertical` 14 padding, `WF.rMD` corners).
-///
-/// `tint` is SEMANTIC: pass `WF.ai` for AI actions, `WF.primary` for normal ones.
-/// `isBusy` shows a small white spinner before the label; `isDisabled` greys the
-/// fill to `WF.ink3`. Both busy and disabled block the tap.
+/// The canonical full-width primary call-to-action. `tint` is SEMANTIC: `WF.ai` for AI
+/// actions, `WF.primary` for normal ones. `isBusy` shows a spinner before the label;
+/// `isDisabled` greys the fill. Both block the tap.
 struct WaffledPrimaryCTA: View {
     var label: String
     var tint: Color = WF.primary
@@ -107,12 +103,10 @@ struct Avatar: View {
     }
 }
 
-/// A small capsule button — an inline answer next to the thing it answers ("Make a task",
-/// "Drop it", "Save"). `filled` makes it the affirmative of a pair.
-///
-/// `.buttonStyle(.plain)` with an explicit foreground: the default style dims and re-tints
-/// its label while pressed, which reads as the control changing state rather than being
-/// touched.
+/// A small capsule button — an inline answer next to the thing it answers. `filled`
+/// makes it the affirmative of a pair. `.buttonStyle(.plain)` with an explicit
+/// foreground: the default style dims and re-tints its label while pressed, which reads
+/// as a state change.
 struct WaffledPillButton: View {
     let label: String
     var tint: Color = WF.primary
@@ -138,9 +132,9 @@ struct WaffledPillButton: View {
     }
 }
 
-/// A centered loading spinner with the standard Waffled tint + breathing room. Use this
+/// A centered loading spinner with the standard Waffled tint + breathing room. Use it
 /// for the first-load state of any list screen so the spinner sits consistently across
-/// the app instead of each screen picking its own padding.
+/// the app.
 struct WaffledLoading: View {
     var top: CGFloat = 48
     var body: some View {
@@ -151,9 +145,8 @@ struct WaffledLoading: View {
     }
 }
 
-/// A friendly centered empty state — big emoji, a bold title, and an optional line of
-/// supporting copy. The shared shape behind every "all caught up" / "nothing here yet"
-/// screen so they read the same everywhere.
+/// A friendly centered empty state — big emoji, a bold title, and optional supporting
+/// copy. The shared shape behind every "all caught up" / "nothing here yet" screen.
 struct WaffledEmptyState: View {
     let emoji: String
     let title: String
@@ -179,12 +172,9 @@ struct WaffledEmptyState: View {
 
 extension View {
     /// A `List` row carrying no list chrome: no card background, no separator, no inset.
-    ///
-    /// The shape every in-list loading / empty / spacer row wants, and which was being
-    /// spelled out by hand (`.listRowBackground(Color.clear).listRowSeparator(.hidden)…`)
-    /// wherever one appeared. Worth a name mostly because forgetting a piece of it is
-    /// invisible until it renders — an empty state that keeps its inset sits in an
-    /// indented card instead of filling the page.
+    /// Worth a name mostly because forgetting a piece of it is invisible until it
+    /// renders — an empty state that keeps its inset sits in an indented card instead of
+    /// filling the page.
     func plainRow() -> some View {
         listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
@@ -192,9 +182,8 @@ extension View {
     }
 }
 
-/// A dismissible inline error banner — ⚠️ + a short message + an ✕ that clears it.
-/// The shared surface for "this action didn't stick" errors shown in place (chore
-/// proof uploads, meal-planner drops), mirroring the web's inline error rows.
+/// A dismissible inline error banner — ⚠️ + a short message + an ✕ that clears it. The
+/// shared surface for "this action didn't stick" errors shown in place.
 struct DismissibleErrorBanner: View {
     let message: String
     let onDismiss: () -> Void
@@ -217,8 +206,7 @@ struct DismissibleErrorBanner: View {
     }
 }
 
-/// The "Add anything…" capture bar shown on Today. Tapping it is wired by the
-/// caller (Phase 2 opens the AI capture sheet).
+/// The "Add anything…" capture bar shown on Today. Tapping it is wired by the caller.
 struct AICaptureBar: View {
     var placeholder: String = "Add anything…"
     var onTap: () -> Void = {}
@@ -256,8 +244,8 @@ struct AICaptureBar: View {
     }
 }
 
-/// A `WaffledCard` whose first child is a bold section title, followed by caller content —
-/// the "titled field card" used throughout the Plan sheets. Stateless wrapper.
+/// A `WaffledCard` whose first child is a bold section title, followed by caller content
+/// — the "titled field card" used throughout the Plan sheets. Stateless wrapper.
 struct WaffledFieldCard<Content: View>: View {
     var title: String
     var padding: CGFloat = 14
@@ -275,9 +263,9 @@ struct WaffledFieldCard<Content: View>: View {
 }
 
 /// A rounded square holding an emoji — the list-row / picker glyph tile used across
-/// Settings, Rewards, Lists, Goals, Family and the capture sheets. Canonical look is a
-/// 42pt square, 22pt emoji, 12pt corner on `WF.panel`; pass params for the intentional
-/// variants (muted archived rows, tinted person rows). Stateless.
+/// Settings, Rewards, Lists, Goals, Family and the capture sheets. 42pt square, 22pt
+/// emoji, 12pt corner on `WF.panel`; pass params for the intentional variants.
+/// Stateless.
 struct WaffledEmojiTile: View {
     var emoji: String
     var size: CGFloat = 22          // emoji font size
@@ -296,9 +284,9 @@ struct WaffledEmojiTile: View {
     }
 }
 
-/// A tinted status / count capsule — colored text on a `color.opacity(0.12)` fill.
-/// The shared shape behind the "Spendable" / "Owner" / "key detected" / pending-count
-/// badges. Pass `weight: .heavy` for the louder count badges. Stateless.
+/// A tinted status / count capsule — colored text on a `color.opacity(0.12)` fill. The
+/// shared shape behind the "Spendable" / "Owner" / pending-count badges. `weight:
+/// .heavy` is louder.
 struct WaffledStatusBadge: View {
     var text: String
     var color: Color                 // tint; bg = color.opacity(0.12), text = color
@@ -332,7 +320,7 @@ struct DisclosureChevron: View {
 }
 
 /// The little capsule used as a `Menu` label — bold text plus a down chevron. Shared by
-/// the Plan sheets so every "tap to change" menu trigger looks identical.
+/// the Plan sheets so every "tap to change" trigger looks identical.
 struct WaffledMenuPill: View {
     var text: String
 
@@ -345,9 +333,8 @@ struct WaffledMenuPill: View {
     }
 }
 
-/// The standard Settings dropdown affordance — a value plus the iOS up/down
-/// "pick from a list" glyph. Used across the Settings screens so every settings
-/// menu reads the same. (Distinct from WaffledMenuPill, the app-wide compact pill.)
+/// The standard Settings dropdown affordance — a value plus the iOS up/down glyph.
+/// (Distinct from WaffledMenuPill, the app-wide compact pill.)
 struct WaffledSettingsMenuLabel: View {
     var value: String
     var body: some View {
@@ -358,10 +345,9 @@ struct WaffledSettingsMenuLabel: View {
     }
 }
 
-/// The Deny/Approve button pair on parent approval rows. Shared by the Chores and
-/// Rewards "Needs your OK" cards so both look identical. Kiosk (iPad) gets inline
-/// capsules; phone gets full-width buttons. Stateless — the approve/deny work stays
-/// at the call site, passed as closures.
+/// The Deny/Approve button pair on parent approval rows, shared by the Chores and
+/// Rewards "Needs your OK" cards. Kiosk (iPad) gets inline capsules; phone gets
+/// full-width buttons. Stateless — the approve/deny work stays at the call site.
 struct ApprovalActionPair: View {
     var denyLabel: String   // "Not yet" (chores) or "Deny" (rewards)
     var isKiosk: Bool       // true → inline capsules; false → full-width
@@ -398,7 +384,7 @@ struct ApprovalActionPair: View {
 }
 
 /// A weekday toggle chip — a full-width pill that fills coral when on. Shared by the
-/// Plan-my-week and Plan-my-month sheets so both day selectors look identical.
+/// Plan-my-week and Plan-my-month sheets.
 struct WeekdayToggleChip: View {
     let label: String
     let isOn: Bool

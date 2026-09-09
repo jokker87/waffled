@@ -1,13 +1,11 @@
 import SwiftUI
 
-/// The launcher tiles on the Family hub. Each pushes a destination in the Family
-/// tab's NavigationStack — Lists is built out; the rest are live-summary
-/// placeholders until their screens land.
+/// The launcher tiles on the Family hub. Each pushes a destination in the Family tab's
+/// NavigationStack; Lists is built out, the rest are live-summary placeholders.
 enum HubRoute: Hashable {
     case chores, goals, rewards, lists, photos, settings, pantry, rhythms
-    // Weekly Planning's session. There is no room for a fifth tab (the bar is four plus
-    // the capture FAB), so the phone reaches the session by pushing this — from the Today
-    // card and from the Family hub.
+    // Weekly Planning's session. There is no room for a fifth tab, so the phone reaches the
+    // session by pushing this — from the Today card and from the Family hub.
     case weeklyPlanning
     case list(WaffledAPI.ListSummary)   // a specific list pushed from the Lists index
     case goal(WaffledAPI.Goal)          // a specific goal pushed from the Goals screen
@@ -15,9 +13,8 @@ enum HubRoute: Hashable {
     case waffledBites(personId: String, personName: String) // a kid's Waffled-Bite control panel
     case recipe(WaffledAPI.RecipeSummary) // a recipe opened from the grocery meal recap
     case recipeCook(WaffledAPI.RecipeSummary) // a recipe opened straight into Cook Mode (Today's tonight card)
-    /// A Meal Builder **plate** — a named, multi-recipe meal — opened from tonight's
-    /// card or the grocery meal recap. Those surfaces know only a summary of it, so
-    /// they push `MealDTO.placeholder` and the detail reloads it by id.
+    /// A Meal Builder **plate**, opened from tonight's card or the grocery meal recap. Those
+    /// surfaces know only a summary, so they push `MealDTO.placeholder` and the detail reloads.
     case meal(WaffledAPI.MealDTO)
     case rewardShop(String)          // one person's reward shop (from the Rewards overview)
     case settingsAccount             // Settings → Accounts (sign-in & sign out)
@@ -55,10 +52,8 @@ extension DemoHooks {
     }
 }
 
-/// Renders a `HubRoute` destination. Shared by the Family hub and the Today tab so
-/// drilling into a person/chores/grocery/recipe stays on whichever tab you started
-/// from — Back returns there instead of switching tabs. `hub` is optional: only the
-/// placeholder tiles (rewards/photos/settings, reachable from the Family grid) use
+/// Renders a `HubRoute` destination. Shared by the Family hub and the Today tab so drilling in
+/// stays on whichever tab you started from. `hub` is optional: only the placeholder tiles use
 /// its summary lines, so Today can omit it.
 struct HubDestination: View {
     let route: HubRoute
@@ -108,8 +103,7 @@ struct HubDestination: View {
     }
 }
 
-/// A consistent "screen coming soon" destination that still surfaces the tile's
-/// real summary line, so the hub never navigates into a dead end.
+/// A "screen coming soon" destination that still surfaces the tile's real summary line.
 struct HubPlaceholder: View {
     let emoji: String
     let title: String

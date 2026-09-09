@@ -1,37 +1,25 @@
 import SwiftUI
 
-/// Weekly Planning · step 9 "Kids" — "What's your week about?"
+/// Weekly Planning · step 9 "Kids". Ported from
+/// `apps/web/src/kiosk/planning/steps/KidsStep.tsx`.
 ///
-/// Ported from `apps/web/src/kiosk/planning/steps/KidsStep.tsx`.
+/// Every card is up at once on the iPad; the phone has no room, so a segmented row puts
+/// one kid on screen at a time. Both answers come from things that already exist, and
+/// "＋ Something else" sits LAST. Everything on screen is composed by the server except
+/// the goal's number, which goes through `GoalDisplay` so a habit reads as this period's
+/// count and not a lifetime total.
 ///
-/// THE ONE STEP THE KIDS THEMSELVES READ. Their NAME is the title of their card, the type
-/// is sized for them, and on the iPad every card is up at once — there is no per-kid
-/// navigation for a family of two. On the phone there isn't room, so a segmented row puts
-/// one kid on screen at a time.
-///
-/// TWO QUESTIONS EACH, AND BOTH ARE ANSWERED FROM THINGS THAT ALREADY EXIST. The focus
-/// options are that child's own goals, their own overdue chores and the standing chores
-/// they already carry; the look-forward-to options are events already on their week.
-/// "＋ Something else" is the escape hatch and sits LAST — a kid should recognise their
-/// week in the list rather than have to invent it. Everything on screen is composed by the
-/// server except the goal's number, which goes through `GoalDisplay` so a habit reads as
-/// this period's count and not a lifetime total.
-///
-/// THE SECOND FRAME IS THE READ-BACK. Once every card has both answers the step stops
-/// being a picker and becomes the two sentences, large. "Change something" puts the picker
-/// back.
+/// Once every card has both answers the step becomes the read-back frame; "Change
+/// something" puts the picker back.
 ///
 /// The answers are a REAL write, never `setDecisionData` — the crumb only reaches the
-/// server when the step is ANSWERED, so a family that reads the cards out and walks away
-/// without pressing Done would lose the very thing they came here to say.
+/// server when the step is ANSWERED.
 struct KidsStepView: View {
     let props: PlanningStepProps
 
     @State private var model = PlanningKidsStepModel()
 
     var body: some View {
-        // NO OUTER ScrollView: the shell owns the chrome around a step, and the scrolling
-        // with it. A second one nested inside would fight it.
         VStack(alignment: .leading, spacing: 12) {
             if !model.loaded {
                 WaffledLoading()
@@ -63,29 +51,21 @@ struct KidsStepView: View {
         // Keyed on session AND week: stepping to another week must not leave the previous
         // week's answers on screen.
         .task(id: "\(props.sessionId)|\(props.weekStart)") { await reload() }
-        // Mirror what the session already knows onto the crumb after EVERY fresh read AND
-        // every write — not only after a tap. The shell resets the crumb on step change and
-        // REPLACES the step's stored data when the affirmative is pressed, so a body that
-        // only set it in its tap handler would erase the kids' answers on a remount.
-        //
-        // NEVER `setDecisionData(model.crumb)` STRAIGHT THROUGH. This crumb is a MIRROR of
-        // server state that the affirmative overwrites, so handing the shell a nil after a
-        // failed fetch is not "no news" — it is the wipe, and what it throws away is the
-        // two sentences the whole step exists to produce.
+        // Mirror the session's own answers onto the crumb after EVERY read and write, not
+        // just after a tap: the shell resets the crumb on step change and REPLACES the
+        // step's data when the affirmative is pressed. And never pass `model.crumb`
+        // straight through — a nil after a failed fetch is the wipe, not "no news".
         .onChange(of: model.rev) {
             if let crumb = model.crumb { props.setDecisionData(crumb) }
         }
-        // THIS STEP LENDS THE BANNER NOTHING. Its text box answers one child's question —
-        // it creates nothing in any module — so there is no verb here that a parked note
-        // could honestly be handed to. Withdrawn explicitly, because the verb is the
-        // SHELL's state and would otherwise still be the previous step's.
+        // THIS STEP LENDS THE BANNER NOTHING: it creates nothing in any module. Withdrawn
+        // explicitly, because the verb is the SHELL's state and would otherwise still be
+        // the previous step's.
         .onAppear { props.lendVerb(nil) }
     }
 
     // MARK: - Which cards are on screen
 
-    /// The iPad is the family display — both cards fit, and switching kid at the board is
-    /// the thing the design is trying to avoid. The phone has no such room.
     private var showsKidTabs: Bool {
         DeviceExperience.current == .planner && model.kids.count > 1
     }
@@ -181,8 +161,8 @@ struct KidsStepView: View {
                 }
             }
             Spacer(minLength: 6)
-            // Stars are funded by chores, so an economy that is off simply isn't drawn —
-            // NEVER a zero, which would read as "you've earned nothing".
+            // An economy that is off isn't drawn — NEVER a zero, which reads as "you've
+            // earned nothing".
             if let stars = card.stars {
                 WaffledStatusBadge(
                     text: "\(card.starsSymbol ?? "⭐") \(stars)", color: WF.gold, size: 13, weight: .heavy)
@@ -190,8 +170,6 @@ struct KidsStepView: View {
         }
     }
 
-    /// Their week, in BOTH frames: the kid at the board wants to see their own week whether
-    /// or not they've answered yet.
     private func theirWeek(_ card: WaffledAPI.PlanningKidCard) -> some View {
         VStack(alignment: .leading, spacing: 7) {
             SectionLabel(text: "Your week")
@@ -206,8 +184,6 @@ struct KidsStepView: View {
         }
     }
 
-    /// `when` is composed server-side in the household's own zone — there is deliberately
-    /// no date math on this device, and so no formatter in this render path.
     private func weekChip(when: String, title: String, late: Bool) -> some View {
         HStack(spacing: 5) {
             Text(when)
@@ -252,7 +228,7 @@ struct KidsStepView: View {
                         model.recordDraft(personId: card.personId, which: which, text: text)
                     })
                 // A new box per person AND per question, so switching kid never inherits
-                // the other one's half-typed words.
+                // the other's half-typed words.
                 .id("\(card.personId):\(which.rawValue)")
             }
         }
@@ -264,8 +240,6 @@ struct KidsStepView: View {
         frozen: Bool
     ) -> some View {
         let checked = PlanningKidsChoice.focusChosen(card, o)
-        // The number ALWAYS comes from the shared helper — never an inline `totalProgress`,
-        // which would tell a kid they'd read 99 times this week.
         var progress: Double?
         var target: Double?
         if let g = o.goal {
@@ -281,8 +255,6 @@ struct KidsStepView: View {
                         .font(.system(size: 15, weight: .semibold)).foregroundStyle(WF.ink)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
-                    // `detail` is null on a standing chore because nothing is wrong with
-                    // it: that absence is the design, not a missing string.
                     if let detail = o.detail {
                         Text(detail).font(.system(size: 12)).foregroundStyle(WF.ink3)
                     }
@@ -314,9 +286,6 @@ struct KidsStepView: View {
         .accessibilityAddTraits(checked ? [.isSelected] : [])
     }
 
-    /// LAST, and quiet: the escape hatch, not the main path. Once it HAS been used it reads
-    /// as the chosen answer and says what they said — an option that still read "＋
-    /// Something else" would look like nothing had been picked at all.
     private func focusHatch(_ card: WaffledAPI.PlanningKidCard, frozen: Bool) -> some View {
         let chosen = PlanningKidsChoice.focusIsCustom(card)
         return Button { model.beginTyping(personId: card.personId, which: .focus) } label: {
@@ -349,9 +318,6 @@ struct KidsStepView: View {
         return Button { answer(card.personId, forward: .key(o.key)) } label: {
             HStack(spacing: 5) {
                 Text(o.emoji).font(.system(size: 14))
-                // Day and title in ONE label: the week strip above already carries the
-                // title on its own, and two identical labels on a card make it unreadable
-                // read out loud.
                 Text("\(o.when) · \(o.label)")
                     .font(.system(size: 13.5, weight: .semibold))
                     .foregroundStyle(checked ? WF.ink : WF.ink2)
@@ -418,10 +384,8 @@ struct KidsStepView: View {
 
     // MARK: - The frame's own control
     //
-    // On the web this is the shell's FooterExtra: "Same as last week" on the picker,
-    // "Change something" on the read-back. The iOS seam routes a footer extra for `meals`
-    // only and this step may not touch it, so the control lives in the body — the one place
-    // it can, and where per-kid navigation already lives.
+    // The web puts this in the shell's FooterExtra; the iOS seam routes a footer extra for
+    // `meals` only, so the control lives in the body instead.
 
     @ViewBuilder private var extraControl: some View {
         if model.isReadBack {
@@ -455,9 +419,8 @@ struct KidsStepView: View {
 
     // MARK: - Writes
 
-    /// The read, and the crumb it produces. Set here as well as on the `rev` change: a
-    /// remount whose fetch fails must not leave the shell holding a crumb it will replace
-    /// the step's data with.
+    /// Set here as well as on the `rev` change: a remount whose fetch fails must not leave
+    /// the shell holding a crumb it will replace the step's data with.
     private func reload() async {
         await model.load(sessionId: props.sessionId, weekStart: props.weekStart)
         if let crumb = model.crumb { props.setDecisionData(crumb) }
@@ -473,21 +436,16 @@ struct KidsStepView: View {
             await model.answer(
                 sessionId: props.sessionId, personId: personId, weekStart: props.weekStart,
                 focus: focus, forward: forward)
-            // The crumb rides the `rev` bump on the body rather than being set here twice.
             props.refresh()
         }
     }
 }
 
-/// The escape hatch's box.
+/// The escape hatch's box. `initial` is their saved answer or the draft they never saved,
+/// so reopening the box does not discard words somebody already dictated.
 ///
-/// `initial` is what they said last time when this is reopening their own answer, or the
-/// draft they typed and never saved — an empty box here discards words somebody already
-/// dictated and makes the chip above look inert.
-///
-/// `onDraft` fires ONCE, as the box goes away, with whatever was in it. On disappear rather
-/// than on every keystroke deliberately: the draft lives in the step's model, and writing
-/// to it per character would re-render every card in the step to move a cursor.
+/// `onDraft` fires ONCE, as the box goes away — per keystroke would re-render every card
+/// in the step just to move a cursor.
 private struct PlanningKidTypeIn: View {
     let placeholder: String
     let accessibilityLabel: String
@@ -497,8 +455,6 @@ private struct PlanningKidTypeIn: View {
     let onSave: (String) -> Void
     let onDraft: (String) -> Void
 
-    /// The server caps free text at 120 characters and 400s past it; the box simply stops
-    /// rather than letting a kid type a sentence that gets rejected.
     private static let maxLength = 120
 
     @State private var text: String

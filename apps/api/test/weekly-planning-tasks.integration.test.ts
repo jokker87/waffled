@@ -1,13 +1,8 @@
 // Weekly Planning · step 8 (Tasks) — "Who's doing what?"
 //
-// The step is a read over CHORE DEFINITIONS, not chore instances: an instance is one
-// day and the session plans a whole week, so assigning next Wednesday's instance of a
-// recurring chore would say nothing about Thursday's (and reading a week to build the
-// board would side-effect-materialize seven days of instances). The board therefore
-// shows unassigned chore *definitions* in a strip, one column per household member, and
-// each column's footer states the recurring load that person already carries.
-//
-// It stores nothing of its own: every write goes through the existing chores endpoints.
+// A read over CHORE DEFINITIONS, not instances: an instance is one day, the session plans a
+// week, and reading a week would side-effect-materialize seven days. The step stores nothing
+// of its own — every write goes through the chores endpoints.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from './helpers/pg'
 import jwt from 'jsonwebtoken'
@@ -28,9 +23,7 @@ function mint(sub: string): string {
   return jwt.sign({}, SECRET, { algorithm: 'HS256', subject: sub, issuer: 'waffled-local', audience: 'waffled-api', expiresIn: '1h' })
 }
 
-// lambda-api reads the query off `queryStringParameters`, NOT off the path — a `?x=y`
-// left in `path` is silently invisible to the handler. Split it here, as the shell's
-// weekly-planning.integration.test.ts does.
+// lambda-api reads the query off `queryStringParameters`, NOT off the path.
 function call(method: string, path: string, token?: string, body?: unknown) {
   const headers: Record<string, string> = {}
   if (token) headers.authorization = `Bearer ${token}`
@@ -74,9 +67,7 @@ beforeAll(async () => {
     `insert into identities (household_id, person_id, provider, auth0_user_id, email_verified) values ($1,$2,'password','dev|kevin',true)`,
     [householdId, ownerId]
   )
-  // The board is one column per member, so the fixture needs more than the owner.
-  // /api/persons doesn't create logins, so seed the people directly (as
-  // chores.integration.test.ts does).
+  // One column per member, so seed the people directly — /api/persons doesn't create logins.
   const kids = await query<{ id: string; name: string }>(
     `insert into persons (household_id, name, member_type, sort_order)
      values ($1,'Wally','kid',1), ($1,'Lottie','kid',2) returning id, name`,
@@ -107,7 +98,6 @@ describe('planning · tasks · gating', () => {
 
 describe('planning · tasks · the board', () => {
   it('gives every member a column and states the recurring load they already carry', async () => {
-    // Wally already carries two standing chores; Lottie one; Kevin none.
     await call('POST', '/api/chores', kevin, { title: 'Feed the dog', personId: wallyId, rrule: 'FREQ=DAILY' })
     await call('POST', '/api/chores', kevin, { title: 'Trash out', personId: wallyId, rrule: 'FREQ=WEEKLY;BYDAY=TU' })
     await call('POST', '/api/chores', kevin, { title: 'Water plants', personId: lottieId, rrule: 'FREQ=WEEKLY;BYDAY=SA' })
@@ -129,7 +119,6 @@ describe('planning · tasks · the board', () => {
     expect(strip(b)).toEqual(expect.arrayContaining(['Sweep the porch', 'Fold the towels']))
     expect(b.unassigned.find((c) => c.title === 'Sweep the porch')!.cadence).toBe('weekly')
     expect(b.unassigned.find((c) => c.title === 'Fold the towels')!.cadence).toBe('daily')
-    // A chore that already has someone is never in the strip.
     expect(strip(b)).not.toContain('Feed the dog')
   })
 
@@ -137,22 +126,18 @@ describe('planning · tasks · the board', () => {
     const before = await board()
     const chore = before.unassigned.find((c) => c.title === 'Sweep the porch')!
 
-    // The write is the existing chores endpoint; this step adds none of its own.
     expect((await call('PATCH', `/api/chores/${chore.id}`, kevin, { personId: lottieId })).statusCode).toBe(200)
 
     const after = await board()
     expect(strip(after)).not.toContain('Sweep the porch')
-    // Lottie's footer grows by the one she just took on.
     expect(who(after, 'Lottie').recurringChores).toBe(who(before, 'Lottie').recurringChores + 1)
   })
 
   it('nobody is a real answer — the untaken chore survives the pass that assigned the other', async () => {
-    // The previous test handed 'Sweep the porch' to Lottie in the same sitting; the
-    // one nobody took has to come back unchanged rather than being swept up with it.
+    // The one nobody took must come back unchanged, not swept up with the one handed over.
     const b = await board()
     expect(strip(b)).not.toContain('Sweep the porch')
     expect(strip(b)).toContain('Fold the towels')
-    // Still genuinely unowned — no column absorbed it.
     const { query } = await import('../src/platform/db')
     const { rows } = await query<{ person_id: string | null }>(
       `select person_id from chores where household_id = $1 and title = 'Fold the towels'`,
@@ -164,9 +149,8 @@ describe('planning · tasks · the board', () => {
 
 describe('planning · tasks · one-offs already on the kiosk board', () => {
   it('surfaces the pending instance so assigning also fixes the day it already landed on', async () => {
-    // A one-off materializes its single instance at create time, snapshotting
-    // person_id — so PATCHing only the definition would leave today's kiosk board
-    // still showing it up for grabs. The read hands back that instance id.
+    // A one-off snapshots person_id onto its instance at create time, so PATCHing only the
+    // definition leaves the kiosk board showing it up for grabs.
     const created = await call('POST', '/api/chores', kevin, { title: 'Return the library books', personId: null, rrule: null })
     expect(created.statusCode).toBe(201)
     const choreId = json(created).chore.id
@@ -176,12 +160,9 @@ describe('planning · tasks · one-offs already on the kiosk board', () => {
     expect(row.cadence).toBe('once')
     expect(row.pendingInstanceIds).toEqual([expect.any(String)])
 
-    // Both writes are existing chores endpoints.
     await call('PATCH', `/api/chores/${choreId}`, kevin, { personId: wallyId })
     expect((await call('POST', `/api/chore-instances/${row.pendingInstanceIds[0]}/assign`, kevin, { personId: wallyId })).statusCode).toBe(200)
 
-    // The kiosk Chores board — the same layout this step mirrors — now shows it
-    // under Wally rather than up for grabs.
     const day = json(await call('GET', '/api/chore-instances/today', kevin))
     const inst = day.instances.find((i: { choreTitle: string }) => i.choreTitle === 'Return the library books')
     expect(inst.personId).toBe(wallyId)
@@ -189,9 +170,7 @@ describe('planning · tasks · one-offs already on the kiosk board', () => {
   })
 
   it('hands back EVERY unclaimed day, not just the first', async () => {
-    // A recurring chore can already be sitting on several days: anyone who opened the
-    // kiosk board on Monday and again on Tuesday materialized both. Assigning only the
-    // earliest would leave the rest up for grabs there while this board shows an owner.
+    // Assigning only the earliest of several materialized days leaves the rest up for grabs.
     const created = await call('POST', '/api/chores', kevin, { title: 'Wipe the counters', personId: null, rrule: 'FREQ=DAILY' })
     const choreId = json(created).chore.id
     const soon = (n: number) => {
@@ -199,7 +178,6 @@ describe('planning · tasks · one-offs already on the kiosk board', () => {
       d.setUTCDate(d.getUTCDate() + n)
       return d.toISOString().slice(0, 10)
     }
-    // Two different days of the board — two materialized, unclaimed instances.
     await call('GET', `/api/chore-instances/today?date=${soon(1)}`, kevin)
     await call('GET', `/api/chore-instances/today?date=${soon(2)}`, kevin)
 
@@ -211,7 +189,6 @@ describe('planning · tasks · one-offs already on the kiosk board', () => {
       expect((await call('POST', `/api/chore-instances/${id}/assign`, kevin, { personId: lottieId })).statusCode).toBe(200)
     }
 
-    // Both days now read as Lottie's on the kiosk board, not just the first.
     for (const d of [soon(1), soon(2)]) {
       const day = json(await call('GET', `/api/chore-instances/today?date=${d}`, kevin))
       expect(day.instances.find((i: { choreTitle: string }) => i.choreTitle === 'Wipe the counters').personId).toBe(lottieId)
@@ -219,9 +196,7 @@ describe('planning · tasks · one-offs already on the kiosk board', () => {
   })
 
   it('does the same for a recurring chore whose instance for today already exists', async () => {
-    // Anyone opening the kiosk board today materialized today's instances, unassigned
-    // ones included — so a recurring chore can have one waiting too. Handing it out
-    // fixes today as well as every day after (the definition covers those).
+    // Today's instances are already materialized, so handing the chore out fixes today too.
     const b = await board()
     const towels = b.unassigned.find((c) => c.title === 'Fold the towels')!
     expect(towels.cadence).toBe('daily')
@@ -238,9 +213,8 @@ describe('planning · tasks · one-offs already on the kiosk board', () => {
   })
 })
 
-// A column is what someone is CARRYING for the week — drawn from the chores they own,
-// not from whatever this sitting happened to move. That's the difference that makes the
-// board survive a refresh, and it's what these cover.
+// A column is what someone is CARRYING — from the chores they own, not from what this
+// sitting moved. That is what makes the board survive a refresh.
 describe('planning · tasks · the week each person is carrying', () => {
   let weekStart: string
   // Nth day of the planned week (0 = the week start), as a plain UTC date.
@@ -255,14 +229,12 @@ describe('planning · tasks · the week each person is carrying', () => {
     const b = await board()
     weekStart = b.weekStart
     expect(weekStart).toMatch(/^\d{4}-\d{2}-\d{2}$/)
-    // The server owns the boundary: naming the Wednesday of a week must not key the
-    // board to a Wednesday (the grocery/meal-planner lesson).
+    // The server owns the boundary: naming a week's Wednesday must not key the board to one.
     const mid = json(await call('GET', `/api/weekly-planning/tasks?weekStart=${day(3)}`, kevin))
     expect(mid.weekStart).toBe(weekStart)
   })
 
   it('fills a column from what that person holds, with the days each chore lands on', async () => {
-    // A standing chore on one weekday, a daily one, and a one-off inside the week.
     await call('POST', '/api/chores', kevin, { title: 'Vacuum upstairs', personId: lottieId, rrule: `FREQ=WEEKLY;BYDAY=${['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'][new Date(`${day(3)}T00:00:00Z`).getUTCDay()]}` })
     await call('POST', '/api/chores', kevin, { title: 'Dishes', personId: lottieId, rrule: 'FREQ=DAILY' })
     await call('POST', '/api/chores', kevin, { title: 'Gift for the party', personId: lottieId, rrule: null, dueOn: day(5) })
@@ -270,19 +242,15 @@ describe('planning · tasks · the week each person is carrying', () => {
     const mine = held(await board(), 'Lottie')
     const titles = mine.map((c) => c.title)
     expect(titles).toEqual(expect.arrayContaining(['Vacuum upstairs', 'Dishes', 'Gift for the party']))
-    // The day chip's data: one weekday, every day, and the one-off's own date.
     expect(mine.find((c) => c.title === 'Vacuum upstairs')!.days).toEqual([day(3)])
     expect(mine.find((c) => c.title === 'Dishes')!.days).toHaveLength(7)
     expect(mine.find((c) => c.title === 'Gift for the party')!.days).toEqual([day(5)])
-    // The header count is what they're holding this week.
     expect(mine.length).toBe(titles.length)
   })
 
   it('leaves out a one-off that belongs to a different week', async () => {
     await call('POST', '/api/chores', kevin, { title: 'Renew the passport', personId: lottieId, rrule: null, dueOn: day(30) })
     expect(held(await board(), 'Lottie').map((c) => c.title)).not.toContain('Renew the passport')
-    // …and it is genuinely on a later week's board, not lost. (Assert the week we got
-    // back really is the later one — otherwise this could pass by reading the default.)
     const later = json(await call('GET', `/api/weekly-planning/tasks?weekStart=${day(28)}`, kevin))
     expect(later.weekStart).toBe(day(28))
     const lottie = later.people.find((p: BoardPerson) => p.name === 'Lottie')
@@ -296,7 +264,6 @@ describe('planning · tasks · the week each person is carrying', () => {
 
     await call('PATCH', `/api/chores/${choreId}`, kevin, { personId: wallyId })
 
-    // A brand-new request — nothing carried over from the one that assigned it.
     const fresh = await board()
     const wally = held(fresh, 'Wally').find((c) => c.title === 'Garage sweep')!
     expect(wally.days).toEqual([day(2)])
@@ -306,10 +273,8 @@ describe('planning · tasks · the week each person is carrying', () => {
   it('a chore carried over from before the week arrives without a day of its own', async () => {
     const { query } = await import('../src/platform/db')
     const created = await call('POST', '/api/chores', kevin, { title: 'Fix the gate', personId: wallyId, rrule: null, dueOn: day(0) })
-    // Backdate its single instance to a day that has genuinely PASSED — a rollover
-    // one-off still open. Relative to today, not to the week: the planned week can
-    // start as much as six days out, so "before the week" alone would include days
-    // still ahead of us, which nobody has carried anything over from yet.
+    // Backdate to a day that has genuinely PASSED, relative to TODAY: the planned week can
+    // start six days out, so "before the week" would include days still ahead.
     const past = new Date()
     past.setUTCDate(past.getUTCDate() - 5)
     await query(`update chore_instances set due_on = $2::date where chore_id = $1`, [
@@ -323,11 +288,9 @@ describe('planning · tasks · the week each person is carrying', () => {
   })
 })
 
-// Handing a chore over has to be REVERSIBLE — back up for grabs, or on to somebody
-// else — and the kiosk board must never be left disagreeing with this one. A chore can
-// already have several pending days materialized, so every one of them has to follow
-// the change in BOTH directions, which is why the board hands those days back for a
-// chore that already has an owner too (it used to hand them back only for unowned ones).
+// Handing a chore over has to be REVERSIBLE and the kiosk board must never disagree: every
+// already-materialized pending day follows the change in BOTH directions, which is why the
+// board hands those days back for an owned chore too.
 describe('planning · tasks · handing a chore out is reversible', () => {
   const soon = (n: number) => {
     const d = new Date()
@@ -342,7 +305,6 @@ describe('planning · tasks · handing a chore out is reversible', () => {
   it('takes a chore back off someone — every pending day follows, both ways', async () => {
     const created = await call('POST', '/api/chores', kevin, { title: 'Sort the recycling', personId: null, rrule: 'FREQ=DAILY' })
     const choreId = json(created).chore.id
-    // Two days of the kiosk board have been opened, so two instances exist.
     await call('GET', `/api/chore-instances/today?date=${soon(1)}`, kevin)
     await call('GET', `/api/chore-instances/today?date=${soon(2)}`, kevin)
 
@@ -355,8 +317,7 @@ describe('planning · tasks · handing a chore out is reversible', () => {
     expect(await dayOwner(soon(1), 'Sort the recycling')).toBe(wallyId)
     expect(await dayOwner(soon(2), 'Sort the recycling')).toBe(wallyId)
 
-    // THE UNDO. The board hands back the pending days of a chore that already has an
-    // owner, which is what makes taking it back possible at all.
+    // THE UNDO: the board hands back the pending days of an owned chore.
     const held = who(await board(), 'Wally').chores.find((c) => c.title === 'Sort the recycling')!
     expect(held.pendingInstanceIds.length).toBeGreaterThanOrEqual(2)
     expect((await call('PATCH', `/api/chores/${choreId}`, kevin, { personId: null })).statusCode).toBe(200)
@@ -364,7 +325,6 @@ describe('planning · tasks · handing a chore out is reversible', () => {
       expect((await call('POST', `/api/chore-instances/${id}/assign`, kevin, { personId: null })).statusCode).toBe(200)
     }
 
-    // Up for grabs again on this board AND on the kiosk one — no day left holding a name.
     expect(strip(await board())).toContain('Sort the recycling')
     expect(await dayOwner(soon(1), 'Sort the recycling')).toBe(null)
     expect(await dayOwner(soon(2), 'Sort the recycling')).toBe(null)
@@ -389,18 +349,14 @@ describe('planning · tasks · handing a chore out is reversible', () => {
   })
 })
 
-// "Carried over" means a day that has actually PASSED with the task still open. A
-// session normally plans NEXT week, so anything created today is dated before the week
-// being planned — which is not the same thing as being left over from it.
+// "Carried over" means a day that has actually PASSED with the task still open.
 describe('planning · tasks · a brand-new task is not carried over', () => {
   it('a one-off created today says when it is for, not that it was left behind', async () => {
     const created = await call('POST', '/api/chores', kevin, { title: 'Book the sitter', personId: wallyId, rrule: null })
     expect(created.statusCode).toBe(201)
 
     const card = who(await board(), 'Wally').chores.find((c) => c.title === 'Book the sitter')
-    // It is on the board (a task you just made must not vanish)…
     expect(card).toBeTruthy()
-    // …and it does not claim to be a leftover.
     expect(card!.carriedOver).toBe(false)
     expect(card!.dueOn).toMatch(/^\d{4}-\d{2}-\d{2}$/)
   })
@@ -411,8 +367,7 @@ describe('planning · tasks · a brand-new task is not carried over', () => {
   })
 })
 
-// A one-off's day lives on its single pending INSTANCE, not on a chores column — so
-// moving it is a `dueOn` patch of the chore, the one chores field this step needed.
+// A one-off's day lives on its single pending INSTANCE, so moving it is a `dueOn` patch.
 describe('planning · tasks · setting the day on a task', () => {
   const day = async (n: number) => {
     const d = new Date(`${(await board()).weekStart}T00:00:00Z`)
@@ -425,7 +380,6 @@ describe('planning · tasks · setting the day on a task', () => {
     const choreId = json(created).chore.id
     const target = await day(2)
 
-    // dueOn ALONE: nothing else about the chore is being edited.
     expect((await call('PATCH', `/api/chores/${choreId}`, kevin, { dueOn: target })).statusCode).toBe(200)
 
     const card = who(await board(), 'Wally').chores.find((c) => c.title === 'Drop the parcel')!
@@ -475,9 +429,8 @@ describe('planning · tasks · the step decision', () => {
   })
 })
 
-// A task added DURING the session belongs to the week being planned, not to whatever
-// day somebody happened to open the board on. The board therefore names that day
-// itself — the week boundary is the server's, and so is "today".
+// A task added DURING the session belongs to the week being planned; the boundary and
+// "today" are both the server's.
 describe('planning · tasks · the day a new task lands on', () => {
   const householdToday = async () => {
     const { query } = await import('../src/platform/db')
@@ -498,7 +451,6 @@ describe('planning · tasks · the day a new task lands on', () => {
 
   it('is today when the session is planning the week today falls in', async () => {
     const today = await householdToday()
-    // resolveWeekStart snaps today to its own week start, so this is the current week.
     const now = json(await call('GET', `/api/weekly-planning/tasks?weekStart=${today}`, kevin)) as Board
     expect(now.newTaskDay).toBe(today)
     expect(now.newTaskDay >= now.weekStart).toBe(true)
@@ -513,9 +465,8 @@ describe('planning · tasks · the day a new task lands on', () => {
   })
 })
 
-// The card doesn't draw "Needs a parent's OK" or photo proof, but the chore editor
-// opened from it does — and a client that can't see a flag can only send it back as
-// false. So the board states them.
+// The card doesn't draw those flags but the chore editor opened from it does, and a client
+// that can't see a flag can only send it back as false.
 describe('planning · tasks · what the card can be edited from', () => {
   it('carries the flags the editor prefills, not just the ones it draws', async () => {
     const created = await call('POST', '/api/chores', kevin, {

@@ -4,14 +4,10 @@ import mod, { weekRangeLabel, weekSummary } from './CalendarStep'
 import type { PlanningStep } from '../../../lib/api'
 import type { StepBodyProps } from '../registry'
 
-// Step 2 · Calendar. The week is one card of seven DAY ROWS — a weekday in caps over a
-// serif date, that day's events as inline chips, a dashed `+` at the end of the row —
-// and adding is the app's own event modal, opened on the day you tapped.
-//
-// `weekStart` is pinned to a fixed Sunday rather than derived from today, because the
-// whole risk in this step is date handling: `new Date('2026-09-06')` is UTC midnight
-// and renders as the 5th west of Greenwich. A test that agreed with today's date would
-// never catch a row shifted by one.
+// Step 2 · Calendar. `weekStart` is pinned to a fixed Sunday rather than derived from today,
+// because the whole risk in this step is date handling: `new Date('2026-09-06')` is UTC midnight
+// and renders as the 5th west of Greenwich, and a test that agreed with today's date would never
+// catch a row shifted by one.
 
 const WEEK_START = '2026-09-06' // a Sunday; the week runs Sun Sep 6 -> Sat Sep 12
 
@@ -28,8 +24,6 @@ const step: PlanningStep = {
   status: 'pending',
   data: {},
   decidedAt: null,
-  // The shell renders the parked-note handoff, not the step — see Handoff in
-  // WeeklyPlanning.tsx. A step test mounts `Body` alone, so there is never one here.
   parked: [],
 }
 
@@ -38,8 +32,7 @@ const PERSONS = [
   { id: 'p2', name: 'Nora', memberType: 'adult', isAdmin: false, avatarEmoji: '🦊', colorHex: '#25A368' },
 ]
 
-// A timed event on `day` at local `time` — built by LOCAL parse so the fixture lands on
-// the day it says it does whatever zone the test machine is in.
+// Built by LOCAL parse so the fixture lands on the day it says it does, whatever the zone.
 const at = (day: string, time: string) => new Date(`${day}T${time}`).toISOString()
 
 const ev = (over: Record<string, unknown>) => ({
@@ -57,8 +50,6 @@ const ev = (over: Record<string, unknown>) => ({
   ...over,
 })
 
-// A STATEFUL double: a POSTed event really joins the week, so "adding is visible
-// immediately" is what's under test rather than a canned view replayed back.
 function mockApi(initial: Record<string, unknown>[]) {
   const events = [...initial]
   const reads: string[] = []
@@ -67,8 +58,8 @@ function mockApi(initial: Record<string, unknown>[]) {
     const u = String(url)
     const method = init?.method ?? 'GET'
     if (u.startsWith('/api/persons')) return { ok: true, json: async () => ({ persons: PERSONS }) }
-    // useEventColorSource + useHousehold both read this; no household ⇒ the device zone,
-    // which is the zone the fixtures above were built in.
+    // useEventColorSource + useHousehold both read this; no household ⇒ the device zone, which
+    // is the zone the fixtures were built in.
     if (u.startsWith('/api/household')) return { ok: true, json: async () => ({ household: null, person: null }) }
     if (u.startsWith('/api/events') && method === 'POST') {
       const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>
@@ -88,15 +79,13 @@ function mockApi(initial: Record<string, unknown>[]) {
     }
     if (u.startsWith('/api/events')) {
       reads.push(u)
-      // A COPY per response, as a real `res.json()` gives. Handing the same array back
-      // twice hides the add behind React's identity check — the state array would be
-      // mutated in place and nothing would re-render.
+      // A COPY per response, as a real `res.json()` gives: handing the same array back twice
+      // hides the add behind React's identity check.
       return { ok: true, json: async () => ({ from: '', to: '', events: [...events] }) }
     }
-    // The shared event modal also reads the goals it could count toward and the
-    // Google calendars it could write to. Empty is the answer here — but they have to
-    // be SHAPED, not `{}`: `useGoals` assigns `d.goals` straight into state and
-    // EventModal filters it on the next render, so a bare `{}` crashes the modal.
+    // The shared event modal also reads goals and Google calendars. Empty is the answer here —
+    // but SHAPED, not `{}`: `useGoals` assigns `d.goals` straight into state, so a bare `{}`
+    // crashes the modal.
     if (u.startsWith('/api/goals')) return { ok: true, json: async () => ({ goals: [] }) }
     if (u.startsWith('/api/calendar/google/status')) return { ok: true, json: async () => ({ calendars: [] }) }
     return { ok: true, json: async () => ({}) }
@@ -125,15 +114,12 @@ function renderStep(over: Partial<StepBodyProps> = {}) {
 
 const day = (key: string) => screen.getByTestId(`wpc-day-${key}`)
 
-// The shared event modal, once it's up. It is the app's own `.modal-card` — this step
-// renders `EventModal`, it does not carry a second event form of its own.
 async function eventModal(): Promise<HTMLElement> {
   const heading = await screen.findByText('New event')
   return heading.closest('.modal-card') as HTMLElement
 }
 const modalIsOpen = () => !!screen.queryByText('New event')
 
-// Open the shared event modal from a day row's `+`, and type the line.
 async function compose(dayName: string, text: string) {
   fireEvent.click(await screen.findByRole('button', { name: new RegExp(`add an event on ${dayName}`, 'i') }))
   const modal = await eventModal()
@@ -149,21 +135,17 @@ describe('Weekly planning · step 2 · Calendar', () => {
     ])
     renderStep()
 
-    // Seven rows, Sun 6 -> Sat 12 — the week the SERVER handed us, not one computed here.
     await waitFor(() => expect(day('2026-09-06')).toBeInTheDocument())
     for (const k of ['2026-09-06', '2026-09-07', '2026-09-08', '2026-09-09', '2026-09-10', '2026-09-11', '2026-09-12']) {
       expect(day(k)).toBeInTheDocument()
     }
-    // A weekday in small caps over a large serif date.
     expect(within(day('2026-09-06')).getByText('SUN')).toBeInTheDocument()
     expect(within(day('2026-09-06')).getByText('Sep 6')).toBeInTheDocument()
     expect(within(day('2026-09-12')).getByText('SAT')).toBeInTheDocument()
     expect(within(day('2026-09-12')).getByText('Sep 12')).toBeInTheDocument()
 
-    // Real events, on their real days.
     expect(await within(day('2026-09-08')).findByText('Dentist')).toBeInTheDocument()
     expect(within(day('2026-09-12')).getByText('Swim meet')).toBeInTheDocument()
-    // …and a day with nothing says so, rather than being blank.
     expect(within(day('2026-09-07')).getByText('Nothing on the calendar')).toBeInTheDocument()
 
     // The window is exactly the planned week — an off-by-one here silently empties a row.
@@ -178,13 +160,11 @@ describe('Weekly planning · step 2 · Calendar', () => {
     renderStep()
 
     expect(await screen.findByText('Sep 6 – 12')).toBeInTheDocument()
-    // Two events, five days with nothing on them.
     expect(
       await screen.findByText('2 events · Sunday, Monday, Wednesday, Thursday and Friday are still open')
     ).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /add an event$/i })).toBeInTheDocument()
 
-    // What the card is, and what it isn't.
     expect(screen.getByText('This is everything your calendars already have. Add what isn’t here yet.')).toBeInTheDocument()
   })
 
@@ -211,7 +191,6 @@ describe('Weekly planning · step 2 · Calendar', () => {
     expect(chip.style.getPropertyValue('--ev')).toBe('#2F7FED')
     expect(within(chip).getByText('🐻')).toBeInTheDocument()
 
-    // All-day says so, and an unassigned event takes the neutral tint (no avatar to show).
     const bins = (within(day('2026-09-09')).getByText('Bins out')).closest('.wpc-chip') as HTMLElement
     expect(within(bins).getByText('All day')).toBeInTheDocument()
     expect(bins.style.getPropertyValue('--ev')).toBe('#6B6B70')
@@ -223,18 +202,15 @@ describe('Weekly planning · step 2 · Calendar', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /add an event on wednesday, sep 9/i }))
     const modal = await eventModal()
-    // Preselected to the tapped day — this is the app's event modal, not a second form.
     expect(within(modal).getByLabelText('Date')).toHaveValue('2026-09-09')
-    // …with everything it already knows how to ask: a duration, repeats, a location.
     expect(within(modal).getByLabelText('Duration')).toBeInTheDocument()
     expect(within(modal).getByText('Repeats')).toBeInTheDocument()
     expect(within(modal).getByLabelText('Location (optional)')).toBeInTheDocument()
   })
 
   it('adds the event AT THE TIME THAT WAS PICKED, for as long as was picked', async () => {
-    // The bug this step existed to fix: the old inline composer's time control was an
-    // invisible chip-sized `input[type=time]`, and every event landed at the 5pm
-    // default. A real time and a real duration have to reach the calendar.
+    // The old inline composer's time control was an invisible chip-sized `input[type=time]` and
+    // every event landed at the 5pm default. A real time and duration have to reach the calendar.
     const { posts } = mockApi([])
     const { setDecisionData, refresh } = renderStep()
 
@@ -247,15 +223,11 @@ describe('Weekly planning · step 2 · Calendar', () => {
     await waitFor(() => expect(posts.length).toBe(1))
     expect(posts[0]).toMatchObject({ title: 'Soccer practice', allDay: false, participantIds: ['p2'] })
     expect(posts[0].startsAt).toBe(at('2026-09-09', '08:30'))
-    // …and 8:30 for two hours ends at 10:30, not at the hardcoded hour it used to.
     expect(posts[0].endsAt).toBe(at('2026-09-09', '10:30'))
 
-    // Visible straight away, on Wednesday.
     expect(await within(day('2026-09-09')).findByText('Soccer practice')).toBeInTheDocument()
-    // The modal closes behind it.
     await waitFor(() => expect(modalIsOpen()).toBe(false))
 
-    // The crumb is a COUNT, never a copy of the calendar — the recap reads through.
     expect(setDecisionData).toHaveBeenCalledWith({ added: 1 })
     expect(refresh).toHaveBeenCalled()
   })
@@ -310,7 +282,6 @@ describe('Weekly planning · step 2 · Calendar', () => {
     const row = day('2026-09-08')
     expect(await within(row).findByText('Breakfast club')).toBeInTheDocument()
     expect(within(row).getByText('Lunch')).toBeInTheDocument()
-    // The fifth and sixth are behind the pill.
     expect(within(row).queryByText('Piano')).not.toBeInTheDocument()
 
     fireEvent.click(within(row).getByRole('button', { name: '+2 more' }))
@@ -346,7 +317,6 @@ describe('Weekly planning · step 2 · Calendar', () => {
 
     await waitFor(() => expect(modalIsOpen()).toBe(false))
     expect(posts.length).toBe(0)
-    // `{ added: 0 }` would be noise on the session record.
     expect(setDecisionData).not.toHaveBeenCalled()
   })
 
@@ -358,8 +328,6 @@ describe('Weekly planning · step 2 · Calendar', () => {
   })
 })
 
-// The two lines of prose the header computes. Pure, so they're worth pinning directly:
-// every branch of "how full is this week" is one string a family reads first.
 describe('the week’s own summary', () => {
   it('names the range, across a month boundary too', () => {
     expect(weekRangeLabel('2026-09-06')).toBe('Sep 6 – 12')

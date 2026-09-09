@@ -1,38 +1,19 @@
 import Foundation
 import Observation
 
-/// One act of the agenda and the steps under it — `PlanningFormat.stepsByAct`'s tuples,
-/// given a name so `ForEach` has something `Identifiable` to hold. The id is the act
-/// name plus the first step's key, because two separated runs CAN share an act name
-/// (the grouping is consecutive-runs-only, deliberately) and a duplicated id inside one
-/// `ForEach` makes SwiftUI reuse the wrong rows.
+/// One act of the agenda and its steps, given a name so `ForEach` has something
+/// `Identifiable`. The id includes the first step's key: two separated runs CAN share an act
+/// name, and a duplicated id makes SwiftUI reuse the wrong rows.
 struct PlanningActGroup: Identifiable, Equatable {
     let act: String
     let steps: [WaffledAPI.PlanningStep]
     var id: String { act + "\u{1}" + (steps.first?.key ?? "") }
 }
 
-/// Weekly Planning — the session shell's model.
-///
-/// A port of `apps/web/src/kiosk/WeeklyPlanning.tsx`'s state, with ONE substantive
-/// translation: the web keeps "which step am I looking at" in the URL (`/planning/:step`)
-/// and "which week" in the query. There is no URL here, so both become fields —
-/// `askedStep` and `requestedWeek` — and every place the web navigates, this model
-/// assigns. The list is short and it is the whole port, so it is worth naming:
-///
-///   * `jump(to:)`        sets `askedStep`, then moves the session's own pointer.
-///   * `answer(_:)`       sets `askedStep` to the next step, or clears it and completes.
-///   * `resume()`         sets `askedStep` to the session's pointer and drops the pause.
-///   * `leave()`          clears `askedStep` and records the pause.
-///   * `goWeek(_:)`       clears `askedStep` — a step key belongs to ITS week's session.
-///   * `discard()`        clears both.
-///
-/// The session's own `currentStep` stays the cross-DEVICE resume pointer; `askedStep` is
-/// only where THIS screen is, exactly as the URL was on the web.
-///
-/// Every network call is an injected closure with a `WaffledAPI()`-backed default — the
-/// test seam, and the reason `PlanningModelTests` can drive the whole session without a
-/// server.
+/// Weekly Planning — the session shell's model, a port of `WeeklyPlanning.tsx`'s state with
+/// one translation: the web keeps "which step am I looking at" in the URL and "which week"
+/// in the query, so here they are `askedStep`/`requestedWeek` and every place the web
+/// navigates this model assigns. `currentStep` stays the cross-DEVICE resume pointer.
 @MainActor
 @Observable
 final class PlanningModel {
@@ -68,7 +49,6 @@ final class PlanningModel {
     private let discardSessionCall: DiscardSession
     private let resolveLooseEndCall: ResolveLooseEnd
 
-    /// Where the per-device "I've stepped out" intent is kept. See `leave()`.
     private let defaults: UserDefaults
 
     init(
@@ -122,57 +102,39 @@ final class PlanningModel {
     // MARK: - State
 
     private(set) var view: WaffledAPI.WeeklyPlanningView?
-    /// A fetch has completed at least once. A FAILED fetch keeps the previous `view` and
-    /// still sets this — the `RestDomain` contract, so the screen never flashes "couldn't
-    /// load" over data it already had, and never sits on "Loading…" forever.
+    /// Set even by a FAILED fetch, which keeps the previous `view` (the `RestDomain` contract).
     private(set) var loaded = false
-    /// A write is in flight — every control in the shell disables on it.
     private(set) var busy = false
     private(set) var errorMessage: String?
 
-    /// The week the NEXT fetch asks for. `nil` means "the server's default week", which
-    /// is what keeps the everyday case following the calendar forward instead of pinning
-    /// whichever week happened to be default when the app launched.
+    /// The week the NEXT fetch asks for; `nil` means the server's default week.
     private(set) var requestedWeek: String?
 
     /// The step this screen is looking at, or `nil` to follow the session's own pointer.
-    /// The iOS stand-in for the web's `/planning/:step`.
     private(set) var askedStep: String?
 
-    /// The session this DEVICE has stepped out of. See `leave()`.
     private(set) var pausedSessionId: String?
 
     // Precomputed once per load — date math must never run in the render path.
     private(set) var weekLabel = ""
     private(set) var sessionDayName = ""
-    /// "Sep 2, 5:32 PM" for the completed record's byline, or nil while there is none.
     private(set) var savedAtLabel: String?
-    /// The lists the loose-ends step could ask about. Empty until `loadListCandidates()`,
-    /// and empty is a real answer: a household with no custom lists has nothing to choose
-    /// between, so the setting hides itself rather than showing an empty card.
+    /// The lists the loose-ends step could ask about. Empty is a real answer.
     private(set) var listCandidates: [WaffledAPI.PlanningListCandidate] = []
     private(set) var actGroups: [PlanningActGroup] = []
-    /// Every runnable step's 1-based position, keyed by step key.
-    ///
-    /// NOT `PlanningStep.number`: the server sets that from the CATALOG index
-    /// (`STEPS.map((s, i) => ({ number: i + 1 }))`), so with a module off it skips —
-    /// "4 of 9" with no step 3. The web counts positions off the runnable list and so
-    /// does this.
+    /// Every runnable step's 1-based position, keyed by step key. NOT `PlanningStep.number`:
+    /// the server sets that from the CATALOG index, so with a module off it skips — "4 of 9"
+    /// with no step 3.
     private(set) var stepNumbers: [String: Int] = [:]
 
-    // The crumb the current step wants kept on the record, and the step that set it.
-    //
-    // Pairing the two is what makes "a crumb belongs to the step that set it" structural
-    // rather than a `.onChange` somebody can forget: a crumb whose owner is no longer on
-    // screen simply isn't read. It is only ever PERSISTED when the step is answered, so a
-    // step that is used and walked away from loses it — by design.
+    // The crumb the current step wants kept, and the step that set it: pairing them makes
+    // "a crumb belongs to its step" structural. Persisted only when the step is answered.
     private var decisionData: [String: JSONValue]?
     private var decisionStepKey: String?
 
     // MARK: - Derived
 
     var steps: [WaffledAPI.PlanningStep] { view?.steps ?? [] }
-    /// The steps that actually run — what the counter counts and the sheet lists.
     var runnable: [WaffledAPI.PlanningStep] { PlanningFormat.availableSteps(steps) }
     var session: WaffledAPI.PlanningSession? { view?.session }
     var config: WaffledAPI.WeeklyPlanningConfig? { view?.config }
@@ -183,15 +145,9 @@ final class PlanningModel {
         return PlanningFormat.nextStepAfter(steps, key: key)
     }
 
-    /// 1-based position of the step on screen, or 0 when there isn't one.
     var position: Int { current.flatMap { stepNumbers[$0.key] } ?? 0 }
-    /// The 2px hair — POSITION over total, which is what `WeeklyPlanning.tsx` draws.
-    ///
-    /// Settled-over-available was the other candidate and reads better in isolation, but
-    /// the two definitions agree only at the ends of a session: jump ahead from the agenda
-    /// sheet and they diverge. A bar that fills differently on the phone than on the kiosk
-    /// for the SAME session is worse than either definition, so this matches the web.
-    /// (`PlanningFormat.settledFraction` is the other one, and the Today card wants it.)
+    /// The 2px hair — POSITION over total, as `WeeklyPlanning.tsx` draws it. A bar that fills
+    /// differently on phone and kiosk for the same session is worse than either definition.
     var progress: Double { PlanningFormat.hairFraction(steps, currentKey: current?.key) }
 
     /// The stepper's floor: a week that has already finished cannot be planned.
@@ -200,49 +156,31 @@ final class PlanningModel {
         return view.weekStart > view.minWeekStart
     }
 
-    /// Every step reads a module that's off (or was turned off by hand) — there is no
-    /// session to run.
     var hasNoRunnableSteps: Bool { loaded && view != nil && runnable.isEmpty }
 
-    /// The finished record is the surface. Checked BEFORE the paused screen, as on the
-    /// web: a completed session is a receipt whether or not somebody once stepped out.
-    ///
-    /// `askedStep` overrides it, for the same reason it overrides `isPaused` directly
-    /// below: **asking for a step by name is asking to be in the session.** That became
-    /// load-bearing when the record started showing the recap read-back, because the
-    /// recap's rows are POINTERS — each names the step whose module owns that decision —
-    /// and without this they were buttons that did nothing. "Leave for now" clears
-    /// `askedStep` again, so the record is still reachable from inside.
-    ///
-    /// It yields only to a step that can actually RUN. `resolveCurrent` falls back to the
-    /// first runnable step when the asked-for one isn't available, so without that guard
-    /// following a pointer to a step whose module has since been turned off would leave
-    /// the record and silently dump you on step 1 — which looks like the app losing your
-    /// place rather than declining to go somewhere that no longer exists.
+    /// The finished record is the surface, checked BEFORE the paused screen: a completed
+    /// session is a receipt whether or not somebody stepped out. `askedStep` overrides it (as
+    /// it does `isPaused`), and yields only to a RUNNABLE step, or `resolveCurrent` dumps you
+    /// on step 1.
     var showsRecord: Bool {
         guard session?.isCompleted == true else { return false }
         guard let asked = askedStep else { return true }
         return !runnable.contains { $0.key == asked }
     }
 
-    /// "Left for now": this device stepped out of THIS session and hasn't asked for a
-    /// step since. An explicitly-asked-for step overrides it — asking for a step by name
-    /// is asking to be in the session.
+    /// "Left for now": stepped out of THIS session, with no step asked for since.
     var isPaused: Bool {
         guard let session, session.isActive else { return false }
         return pausedSessionId == session.id && askedStep == nil
     }
 
-    /// The steps this session actually decided, for the record.
     var decidedSteps: [WaffledAPI.PlanningStep] { runnable.filter(\.isSettled) }
     var settledCount: Int { decidedSteps.count }
 
     // MARK: - Loading
 
-    /// Re-read the session view.
-    ///
-    /// A failure keeps the last good view and still marks the model loaded — the screen
-    /// must not blank out because one refresh lost the network.
+    /// Re-read the session view. A failure keeps the last good view and still marks the model
+    /// loaded — the screen must not blank because one refresh lost the network.
     func load() async {
         if let latest = try? await fetchView(requestedWeek) {
             apply(latest)
@@ -264,18 +202,15 @@ final class PlanningModel {
         }
     }
 
-    /// The bare config plus the SERVER-OWNED catalog (`key/title/ask/primary/act/
-    /// requiresModule` — no availability, no status). Cheaper than the full view when
-    /// only the day/time is wanted.
+    /// The bare config plus the SERVER-OWNED catalog. Cheaper than the full view.
     func loadConfigCatalog() async -> WaffledAPI.WeeklyPlanningConfigView? {
         try? await fetchConfig()
     }
 
     // MARK: - Writes
 
-    /// The web's `go()`: one write at a time, and ALWAYS refetch afterwards — the
-    /// server's answer, not the optimistic guess, is what the counter and the agenda
-    /// sheet render from.
+    /// The web's `go()`: one write at a time, and ALWAYS refetch — the server's answer, not
+    /// the optimistic guess, is what the shell renders.
     private func go(_ work: () async throws -> Void) async {
         guard !busy else { return }
         busy = true
@@ -291,7 +226,6 @@ final class PlanningModel {
 
     func dismissError() { errorMessage = nil }
 
-    /// Start this week's session — or resume the one already there; the route does both.
     func start() async {
         let week = view?.weekStart
         await go {
@@ -303,8 +237,7 @@ final class PlanningModel {
         }
     }
 
-    /// Answer the step on screen. Two writes that belong together: record the answer,
-    /// then move the driver on — and when there is no next step, the answer IS the save.
+    /// Answer the step on screen; with no next step, the answer IS the save.
     func answer(_ status: String) async {
         guard let session, let step = current else { return }
         let crumb = crumbForCurrentStep
@@ -318,40 +251,29 @@ final class PlanningModel {
             } else {
                 _ = try await completeSessionCall(session.id)
                 askedStep = nil
-                // The session is finished, so an old "not right now" is stale: without
-                // this, reopening the record and then coming back to the feature would
-                // land on "Left for now" instead of the session.
+                // The session is finished, so an old "not right now" is stale — otherwise
+                // coming back from the record lands on "Left for now".
                 if pausedSessionId == session.id { writePaused(nil) }
             }
         }
     }
 
-    /// Land on a step from the agenda sheet, and move the session's pointer with you so
-    /// another device resumes in the same place.
+    /// Land on a step from the agenda sheet, moving the pointer so another device follows.
     func jump(to key: String) async {
         askedStep = key
         guard let session else { return }
         await go { _ = try await patchSessionCall(session.id, key, nil) }
     }
 
-    /// SHOW a step without claiming the session moved there.
-    ///
-    /// The difference from `jump(to:)` is the whole point, and it is not cosmetic:
-    /// `jump` is the agenda sheet's gesture and it PATCHes `currentStep`, which is the
-    /// cross-DEVICE resume pointer. The recap's rows are links — on the web they are
-    /// literally `<Link to="/planning/<step>">`, which changes the address and nothing
-    /// else, and the URL-sync effect there leaves a path naming a runnable step alone
-    /// ("a pasted link outranks the pointer").
-    ///
-    /// So following a recap row must not tell the kiosk in the kitchen that the family
-    /// went back to step 4. `askedStep` is this device's view; `currentStep` is the
-    /// session's.
+    /// SHOW a step without claiming the session moved there. `jump(to:)` is the agenda
+    /// sheet's gesture and PATCHes `currentStep`, the cross-DEVICE pointer; a recap row is
+    /// only a link, so following one must not tell the kitchen kiosk the family went back.
     func show(_ key: String) {
         askedStep = key
     }
 
-    /// Reopen a saved session. `status` is the only field sent — `currentStep` is omitted
-    /// so the server leaves the pointer exactly where the session ended.
+    /// Reopen a saved session. `status` is the only field sent, so the server leaves the
+    /// pointer where the session ended.
     func reopen() async {
         guard let session else { return }
         await go {
@@ -360,8 +282,7 @@ final class PlanningModel {
         }
     }
 
-    /// Throw the session away and put the week back to its lobby. What it decided lives
-    /// in the modules that own it and stays put.
+    /// Throw the session away. What it decided lives in the modules that own it.
     func discard() async {
         guard let session else { return }
         await go {
@@ -372,13 +293,11 @@ final class PlanningModel {
         }
     }
 
-    /// Move the stepper. Drops the step: that week has its own session (or none), and
-    /// carrying this week's step across would name a step of a different record.
+    /// Move the stepper, dropping the step: it would name a step of a different record.
     func goWeek(_ week: String) async {
         askedStep = nil
         clearCrumb()
-        // `nil` when it IS the default, so the everyday case keeps following the calendar
-        // forward rather than pinning today's default week for the life of the process.
+        // `nil` when it IS the default, so the everyday case keeps following the calendar.
         requestedWeek = (week == view?.defaultWeekStart) ? nil : week
         await load()
     }
@@ -397,18 +316,9 @@ final class PlanningModel {
 
     /// "I've stepped out of this session" — remembered on THIS DEVICE only.
     ///
-    /// Opening Planning resumes the active session on purpose: it is what lets another
-    /// device pick a session up mid-way. But that also made leaving meaningless — the
-    /// button did no more than the tab bar already does. So leaving records the intent.
-    ///
-    /// **`UserDefaults`, not memory and not the server.** Not memory, because the intent
-    /// has to survive leaving the feature and tapping back into it — which is precisely
-    /// the gesture it exists to answer, and which throws away every `@State` this screen
-    /// owns. Not the server, because "not right now" is one person at one screen, and
-    /// writing it to the session row would reach into the very device the resume feature
-    /// exists for. The session itself is untouched: still active, still exactly where it
-    /// was. The key holds a session id, so a value left behind by a session that has
-    /// since been discarded is inert — it can never match again.
+    /// `UserDefaults`, not memory (the intent must survive tapping back in, the very gesture
+    /// that throws away this screen's `@State`) and not the server ("not right now" is one
+    /// person at one screen). The key holds a session id, so a stale value is inert.
     func leave() {
         guard let id = session?.id else { return }
         askedStep = nil
@@ -416,7 +326,6 @@ final class PlanningModel {
         writePaused(id)
     }
 
-    /// Pick it back up. Drops the pause and lands on the session's own pointer.
     func resume() {
         writePaused(nil)
         askedStep = session?.currentStep
@@ -435,8 +344,7 @@ final class PlanningModel {
 
     // MARK: - The step's crumb
 
-    /// `PlanningStepProps.setDecisionData`. Held, never written on its own — see
-    /// `decisionData`.
+    /// `PlanningStepProps.setDecisionData`. Held, never written on its own.
     func setDecisionData(_ data: [String: JSONValue]?) {
         decisionData = data
         decisionStepKey = data == nil ? nil : current?.key
@@ -455,12 +363,7 @@ final class PlanningModel {
 
     // MARK: - Parked notes (the shell's handoff banner)
 
-    /// Settle one parked note. Returns true when the server took it, so the banner can
-    /// hide the row before the refetch lands — the refetch is what makes it true, this is
-    /// what makes it FEEL true.
-    ///
-    /// A failure leaves the note on screen rather than half-answered; the next refetch is
-    /// authoritative either way.
+    /// Settle one parked note; true when the server took it, so the banner can hide the row.
     @discardableResult
     func resolveParked(id: String, action: String) async -> Bool {
         guard let sessionId = session?.id else { return false }
@@ -475,9 +378,8 @@ final class PlanningModel {
 
     // MARK: - Config (Settings)
 
-    /// Save part of the config. Pass ONLY what changed: `steps` is merged server-side
-    /// onto the household's existing opt-out map, so sending a whole map built from this
-    /// client's snapshot would clobber every step another device had just turned off.
+    /// Save part of the config, passing ONLY what changed: `steps` is merged server-side, so
+    /// a whole map from this client's snapshot would clobber another device's change.
     func saveConfig(
         dayOfWeek: Int? = nil, time: String? = nil, showOnToday: Bool? = nil,
         steps: [String: Bool]? = nil, lists: [String: Bool]? = nil
@@ -487,16 +389,9 @@ final class PlanningModel {
         }
     }
 
-    /// The lists step 1 could ask about, for the settings panel's switches.
-    ///
-    /// Off the CONFIG read, not the session view: which lists are even candidates is step
-    /// 1's own rule (the `custom` allowlist — the grocery list rebuilds itself and a
-    /// template is unchecked by design), and having the server resolve it is what stops
-    /// this app re-deriving that rule against the lists module and drifting from the web.
-    ///
-    /// Only the names are taken from here. How each list STANDS comes from
-    /// `config.asksAbout(_:)`, which `load()` refreshes after every save, so a switch
-    /// cannot go stale against another device.
+    /// The lists step 1 could ask about, off the CONFIG read rather than the session view:
+    /// which lists are candidates is step 1's own rule, and letting the server resolve it
+    /// stops this app drifting from the web.
     func loadListCandidates() async {
         guard let view = try? await fetchConfig() else { return }
         listCandidates = view.lists ?? []
@@ -505,9 +400,8 @@ final class PlanningModel {
     // MARK: - Formatting
 
     // `static let`, per the project's formatter rule. Two of them because the server's
-    // timestamps carry fractional seconds in some payloads and not others, and a
-    // `DateFormatter` that expects one and gets the other returns nil rather than
-    // tolerating it.
+    // timestamps carry fractional seconds in some payloads and not others, and the wrong
+    // formatter returns nil rather than tolerating it.
     private static let isoFractional: DateFormatter = {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
@@ -525,8 +419,7 @@ final class PlanningModel {
         return f
     }()
 
-    /// "Sep 2, 5:32 PM" in the device's zone, or the raw string when it parses as
-    /// neither — an unrecognized timestamp must cost the prettiness, not the record.
+    /// "Sep 2, 5:32 PM", or the raw string: an unrecognized timestamp costs the prettiness.
     static func savedLabel(_ iso: String) -> String {
         guard let d = isoFractional.date(from: iso) ?? isoPlain.date(from: iso) else { return iso }
         return DateFmt.localizedString(d, "MMM d, h:mm a", .current)

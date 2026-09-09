@@ -1,32 +1,15 @@
 // Step 6 · Goals — "What's each group's focus this week?"
 //
-// THE ARCHITECTURAL POINT (see docs/product/weekly-planning-plan.md): this step invents
-// nothing. The tabs are the `goal_lists` that already exist, the goals are the real
-// goals with their real progress, and picking one sets the goal's existing
-// `is_featured` flag. There is no "focus" table and no parallel flag.
+// This step invents nothing (see docs/product/weekly-planning-plan.md): the tabs are the
+// `goal_lists` that already exist and picking one sets the goal's existing `is_featured`
+// flag. What has no other home is WHICH GROUPS THIS SESSION SETTLED, since "nothing this
+// week" is a real answer indistinguishable from "not got to it yet" — so the session keeps
+// a `{ focus: { <listId>: <goalId> | null } }` map in `planning_session_steps.data`.
 //
-// The one thing that has no other home is WHICH GROUPS THIS SESSION HAS SETTLED —
-// because "nothing this week" is a real answer and is indistinguishable from "we
-// haven't got to this group yet" if you only read `is_featured`. So the session keeps a
-// `{ focus: { <listId>: <goalId> | null } }` map in `planning_session_steps.data`: a key
-// present means the group is settled (the ★ on its tab), and a null value means it
-// settled on nothing. That map is a record of the DECISION, not a copy of module data —
-// the flag itself stays the module's truth, which is what the recap reads through to.
-//
-// …and it is also what makes the write NON-DESTRUCTIVE. `is_featured` is the goals
-// screen's user-facing "Pinned" tier, which is deliberately NOT one-per-list there: a
-// family can pin four goals on purpose. So changing a group's focus un-features ONLY
-// the goal this session previously set for that list (which the map records exactly),
-// never every pin in the list. One-per-focus is enforced in the SESSION, where that
-// rule actually belongs; `is_featured` itself stays additive, and a pin that predates
-// the session survives it.
-//
-// PRIVACY. `goal_lists.is_private` is enforced HERE for the first time in the codebase:
-// `listGoalLists` hands every list to every caller and no existing screen filters on it
-// (a real pre-existing bug on the goals screen, raised separately). A private list
-// belongs to its members: it is dropped from the read for anyone else, and naming it in
-// a write 404s. Membership is the whole rule — an admin gets no bypass, because "the
-// couple's private list" means nothing if the household owner can read it.
+// That map keeps the write NON-DESTRUCTIVE: `is_featured` is the goals screen's additive
+// "Pinned" tier, so changing a focus un-features ONLY the goal this session set for the
+// list. PRIVACY: `goal_lists.is_private` is enforced HERE — a private list is dropped from
+// the read for non-members and naming it in a write 404s, with no admin bypass.
 import type { PoolClient } from 'pg'
 import { query, getPool } from '../../../platform/db'
 import type { Tenant } from '../../households/households'
@@ -35,15 +18,14 @@ import { getSessionById } from '../weeklyPlanning'
 
 const STEP_KEY = 'goals'
 
-// What the session decided per list. A key PRESENT means settled; `null` means it
-// settled on "nothing this week", which the design treats as a real answer.
+// What the session decided per list. A key PRESENT means settled; `null` means it settled
+// on "nothing this week".
 export type FocusMap = Record<string, string | null>
 
 type GoalList = Awaited<ReturnType<typeof listGoalLists>>[number]
 type Goal = Awaited<ReturnType<typeof listGoals>>[number]
 
-// A goal as this step shows it: everything the goals screen has, plus how it is
-// actually going (see `paceFor`).
+// A goal as this step shows it: the goals screen's fields plus how it is going (`paceFor`).
 export interface GoalsStepGoal extends Goal {
   pace: Pace | null
 }
@@ -53,8 +35,7 @@ export interface GoalsStepMember {
   name: string
   avatarEmoji: string | null
   colorHex: string | null
-  // Null when we don't know their birthday — the group's sub line then omits the age
-  // rather than guessing one.
+  // Null when we don't know their birthday — the sub line omits the age rather than guess.
   age: number | null
 }
 
@@ -62,8 +43,7 @@ export interface GoalsStepGroup extends Omit<GoalList, 'id' | 'goalCount' | 'mem
   // Named `listId` rather than `id` so a client can never confuse a tab with a goal.
   listId: string
   members: GoalsStepMember[]
-  // True when the group is literally every person in the household — what lets the
-  // sub line say "everyone tracks it" without the client counting people.
+  // Literally every person, so the sub line can say "everyone" without counting people.
   isEveryone: boolean
   goals: GoalsStepGoal[]
   // True when THIS session has answered for this group — the ★ on the tab.
@@ -76,19 +56,10 @@ export interface GoalsStepView {
   groups: GoalsStepGroup[]
 }
 
-// ---------------------------------------------------------------------------
-// Pace — the second half of a goal row's subtitle ("kind · pace")
-// ---------------------------------------------------------------------------
-// The design wants each goal to say how it is actually GOING, in a sentence, with one
-// of three tones. It is derived from real `goal_logs` activity — never invented — and
-// computed SERVER-side so web and iOS read the same verdict, the same way the step
-// catalog's questions are server-owned.
-//
-// The facts (one grouped query below): the household-local day of the first and last
-// log, how many distinct days were logged in the last 7 and the last 28, the amount
-// logged in the last 7, and — for habits — how many days were logged in the PREVIOUS
-// habit period (the same window `period_done` uses, shifted back one, so "last week"
-// here means exactly what "this week" means on the goals screen).
+// Pace — the second half of a goal row's subtitle ("kind · pace"), derived from real
+// `goal_logs` activity SERVER-side so web and iOS read the same verdict. One grouped query
+// gives the first and last log's local day, distinct days in the last 7 and 28, the amount
+// in the last 7, and — for habits — days logged in the PREVIOUS habit period.
 export type PaceTone = 'ok' | 'flat' | 'behind'
 export interface Pace {
   text: string
@@ -118,8 +89,7 @@ export interface Activity {
 
 const DAY_MS = 86400000
 const dayNum = (iso: string) => Date.parse(`${iso}T00:00:00Z`) / DAY_MS
-// At most 2 decimals, trailing zeros dropped, thousands grouped — the reading
-// `fmtGoalNum` gives on the client, so the sentence and the number never disagree.
+// The same reading `fmtGoalNum` gives on the client, so sentence and number never disagree.
 const fmtNum = (n: number) => n.toLocaleString('en-US', { maximumFractionDigits: 2 })
 const fmtDay = (iso: string) =>
   new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
@@ -133,8 +103,7 @@ export function paceFor(goal: Goal, a: Activity | undefined): Pace | null {
   // Never logged. Said plainly rather than dressed up as a rate.
   if (a.lastDay == null || since == null) return { text: 'nothing logged yet', tone: 'behind' }
 
-  // Gone quiet. Three weeks reads as an absence; one or two reads as a stall, and
-  // naming the date it stopped is more use than naming the size of the gap.
+  // Gone quiet. Naming the date it stopped is more use than naming the size of the gap.
   if (since >= 21) return { text: `nothing logged in ${plural(Math.floor(since / 7), 'week', 'weeks')}`, tone: 'behind' }
   if (since >= 8) return { text: `stalled since ${fmtDay(a.lastDay)}`, tone: 'behind' }
 
@@ -148,9 +117,7 @@ export function paceFor(goal: Goal, a: Activity | undefined): Pace | null {
     }
   }
 
-  // The long slow burn: running two months or more, touched about once a month, and
-  // touched recently. Its weekly number would be noise, so the honest reading is the
-  // cadence — "roughly 1 book a month".
+  // The long slow burn: its weekly number would be noise, so the cadence is honest.
   const span = a.firstDay ? dayNum(a.today) - dayNum(a.firstDay) : 0
   if (span >= 56 && a.daysLast28 <= 2 && goal.totalProgress > 0) {
     const perMonth = goal.totalProgress / (span / 30.44)
@@ -158,8 +125,7 @@ export function paceFor(goal: Goal, a: Activity | undefined): Pace | null {
     return { text: `roughly ${fmtNum(Math.round(perMonth * 100) / 100)}${unit} a month`, tone: 'flat' }
   }
 
-  // Recent and measurable. `ok` only when there is a target for it to be ok against —
-  // an untargeted goal has nothing to be behind on, so its number is stated flat.
+  // Recent and measurable. `ok` only where there is a target to be ok against.
   if (a.amountLast7 > 0 && goal.unit) {
     const target = goal.goalType === 'checklist' ? goal.stepTotal : goal.target
     return { text: `${fmtNum(a.amountLast7)} ${goal.unit} last week`, tone: target ? 'ok' : 'flat' }
@@ -170,14 +136,9 @@ export function paceFor(goal: Goal, a: Activity | undefined): Pace | null {
 
 // Every live goal's recent activity in one grouped query.
 //
-// `prev_period_days` is the goals module's OWN period rule, shifted back one period — it
-// imports `periodStartSQL` rather than restating it, so "2 of 5 last week" is measured on
-// the same clock as the "3 of 5" the goals screen shows for this week. The interval comes
-// from a CASE, never from concatenating a column into a cast.
-//
-// Never a bare `date_trunc('week', …)`: that is MONDAY-only, so on a Sunday-start household (the
-// default) Sunday's log lands in the wrong period and this disagrees with the goals screen about
-// the same habit.
+// `prev_period_days` imports `periodStartSQL` rather than restating it, so "2 of 5 last
+// week" is on the same clock as the screen's "3 of 5". Never a bare `date_trunc('week', …)`:
+// that is MONDAY-only, so a Sunday-start household's Sunday log lands in the wrong period.
 async function recentActivity(householdId: string): Promise<Map<string, Activity>> {
   const { rows } = await query<ActivityRow>(
     `with local as (select id, timezone, week_start, (now() at time zone timezone)::date as today
@@ -231,8 +192,7 @@ async function recentActivity(householdId: string): Promise<Map<string, Activity
   )
 }
 
-// Each member's age, for the "individual · age 9" sub line the design gives a group
-// card, plus the household headcount that lets a group honestly say "everyone".
+// Each member's age for the sub line, plus the headcount that lets a group say "everyone".
 async function householdPeople(householdId: string): Promise<{ ages: Map<string, number>; headcount: number }> {
   const { rows } = await query<{ id: string; age: number | null }>(
     `select p.id,
@@ -252,9 +212,8 @@ function isFocusMap(v: unknown): v is FocusMap {
   return Object.values(v as Record<string, unknown>).every((x) => x === null || typeof x === 'string')
 }
 
-// `runner` is the pool for a plain read, or the transaction's client when the map is
-// about to be rewritten — reading it outside the transaction that updates it is how a
-// concurrent answer on another group loses its entry.
+// `runner` is the pool for a plain read, or the transaction's client when the map is about
+// to be rewritten — reading it outside that transaction loses a concurrent answer's entry.
 type Runner = Pick<PoolClient, 'query'> | null
 async function readFocus(sessionId: string, runner: Runner = null): Promise<FocusMap> {
   const sql = `select data from planning_session_steps where session_id = $1 and step_key = $2`
@@ -265,13 +224,9 @@ async function readFocus(sessionId: string, runner: Runner = null): Promise<Focu
   return isFocusMap(focus) ? focus : {}
 }
 
-// Merge the decision map onto the step row WITHOUT claiming the step is answered:
-// `status` and `decided_at` are left alone (a mid-step write is not a decision about
-// the step), and `jsonb_set` keeps any other crumb the step may add later.
-//
-// The shell's own `decideStep` REPLACES `data` when the primary is pressed, so the step
-// body mirrors this map back through `setDecisionData` — otherwise pressing "Done"
-// would wipe the very thing this write persisted.
+// Merge the decision map onto the step row WITHOUT claiming the step is answered. The
+// shell's `decideStep` REPLACES `data` when the primary is pressed, so the step body mirrors
+// this map back through `setDecisionData`.
 async function writeFocus(client: PoolClient, sessionId: string, focus: FocusMap): Promise<void> {
   await client.query(
     `insert into planning_session_steps (session_id, step_key, status, data)
@@ -282,8 +237,7 @@ async function writeFocus(client: PoolClient, sessionId: string, focus: FocusMap
   )
 }
 
-// The lists this caller may see: every shared list, plus the private ones they belong
-// to. The single privacy gate — both the read and the write go through it.
+// Every shared list plus the private ones this caller belongs to — the single privacy gate.
 async function visibleLists(tenant: Tenant): Promise<GoalList[]> {
   const lists = await listGoalLists(tenant.householdId)
   return lists.filter((l) => !l.isPrivate || l.members.some((m) => m.personId === tenant.personId))
@@ -312,23 +266,15 @@ export async function getGoalsStepView(tenant: Tenant, sessionId: string | null)
         members: members.map((m) => ({ ...m, age: people.ages.get(m.personId) ?? null })),
         isEveryone: people.headcount > 1 && members.length === people.headcount,
         goals: mine,
-        // ★ ON THE TAB IS THE SESSION'S OWN ANSWER, never a flag we found lying around.
-        // Adopting a pre-existing pin as "settled" would star a tab nobody had looked
-        // at yet — the exact thing the ★ exists to rule out — and the recap, which
-        // reads this map, would then disagree with the screen.
+        // ★ IS THE SESSION'S OWN ANSWER: adopting a pre-existing pin would star a tab
+        // nobody had looked at yet.
         settled,
         focusGoalId: settled
-          // A pick whose goal has since gone (deleted, or moved to another list) is not
-          // reported as this group's focus — but the group stays settled: the family did
-          // answer, and re-answering is a click away.
+          // A pick whose goal has gone isn't reported as the focus, but the group stays settled.
           ? (picked && mine.some((g) => g.id === picked) ? picked : null)
-          // Not answered yet, but exactly one goal in the list already carries the flag
-          // — that IS the group's current focus, so show it selected rather than making
-          // the family re-pick it. This is what closes the "＋ New goal for this week"
-          // round trip: the editor creates the goal featured (`?featured=1`), so on the
-          // way back it's already the one on screen. TWO pins is ambiguous — the family
-          // pinned those by hand and the session has no business choosing between them
-          // — so it adopts neither.
+          // Not answered yet, but exactly one goal already carries the flag — that IS the
+          // focus, which is what closes the "＋ New goal for this week" round trip. TWO pins
+          // is ambiguous, so the session adopts neither.
           : (pinned.length === 1 ? pinned[0].id : null),
       }
     }),
@@ -337,15 +283,11 @@ export async function getGoalsStepView(tenant: Tenant, sessionId: string | null)
 
 export type SetFocusResult = { ok: true; view: GoalsStepView } | { ok: false }
 
-// Answer one group. `goalId` null is the real answer "nothing this week".
+// Answer one group; `goalId` null is the real answer "nothing this week".
 //
-// ONE FOCUS PER LIST, WITHOUT TRAMPLING PINS. `is_featured` is also the goals screen's
-// user-facing "Pinned" tier, and pinning there is deliberately NOT one-per-list — a
-// family can pin four goals on purpose. So this un-features exactly ONE goal: whichever
-// one THIS session last set as the list's focus, which the session's own focus map
-// records. A goal pinned before the session started keeps its pin; the session cannot
-// silently undo a decision it never made. `is_spotlight` is never touched either — the
-// hero is an independent flag with its own partial unique index.
+// ONE FOCUS PER LIST, WITHOUT TRAMPLING PINS: `is_featured` is also the goals screen's
+// not-one-per-list "Pinned" tier, so this un-features exactly ONE goal — whichever THIS
+// session last set as the list's focus. `is_spotlight` is never touched.
 export async function setGroupFocus(
   tenant: Tenant,
   sessionId: string,
@@ -355,9 +297,8 @@ export async function setGroupFocus(
   const session = await getSessionById(tenant.householdId, sessionId)
   if (!session) return { ok: false }
 
-  // Privacy AND ownership in one check: a list this caller can't see is a list they
-  // can't answer for. Hiding it from the read while accepting a write on it would not
-  // be privacy at all.
+  // Privacy AND ownership in one check: a list this caller can't see is one they can't
+  // answer for.
   const lists = await visibleLists(tenant)
   if (!lists.some((l) => l.id === listId)) return { ok: false }
 
@@ -367,8 +308,7 @@ export async function setGroupFocus(
         where household_id = $1 and id = $2 and goal_list_id = $3 and deleted_at is null and is_active`,
       [tenant.householdId, goalId, listId]
     )
-    // Validated BEFORE anything is cleared, so a goal from another list can't cost this
-    // list the focus it already had.
+    // Validated BEFORE anything is cleared, so another list's goal can't cost this one its focus.
     if (!rowCount) return { ok: false }
   }
 

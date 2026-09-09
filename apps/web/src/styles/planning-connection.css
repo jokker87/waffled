@@ -1,31 +1,11 @@
 /* Weekly Planning · step 5 — Connection (ConnectionStep.tsx).
 
-   A stack of pairing rows, then "Make a pairing" at full width under them. The rows are
-   a PROMPT, not the list, so the composer is not styled as a footnote: it is the widest
-   thing on the screen and it reads as the real offer.
+   Pairing rows, then "Make a pairing" at full width under them: the rows are a PROMPT,
+   not the list, so the composer is the widest thing on screen.
 
-   The faces borrow the Tasks step's `.wpt-face` shape (a round tinted bubble carrying
-   the person's own colour) rather than inventing a second kind of person chip — same
-   size, same radius, same lift on hover. Everything else here is only what that
-   vocabulary doesn't have: the paired faces, the status sentence, the slot chips, and
-   the muted "already counts" chip that lets a row say the week has this covered.
-
-   Every colour is a token, so dark mode comes for free. Never hardcode a hex here — the
-   ONE exception is the per-person tint, which is a person's own `colorHex` from the
-   API applied inline at 13% (`…22`), exactly as the Tasks step does it.
-
-   VOCABULARY
-     .wpn                 the step body (a scrolling column of rows)
-     .wpn-row             one pairing: faces, the sentence, the chips
-     .wpn-faces .wpn-face the two (or three) people it is between
-     .wpn-who .wpn-stat   their names, and the one line under them
-     .wpn-slots .wpn-slot the gaps the week left behind
-     .wpn-counts          the muted chip: time that already exists gets credit
-     .wpn-add             "＋ Another time" / "Pick a date and time" — dashed, an opener
-     .wpn-make-open       the collapsed "＋ Make a pairing", full width
-     .wpn-make            the open composer: WHO (a query input) and WHEN (the gaps)
-     .wpn-note            what the rows are, and what they aren't
-*/
+   Faces borrow the Tasks step's `.wpt-face` shape rather than inventing a second person
+   chip. Every colour is a token so dark mode comes for free — never hardcode a hex; the
+   ONE exception is the per-person tint (`colorHex` applied inline at 13%, `…22`). */
 
 .wpn {
   display: flex;
@@ -46,8 +26,7 @@
 /* ── A pairing row ───────────────────────────────────────────────────────────── */
 .wpn-row {
   display: flex;
-  /* Wraps only when the "Link a time" list is open — it is the one child that claims a
-     full row of its own; everything else still sits on one line. */
+  /* Wraps only when the "Link a time" list is open — the one child that claims a full row. */
   flex-wrap: wrap;
   align-items: center;
   gap: 16px;
@@ -58,7 +37,6 @@
   box-shadow: var(--sh-1);
 }
 
-/* The faces overlap slightly: two people, one pairing. */
 .wpn-faces { display: flex; flex: none; }
 .wpn-faces > * + * { margin-left: -10px; }
 
@@ -111,8 +89,8 @@
   color: var(--ink-3);
 }
 
-/* TIME THAT ALREADY EXISTS. Muted on purpose: it is not one more thing to schedule,
-   it is the row admitting the week already answers this. Pressed, it reads as claimed. */
+/* Muted on purpose: not one more thing to schedule, but the row admitting the week
+   already answers this. Pressed, it reads as claimed. */
 .wpn-counts {
   background: transparent;
   border-color: transparent;
@@ -121,18 +99,14 @@
 }
 .wpn-counts:hover:not(:disabled) { border-color: var(--hair-2); color: var(--ink-2); }
 
-/* LINKING A TIME THEY ALREADY SHARE. The chip opens a list of every event this week
-   with both of them on it — including the ones with somebody else there too, which the
-   row could previously only describe ("but it's not that") and never let you choose.
-   Nothing here writes to the calendar; picking one records which event answers the
-   pairing. */
+/* Picking a shared event records which one answers the pairing; it writes no calendar. */
 .wpn-link { font-weight: 700; }
 .wpn-link.on { background: var(--success-t); border-color: var(--success); color: var(--success); }
-/* Same specificity trap as the horizon tags: `.wpn-slot:hover` sets a colour, and it
+/* Same specificity trap as the horizon tags: `.wpn-slot:hover` sets a colour and it
    outscores every `.on` below it. A chosen chip holds its green under the cursor. */
 .wpn-slot.on:hover:not(:disabled) { border-color: var(--success); color: var(--success); background: var(--success-t); }
-/* Its own line under the row. `.wpn-row` is a flex row, so the list has to claim the
-   full width or it would sit in among the chips it was opened from. */
+/* Its own line under the row: `.wpn-row` is a flex row, so the list must claim the full
+   width or it would sit in among the chips it was opened from. */
 .wpn-link-list {
   flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 8px;
   margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--hair);
@@ -209,7 +183,6 @@
 }
 
 /* ── Narrow / phone ──────────────────────────────────────────────────────────── */
-/* Two lines: faces + name + one clause, then the chips wrapping under them. */
 @media (max-width: 720px) {
   .wpn { padding: 4px 16px 20px; }
   .wpn-row { flex-wrap: wrap; }

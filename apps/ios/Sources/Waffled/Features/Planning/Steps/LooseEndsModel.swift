@@ -1,33 +1,27 @@
 import Foundation
 import Observation
 
-// Weekly Planning · step 1 "Loose ends" — the step's state and its copy.
+// Weekly Planning · step 1 "Loose ends" — the step's state and its copy; the view is in
+// `LooseEndsStep.swift`.
 //
-// Ported from `apps/web/src/kiosk/planning/steps/LooseEndsStep.tsx` and the group/label
-// tables in `apps/web/src/lib/api/planning/looseEnds.ts`. The view is in
-// `LooseEndsStep.swift`; everything here is testable without a screen.
-//
-// THREE THINGS WRITE, AND ONLY THREE. "It's done already" and "Drop it" go to the module
-// that owns the item; the capture bar parks a new note. Routing records a DESTINATION on
-// the session and touches no module at all, and "leave it open" / "keep it parked" writes
-// nothing anywhere — which is why the set-aside list lives in this object and never
-// becomes a row.
+// THREE THINGS WRITE, AND ONLY THREE: "It's done already" and "Drop it" go to the module
+// that owns the item, and the capture bar parks a note. Routing records a DESTINATION on
+// the session; "leave it open" writes nothing, which is why the set-aside list lives in
+// this object and never becomes a row.
 
-/// The two halves of step 1, and the distinction between them — which is the whole
-/// design. "Not done" is COMPUTED from the modules that already own the work; "Parked" is
-/// what somebody wrote down during the week and exists nowhere else yet, which is why one
-/// of its answers is to drop it.
+/// The two halves of step 1. "Not done" is COMPUTED from the modules that already own the
+/// work; "Parked" is what somebody wrote down during the week and exists nowhere else,
+/// which is why one of its answers is to drop it.
 enum LooseEndGroup: String, CaseIterable, Sendable {
     case notDone
     case parked
 
     var label: String { self == .notDone ? "Not done" : "Parked" }
 
-    /// The mock's four-word version, for the see-all headings where there is no switch.
     var caption: String { self == .notDone ? "already in the app" : "somebody wrote it down" }
 
-    /// The full explanation. It travels with the SWITCH, because in one-at-a-time mode the
-    /// switch is the entire explanation of the two kinds.
+    /// The full explanation. It travels with the SWITCH, because in one-at-a-time mode
+    /// the switch is the entire explanation of the two kinds.
     var note: String {
         switch self {
         case .notDone:
@@ -55,14 +49,13 @@ enum LooseEndCopy {
         }
     }
 
-    /// The label each WRITING answer wears. Both read differently by group, because the
-    /// same word means a different thing to a computed item and to a note.
+    /// The label each WRITING answer wears. Both read differently by group: the same word
+    /// means a different thing to a computed item and to a note.
     static func actionLabel(_ action: String, kind: String) -> String {
         if action == "done" { return kind == "parked" ? "Talk about it now" : "It’s done already" }
         return "Drop it"
     }
 
-    /// And the reason under it.
     static func actionHint(_ action: String, kind: String) -> String {
         if action == "done" { return kind == "parked" ? "Two minutes, then decide" : "Just tell its module" }
         return "It was never really a thing"
@@ -79,10 +72,8 @@ enum LooseEndCopy {
     /// The one claim the user has to believe for this step to feel safe.
     static let disclaimer = "Routing here changes nothing in your modules — it only decides which step handles it."
 
-    /// WHAT THE ARROW MEANS, said once. A title, an arrow and a step name is a receipt
-    /// only to somebody who already knows the mechanism: routing does not DO the thing, it
-    /// hands the item to the step that will, and every destination is still ahead of this
-    /// one tonight. Reported as unreadable without this line.
+    /// WHAT THE ARROW MEANS, said once. Routing does not DO the thing: it hands the item
+    /// to the step that will, and every destination is still ahead of this one tonight.
     static let trailCaption = "Sent ahead — they’ll come up at that step later tonight"
 
     static let capturePlaceholder = "Drop something new on the board — one line is enough"
@@ -115,11 +106,8 @@ enum LooseEndCopy {
 }
 
 /// One choice on the card: a destination, one of the two answers that write, or the quiet
-/// "leave it" that writes nothing.
-///
-/// Built as DATA rather than as closures so the card renders one uniform layout whichever
-/// group it is showing — the design's point is that it is the SAME card — and so the
-/// arrangement (which answers sit in the grid, which stay quiet underneath) can be tested
+/// "leave it" that writes nothing. Built as DATA rather than closures so the card renders
+/// one uniform layout whichever group it shows, and so the arrangement can be tested
 /// without a view.
 struct LooseEndChoice: Identifiable, Equatable, Sendable {
     enum Act: Equatable, Sendable {
@@ -139,10 +127,9 @@ struct LooseEndChoice: Identifiable, Equatable, Sendable {
 
     var id: String { key }
 
-    /// The choices a card offers: the destinations for its group, then the answers that
-    /// settle it here. `parked` keeps two of its four choices in the grid ("talk about it
-    /// now", "keep it parked") because a note might turn out to be nothing — settling it
-    /// is as ordinary an answer as sending it on.
+    /// The choices a card offers: its group's destinations, then the answers that settle
+    /// it here. `parked` keeps two of its four in the grid because a note might turn out
+    /// to be nothing.
     static func build(
         item: WaffledAPI.LooseEnd,
         group: LooseEndGroup,
@@ -160,8 +147,8 @@ struct LooseEndChoice: Identifiable, Equatable, Sendable {
                 hint: LooseEndCopy.actionHint(a, kind: item.kind),
                 isPrimary: false,
                 act: .settle(a))
-            // A note's "talk about it now" is one of its four choices; everywhere else the
-            // writing answers stay quiet, under the destinations.
+            // A note's "talk about it now" is one of its four choices; everywhere else
+            // the writing answers stay quiet, under the destinations.
             if group == .parked && a == "done" { choices.append(c) } else { quiet.append(c) }
         }
         let leave = LooseEndChoice(
@@ -188,16 +175,15 @@ final class PlanningLooseEndsModel {
     typealias ParkNote = (_ note: String, _ sessionId: String) async throws -> WaffledAPI.PlanningParkedItem
     /// Rule one list in or out. SPARSE by construction — one list per call — because the
     /// server merges the map and a whole one built here would rule lists back in behind
-    /// another device's back.
+    /// another device.
     typealias RuleList = (_ listId: String, _ relevant: Bool) async throws -> Void
 
     private(set) var view: WaffledAPI.LooseEndsView?
     /// A FAILED fetch keeps the previous value and still counts as loaded — the shared
-    /// REST loading contract (`Features/Shared/RestDomain.swift`), so a dropped refresh
-    /// never blanks a screen that had data and never sits on "Loading…" forever.
+    /// REST loading contract (`Features/Shared/RestDomain.swift`).
     private(set) var loaded = false
-    /// What has been routed this session. Seeded from the read, which is why a reload
-    /// mid-step doesn't re-ask everything already triaged.
+    /// What has been routed this session. Seeded from the read, so a reload mid-step
+    /// doesn't re-ask everything already triaged.
     private(set) var routes: [WaffledAPI.LooseEndRoute] = []
     /// How many items were SETTLED here ("done"/"drop") — the human half of the crumb.
     private(set) var answered = 0
@@ -212,8 +198,8 @@ final class PlanningLooseEndsModel {
     /// instead of watching five properties.
     private(set) var revision = 0
 
-    /// Items set aside on THIS screen ("leave it open" / "keep it parked"). Client-only by
-    /// design: that answer writes nothing anywhere, so it must not become a row.
+    /// Items set aside on THIS screen. Client-only by design: that answer writes nothing
+    /// anywhere, so it must not become a row.
     private var setAside: Set<String> = []
     private var routedKeys: Set<String> = []
 
@@ -263,13 +249,10 @@ final class PlanningLooseEndsModel {
     /// Seed the routes from the step's OWN persisted `data.routes` before the read lands.
     ///
     /// NOT A NICETY — it is what stops a second visit destroying the first one's work.
-    /// The crumb REPLACES the step's `data` when the step is answered (`decideStep`'s
-    /// `do update set data = excluded.data`), and a fresh model whose read then FAILED
-    /// would be holding an empty `routes` and would push exactly that. Four routing
-    /// decisions would vanish, silently, with no error on screen. Seeding means the model
-    /// is never emptier than what is already persisted.
-    ///
-    /// `routes.isEmpty` guards it, so a read that came back stays authoritative.
+    /// The crumb REPLACES the step's `data` when the step is answered, and a fresh model
+    /// whose read then FAILED would push an empty `routes`, silently losing every routing
+    /// decision. `routes. isEmpty` guards it, so a read that came back stays
+    /// authoritative.
     func seedRoutes(from value: JSONValue?) {
         guard routes.isEmpty, let value, case .array = value else { return }
         // Round-tripped through the SAME decoder the read uses, so the tolerant
@@ -285,7 +268,7 @@ final class PlanningLooseEndsModel {
     }
 
     /// A different week is a different set of loose ends, so the aside list and the tally
-    /// start again with it.
+    /// reset.
     func resetForWeek() {
         setAside = []
         answered = 0
@@ -298,8 +281,8 @@ final class PlanningLooseEndsModel {
 
     func remaining(_ group: LooseEndGroup) -> Int { open(group).count }
 
-    /// Everything the server reported for this group, before anything was triaged — the
-    /// denominator of "3 of 7".
+    /// Everything the server reported for this group, before triage — the denominator of
+    /// "3 of 7".
     func total(_ group: LooseEndGroup) -> Int {
         (group == .notDone ? view?.notDone : view?.parked)?.count ?? 0
     }
@@ -312,20 +295,18 @@ final class PlanningLooseEndsModel {
     /// The trail: what was just routed, most recent first, capped at three.
     var trail: [WaffledAPI.LooseEndRoute] { Array(routes.suffix(3).reversed()) }
 
-    /// Step NAMES for the trail. "Not done"'s destination labels ARE the step titles
-    /// ("Tasks", "Calendar"); "Parked"'s are verbs ("Make it a task"), which read wrong
-    /// after an arrow — so the trail always uses the notDone label, falling back to the
-    /// key for a step whose module is off (a route can outlive the toggle).
+    /// Step NAMES for the trail. "Not done"'s destination labels ARE the step titles;
+    /// "Parked"'s are verbs ("Make it a task"), which read wrong after an arrow — so the
+    /// trail always uses the notDone label, falling back to the key for a step whose
+    /// module is off.
     func stepName(_ to: String) -> String {
         view?.destinations.notDone.first { $0.to == to }?.label ?? to
     }
 
-    /// THE CRUMB, and the cross-step contract in one.
-    ///
-    /// `routes` is here on purpose and is NOT "a copy of module data": answering a step
-    /// REPLACES its `data` server-side (`decideStep`'s `do update set data =
-    /// excluded.data`), so a crumb of bare counts would wipe `data.routes` — the array
-    /// steps 2/6/8/9 read straight off the session view. The counts are the readable half.
+    /// THE CRUMB, and the cross-step contract in one. `routes` is here on purpose and is
+    /// NOT "a copy of module data": answering a step REPLACES its `data` server-side, so
+    /// a crumb of bare counts would wipe `data.routes` — the array steps 2/6/8/9 read off
+    /// the session view.
     var decisionData: [String: JSONValue] {
         [
             "routes": .array(routes.map(\.json)),
@@ -354,8 +335,8 @@ final class PlanningLooseEndsModel {
         }
     }
 
-    /// One of the two answers that write, then a reload — the item's own module is what
-    /// decides whether it is still open, so we re-read rather than removing it locally.
+    /// One of the two answers that write, then a reload — the item's own module decides
+    /// whether it is still open, so we re-read rather than removing it locally.
     @discardableResult
     func settle(_ item: WaffledAPI.LooseEnd, action: String, weekStart: String, sessionId: String) async -> Bool {
         await guarded {
@@ -365,8 +346,8 @@ final class PlanningLooseEndsModel {
         }
     }
 
-    /// The capture bar. Step 1 does create parked items after all: the board is where "one
-    /// more thing" goes when it belongs to no module yet.
+    /// The capture bar: the board is where "one more thing" goes when it belongs to no
+    /// module yet.
     @discardableResult
     func park(_ note: String, weekStart: String, sessionId: String) async -> Bool {
         let text = note.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -378,21 +359,19 @@ final class PlanningLooseEndsModel {
     }
 
     /// The lists this step could ask about. Empty is a real answer — a household with no
-    /// custom lists has nothing to choose between, so the chooser hides itself rather than
-    /// opening an empty sheet — and so is a server that predates the setting.
+    /// custom lists has nothing to choose between — and so is a server that predates the
+    /// setting.
     var listCandidates: [WaffledAPI.PlanningListCandidate] { view?.lists ?? [] }
 
     /// Rule one list in or out, from inside the step.
     ///
-    /// WHY THE STEP AND NOT SETTINGS: the friction is here, on the fourth week of "Learn
-    /// the banjo" off a someday list, and Settings → Modules is admin-only — which
-    /// whoever sat down to run the session may well not be. The route takes
-    /// `planning.manage` (adult by default) instead.
+    /// WHY THE STEP AND NOT SETTINGS: the friction is here, and Settings → Modules is
+    /// admin-only — which whoever sat down to run the session may not be. The route takes
+    /// `planning.manage`.
     ///
     /// THEN IT RE-READS. A list ruled out takes its cards out of the deck with it, and
-    /// working out WHICH cards those were is the server's job, not a guess made here from
-    /// a `detail` string. `guarded` skips the reload when the write itself failed, so a
-    /// refusal never looks like it took.
+    /// working out WHICH cards those were is the server's job, not a guess from a
+    /// `detail` string. `guarded` skips the reload when the write itself failed.
     @discardableResult
     func ruleList(_ listId: String, relevant: Bool, weekStart: String, sessionId: String) async -> Bool {
         await guarded {
@@ -416,7 +395,7 @@ final class PlanningLooseEndsModel {
     // MARK: internals
 
     /// A refetch that keeps what it has on failure — the same contract as `load`, so a
-    /// write that succeeded is never reported as a failure because the reload after it
+    /// write that succeeded is never reported as failed because the reload after it
     /// didn't come back.
     private func reload(weekStart: String, sessionId: String) async {
         if let next = try? await fetchLooseEnds(weekStart, sessionId) {
@@ -425,8 +404,8 @@ final class PlanningLooseEndsModel {
         }
     }
 
-    /// One write at a time, and a failure leaves every piece of state exactly as it was —
-    /// the assignment inside each operation only runs when the call returned.
+    /// One write at a time, and a failure leaves every piece of state as it was — the
+    /// assignment inside each operation only runs when the call returned.
     private func guarded(_ operation: () async throws -> Void) async -> Bool {
         guard !working else { return false }
         working = true

@@ -38,9 +38,8 @@ function parseRrule(
   }
   if (rrule && /FREQ=DAILY/i.test(rrule)) return { freq: 'daily', days: [] }
   // No rrule: an existing chore with null rrule is a one-off; a brand-new chore defaults to
-  // "Every day" (the common case on the Chores screen) unless the surface opening the modal
-  // knows better — Weekly Planning adds mostly one-offs, so it asks for 'once'. The default
-  // stays put for everyone who doesn't pass one.
+  // "Every day" unless the surface opening the modal knows better (Weekly Planning asks
+  // for 'once').
   return { freq: editing ? 'once' : defaultFreq, days: [] }
 }
 
@@ -63,8 +62,8 @@ function initialForm(
   defaultTitle?: string
 ) {
   const sched = parseRrule(chore?.rrule, !!chore, defaultFreq)
-  // Restricted users (no chore.manage) can only target themselves or up-for-grabs;
-  // default them to self rather than the full-list default.
+  // Restricted users (no chore.manage) can only target themselves or up-for-grabs; default
+  // them to self rather than the full-list default.
   const prefill = chore?.personId ?? personId ?? (canAssignOthers ? '' : selfPersonId ?? '')
   return {
     title: chore?.title ?? defaultTitle ?? '',
@@ -74,11 +73,9 @@ function initialForm(
     rewardCurrency: chore?.rewardCurrency ?? '',
     freq: sched.freq,
     days: sched.days,
-    // One-off (freq === 'once') only: which day the single task lands on. New
-    // one-offs default to today; editing can't move an already-materialized one.
+    // One-off only: which day the single task lands on.
     dueOn: chore?.dueOn || defaultDueOn || localToday(),
-    // Optional time-of-day the chore is due (HH:MM). Applies to one-offs and each
-    // recurring occurrence; empty = no specific time.
+    // Optional time-of-day (HH:MM), for one-offs and each recurring occurrence.
     dueTime: (chore?.dueTime ?? '').slice(0, 5),
     requiresApproval: chore?.requiresApproval ?? false,
     requiresPhoto: chore?.requiresPhoto ?? false,
@@ -100,21 +97,18 @@ export function ChoreModal({
 }: {
   chore?: ChoreDraft
   personId?: string | null
-  // Which "Repeats" a NEW chore starts on. Omit it for the app-wide default ('daily'); a
-  // surface where most additions are one-offs (Weekly Planning's Tasks step) passes 'once'.
-  // Ignored when editing — an existing chore's cadence is its own.
+  // Which "Repeats" a NEW chore starts on. Omit for the app-wide default ('daily'). Ignored
+  // when editing — an existing chore's cadence is its own.
   defaultFreq?: Freq
-  // Which day a NEW one-off starts on (YYYY-MM-DD). Omit it for today; a surface planning a
-  // different week passes that week's day, so the task lands where the person is looking.
-  // Still editable here, and ignored when editing.
+  // Which day a NEW one-off starts on. Omit for today; a surface planning a different week
+  // passes that week's day. Still editable here, and ignored when editing.
   defaultDueOn?: string
-  // What a NEW chore's title starts as. Weekly Planning passes a parked note's words when
-  // the banner's "Make a task" opened this, so nobody retypes what they already wrote down.
+  // What a NEW chore's title starts as — Weekly Planning passes a parked note's words, so
+  // nobody retypes what they already wrote down.
   defaultTitle?: string
-  // Whether editing may also DELETE the chore. True for the Chores screen, which is where a
-  // chore's existence is managed; a surface with a narrower question — Weekly Planning's
-  // Tasks step asks only who does what — passes false and gets an editor without a removal
-  // it isn't offering.
+  // Whether editing may also DELETE the chore. True for the Chores screen; a surface with a
+  // narrower question (Weekly Planning's Tasks step) passes false and gets an editor without a
+  // removal it isn't offering.
   canDelete?: boolean
   // Without chore.manage, restrict the assignee picker to self + up-for-grabs.
   canAssignOthers?: boolean
@@ -127,11 +121,9 @@ export function ChoreModal({
   const { currencies, defaultCurrency } = useCurrencies()
   const [form, setForm] = useState(() =>
     initialForm(chore, personId, canAssignOthers, selfPersonId, defaultFreq, defaultDueOn, defaultTitle))
-  // Restricted users see only themselves; everyone else sees the full member list.
   const pickable = canAssignOthers ? persons : persons.filter((p) => p.id === selfPersonId)
-  // A parent doesn't need another parent's OK: hide the approval toggle when the
-  // chore is assigned to an adult/admin. Still shown for kids, teens, and
-  // "up for grabs" (unknown claimer), where a sign-off makes sense.
+  // A parent doesn't need another parent's OK: hide the approval toggle when the chore is
+  // assigned to an adult/admin. Still shown for kids, teens and "up for grabs".
   const assignee = persons.find((p) => p.id === form.personId)
   const assigneeIsAdult = !!assignee && (assignee.memberType === 'adult' || assignee.isAdmin)
   const curKey = form.rewardCurrency || defaultCurrency?.key || 'stars'
@@ -166,10 +158,9 @@ export function ChoreModal({
         setScopeAction({ kind: 'save', payload, repeatChanged: buildRrule(form.freq, form.days) !== chore.rrule })
         return
       }
-      // A ONE-OFF CARRIES ITS DAY EITHER WAY. On create it is where the single instance
-      // lands; on EDIT it moves that instance — which is what the Weekly Planning Tasks
-      // board day chip does, and the reason this is not create-only. A recurring chore
-      // sends none: its days come from the rrule, and the server ignores dueOn for one.
+      // A ONE-OFF CARRIES ITS DAY EITHER WAY: on create it is where the single instance lands,
+      // on EDIT it moves that instance. A recurring chore sends none — its days come from the
+      // rrule, and the server ignores dueOn for one.
       const withDay = form.freq === 'once' ? { ...payload, dueOn: form.dueOn } : payload
       if (editing) await api.updateChore(chore!.id, withDay)
       else await api.createChore(withDay)
@@ -273,13 +264,11 @@ export function ChoreModal({
                 ))}
               </div>
             )}
-            {/* One-off: pick the day (today by default) — ON EDIT TOO, because the day is
-                the thing a planning board most often changes: the Tasks step day chip opens
-                this editor for exactly that, and an existing one-off is otherwise
-                unmovable. `min` stays create-only, though: a chore carried over from last
-                week is dated in the PAST and is the likeliest thing anybody opens here, and
-                Save lives inside a <form>, so flooring the input at today would let the
-                browser refuse the submit and make Save look dead on those very cards. */}
+            {/* One-off: pick the day — ON EDIT TOO, because an existing one-off is otherwise
+                unmovable and the Tasks step's day chip opens this editor for exactly that.
+                `min` stays create-only, though: a carried-over chore is dated in the PAST, and
+                Save lives inside a <form>, so flooring the input at today would let the browser
+                refuse the submit and make Save look dead on those very cards. */}
             {form.freq === 'once' && (
               <label className="field" style={{ marginTop: 8 }}>
                 <span>On</span>

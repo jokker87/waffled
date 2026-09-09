@@ -16,58 +16,29 @@ import '../../../styles/planning-kids.css'
 
 // Step 9 · Kids — "What's your week about?"
 //
-// THE ONE STEP THE KIDS THEMSELVES READ. Wally and Lottie are standing at the board, so
-// the type is sized for them, their NAME is the title of their card, and both cards fit
-// one screen — there is no per-kid navigation for a family of two. (On a phone there
-// isn't room, so a segmented control puts one kid on screen at a time; both cards stay
-// in the DOM and CSS decides, so switching costs nothing and there is only one layout to
-// keep right.)
+// THE ONE STEP THE KIDS THEMSELVES READ: the type is sized for them, their NAME is the title of
+// their card, and both cards fit one screen. On a phone a segmented control puts one kid on
+// screen at a time; both cards stay in the DOM and CSS decides, so there is one layout to keep
+// right.
 //
-// TWO QUESTIONS EACH, AND BOTH ARE ANSWERED FROM THINGS THAT ALREADY EXIST. The focus
-// options are that child's own goals, their own overdue chores and the standing chores
-// they already carry; the look-forward-to options are events already on their week.
-// "＋ Something else" is the escape hatch and sits LAST — a kid should recognise their
-// week in the list rather than have to invent it. Everything on screen is composed by
-// the server (see steps/kids.ts) except the goal's number, which goes through the SHARED
-// display helper so a habit reads as this period's count and not a lifetime total.
 //
-// THE SECOND FRAME IS THE READ-BACK. Once every card has both answers the step stops
-// being a picker and becomes the two sentences, large: "the part they'll actually
-// remember". "Change something" in the footer puts the picker back.
+// WHY THERE IS A STORE IN THIS FILE: the shell renders `Body` and `FooterExtra` as two sibling
+// trees, and the footer's "Same as last week" / "Change something" is what the body reacts to.
+// Module-scoped and keyed by session+week, so another week can't inherit these answers.
 //
-// WHY THERE IS A STORE IN THIS FILE. The shell renders `Body` and `FooterExtra` as two
-// sibling trees, and the footer's "Same as last week" / "Change something" is what the
-// body has to react to. A context provider would mean editing the shell, so the state
-// lives here, module-scoped and keyed by session+week so stepping to another week (or
-// discarding the session) can't leave a previous week's answers on screen.
-//
-// The answers are a REAL write, never `setDecisionData` — the crumb only reaches the
-// server when the step is ANSWERED, so a family that reads the cards out and walks away
-// without pressing Done would lose the very thing they came here to say.
+// The answers are a REAL write, never `setDecisionData` — the crumb only reaches the server
+// when the step is ANSWERED, so a family that read the cards out and walked away would lose the
+// very thing they came here to say.
 
 interface StepState {
   key: string
   view: PlanningKidsView | null
   loading: boolean
   error: string | null
-  // The card a write is in flight for. One at a time: two answers landing together would
-  // race two read-modify-writes of the same session crumb.
   saving: string | null
-  // Which card the phone's segmented control is showing. Irrelevant on a wide screen,
-  // where both are up.
   active: string | null
-  // "Change something" — the read-back put away by hand, until they answer again.
   changing: boolean
-  // Which escape hatch is open, if any.
   typing: { personId: string; which: 'focus' | 'forward' } | null
-  // WHAT THEY TYPED BUT NEVER SAVED, keyed `<personId>:<which>`.
-  //
-  // Picking an existing option IS a change of answer, and only one option can be the chosen one
-  // — but the typed draft is kept, so going back to "something else" still holds what a nine-
-  // year-old dictated. An empty box would say it was gone for good.
-  //
-  // Kept out of `view` on purpose: a draft is not an answer, it never reaches the
-  // server, and it lives exactly as long as the step is on screen.
   drafts: Record<string, string>
 }
 
@@ -100,8 +71,6 @@ async function reread(sessionId: string, weekStart: string) {
   if (state.key === key) set({ view })
 }
 
-// Both components read the same state; `primary` (only Body passes it) says which one
-// owns the fetching, so a remount doesn't fire two reads.
 function useKidsStep(p: StepBodyProps, primary = false): StepState {
   const key = `${p.sessionId}|${p.weekStart}`
   useEffect(() => {
@@ -117,22 +86,14 @@ async function answer(p: StepBodyProps, personId: string, body: { focus?: Planni
   set({ saving: personId, error: null, typing: null })
   try {
     const view = await planningKidsApi.answer(p.sessionId, personId, body, p.weekStart)
-    // Answering again is how you get OUT of "Change something": the frame follows the
-    // answers once they're fresh, rather than waiting to be told twice.
     set({ view, saving: null, changing: false })
   } catch {
-    // Leave the last good answer on screen rather than a half-applied one.
     set({ saving: null, error: "That didn't take — try again." })
   }
   p.refresh()
 }
 
-// ---------------------------------------------------------------------------
-// Bits
-// ---------------------------------------------------------------------------
 
-// "Wally and Lottie" — the mock's own step title. The catalog says "Kids" and is
-// server-owned (web and iOS must not drift on it), so the names live here instead.
 function heading(kids: PlanningKidCard[]): string {
   const names = kids.map((k) => k.name)
   if (names.length <= 1) return names[0] ?? 'Kids'
@@ -143,9 +104,6 @@ const readBackNow = (s: StepState) =>
   !s.changing && !!s.view && s.view.kids.length > 0 && s.view.kids.every((k) => k.settled)
 
 function Face({ kid, className }: { kid: PlanningKidCard; className: string }) {
-  // The household's REAL avatar on a tint of their own colour, the way the Tasks step
-  // draws a person. (There is no shared person-avatar component on web; kiosk/components
-  // /Avatar.tsx is a design-era stub with four hardcoded emoji and must not be used.)
   return (
     <span className={className} style={{ background: `${kid.colorHex ?? '#A6A29B'}22` }} aria-hidden>
       {kid.avatarEmoji ?? '🙂'}
@@ -159,10 +117,9 @@ function FocusOption({ option, checked, disabled, onPick }: {
   disabled: boolean
   onPick: () => void
 }) {
-  // The number ALWAYS comes from the shared helper — never an inline `totalProgress`,
-  // which would tell a kid they'd read 99 times this week. `detail` is the server's
-  // sentence for the same fact, and is null on a standing chore because nothing is wrong
-  // with it: that absence is the design, not a missing string.
+  // The number ALWAYS comes from the shared helper — never an inline `totalProgress`, which
+  // would tell a kid they'd read 99 times this week. `detail` is null on a standing chore
+  // because nothing is wrong with it: that absence is the design, not a missing string.
   const progress = option.goal ? goalDisplayProgress(option.goal) : null
   const target = option.goal ? goalDisplayTarget(option.goal) : null
   return (
@@ -206,8 +163,6 @@ function ForwardOption({ option, checked, disabled, onPick }: {
       onClick={onPick}
     >
       <span aria-hidden>{option.emoji}</span>
-      {/* Day and title in ONE node: the week strip above already carries the title on
-          its own, and two identical labels on a card make it unreadable by voice. */}
       <span className="wpk-fchip-n">{option.when} · {option.label}</span>
     </button>
   )
@@ -216,20 +171,17 @@ function ForwardOption({ option, checked, disabled, onPick }: {
 function TypeIn({ label, placeholder, initial, disabled, onCancel, onSave, onDraft }: {
   label: string
   placeholder: string
-  // What they said last time, when this is reopening their own answer. An empty box here
-  // discards what somebody already dictated and makes the chip above look inert.
   initial: string
   disabled: boolean
   onCancel: () => void
   onSave: (text: string) => void
-  // Called ONCE, as the box goes away, with whatever was in it. On unmount rather than
-  // on every keystroke deliberately: the draft lives in the step's shared store, and
-  // writing to it per character would re-render every card in the step to move a cursor.
   onDraft: (text: string) => void
 }) {
   const [text, setText] = useState(initial)
   const latest = useRef(text)
   latest.current = text
+  // Called ONCE, as the box goes away: writing the draft per keystroke would re-render every
+  // card in the step to move a cursor.
   useEffect(() => () => onDraft(latest.current), [])
   return (
     <form
@@ -273,15 +225,11 @@ function Card({ kid, s, p, readBack }: { kid: PlanningKidCard; s: StepState; p: 
           <div className="wpk-nm">{kid.name}</div>
           {kid.age != null && <div className="wpk-ag">age {kid.age}</div>}
         </div>
-        {/* Stars are funded by chores, so an economy that is off simply isn't drawn —
-            never a zero, which would read as "you've earned nothing". */}
         {kid.stars != null && (
           <div className="wpk-stars">{kid.starsSymbol ?? '⭐'} {kid.stars}</div>
         )}
       </header>
 
-      {/* Their week, in both frames: the kid at the board wants to see their own week
-          whether or not they've answered yet. */}
       <div className="wpk-sec">
         <div className="wpk-lab">Your week</div>
         <ul className="wpk-chips" aria-label={`${kid.name}’s week`}>
@@ -340,7 +288,6 @@ function Card({ kid, s, p, readBack }: { kid: PlanningKidCard; s: StepState; p: 
                   onPick={() => void answer(p, kid.personId, { focus: { key: o.key } })}
                 />
               ))}
-              {/* LAST, and quiet. The escape hatch, not the main path. */}
               <button
                 type="button"
                 role="radio"
@@ -414,10 +361,9 @@ function Body(p: StepBodyProps) {
   const s = useKidsStep(p, true)
   const { setDecisionData } = p
 
-  // Mirror what the session already knows onto the crumb after EVERY fresh read, not
-  // only after a click: the shell RESETS the crumb on step change and replaces the
-  // step's stored data when the primary is pressed, so a body that only set it in its
-  // click handler would erase its own record after a remount.
+  // Mirror what the session knows onto the crumb after EVERY fresh read, not only after a
+  // click: the shell RESETS the crumb on step change and replaces the step's stored data when
+  // the primary is pressed.
   useEffect(() => { if (s.view) setDecisionData(planningKidsDecision(s.view)) }, [s.view, setDecisionData])
 
   if (s.loading) return <div className="wpk-note">Reading their week…</div>
@@ -439,8 +385,6 @@ function Body(p: StepBodyProps) {
     <div className="wpk">
       <h2 className="wpk-title">{heading(kids)}</h2>
 
-      {/* Phone only (CSS). Both cards stay mounted; this only decides which is on
-          screen, so switching kid costs nothing and loses no half-typed answer. */}
       <div className="wpk-tabs" role="tablist" aria-label="Which kid">
         {kids.map((k) => (
           <button
@@ -469,13 +413,6 @@ function Body(p: StepBodyProps) {
   )
 }
 
-// One more control beside Skip and the affirmative — and WHICH one is the frame's own
-// question. On the picker it is the shortcut the mock names ("Same as last week"); on
-// the read-back it is the way back ("Change something"). Both are the middle button in
-// the mock's two frames.
-//
-// The phone's "Lottie →" is deliberately NOT here: the per-kid picker lives in the body
-// where per-kid navigation belongs, so this slot keeps one meaning on every screen size.
 function FooterExtra(p: StepBodyProps) {
   const s = useKidsStep(p)
   if (!s.view || s.view.kids.length === 0) return null

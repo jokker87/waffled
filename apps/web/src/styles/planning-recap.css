@@ -1,29 +1,10 @@
 /* Weekly Planning · step 10 — Recap (kiosk/planning/steps/RecapStep.tsx).
 
-   THE LAST SCREEN OF THE SESSION: the week as seven columns one last time, then two
-   cards — what changed, and what was left alone on purpose.
-
-   THE ONE RULE THIS FILE EXISTS FOR: it all has to fit at once. Seven columns above two
-   cards, on a kiosk, with a genuinely busy week in them. So every track is
+   THE ONE RULE THIS FILE EXISTS FOR: it all has to fit at once. So every track is
    `minmax(0, 1fr)` and every cell carries `min-width: 0` / `min-height: 0` — a grid item
    defaults to `min-*: auto`, which REFUSES to shrink below its content, and that is
-   exactly how the Horizon month grid overflowed its box and painted over the park bar.
-   The day columns clip; the server caps the events and the column says "+N more".
+   exactly how the Horizon month grid overflowed its box and painted over the park bar. */
 
-   Every colour is a token, as in planning.css — never a hex, or dark mode breaks.
-   Buttons are the app's own `btn btn-ghost`; this file only sizes them.
-
-   VOCABULARY
-     Frame  — .wpr .wpr-note
-     Week   — .wpr-week .wpr-day .wpr-d .wpr-line (.mut, or .ev .ev-tint from
-              waffled.css for an event) .wpr-more
-     Cards  — .wpr-cols .wpr-side .wpr-card .wpr-h
-     Rows   — .wpr-row .wpr-src .wpr-t .wpr-n (.is-none .is-skipped .is-parked)
-              .wpr-acts .wpr-act (.is-drop)
-     Close  — .wpr-foot
-*/
-
-/* `.wp-body` is a flex column with `min-height: 0` and its own scroll. */
 .wpr { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 14px; }
 
 .wpr-note { color: var(--ink-3); font-weight: 600; padding: 18px 2px; max-width: 62ch; line-height: 1.55; }
@@ -55,20 +36,14 @@
   font-size: 12px; font-weight: 650; color: var(--ink); line-height: 1.35;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-/* An event takes the calendar's OWN chip — `.ev` + `.ev-tint` from waffled.css, painted
-   through `evVars()` — so the week reads back in the colours the family already knows
-   from the month and week views. Only the geometry is retuned for a column this narrow;
-   the wash, the ink and the theme handling all come from the shared rule, which is the
-   point (a colour rule of our own here would drift from the calendar it describes). */
+/* An event takes the calendar's OWN chip (`.ev` + `.ev-tint`, painted through `evVars()`),
+   so the week reads back in the colours the family knows. Only the geometry is retuned:
+   a colour rule of our own here would drift from the calendar it describes. */
 .wpr-line.ev { padding: 3px 7px; font-size: 11.5px; font-weight: 650; border-radius: 6px; }
-/* A dinner is not an event and keeps its plain weight, so the tinted chips are the only
-   coloured things in the column and read as the calendar's. */
 .wpr-line.mut { font-weight: 600; color: var(--ink-2); }
 .wpr-more { font-size: 11px; font-weight: 700; color: var(--ink-3); }
 
 /* ── The two cards ───────────────────────────────────────────────────────────── */
-/* The decisions get the room; the two honesties share the narrower side. Both columns
-   are `minmax(0, …)` for the same reason the week's tracks are. */
 .wpr-cols {
   flex: 1; min-height: 0;
   display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); gap: 14px;
@@ -80,8 +55,7 @@
   min-width: 0;
   background: var(--card); border: 1px solid var(--hair-2); border-radius: var(--r-lg);
   /* 4px, not 16px: the header and the rows carry the remaining 12px themselves so a
-     hovered row can paint a fill that is wider than its own text. Text still sits 16px
-     from the card's edge. */
+     hovered row can paint a fill wider than its own text. */
   padding: 4px 4px 8px;
 }
 .wpr-h {
@@ -92,11 +66,9 @@
 .wpr-h span { font-size: 12px; font-weight: 650; color: var(--ink-3); }
 
 /* ── A row: source · sentence · count ────────────────────────────────────────── */
-/* A link and a div have to sit on the same rails, so the row is a grid rather than a
-   flex of mixed elements: [source] [sentence] [count]. The middle column is the one
-   allowed to shrink, and each cell names its own track — a row with no source (the
-   parked and left-alone cards) must leave column 1 empty rather than sliding its badge
-   in beside the text. */
+/* A grid rather than a flex of mixed elements, because a link and a div have to sit on the
+   same rails: [source] [sentence] [count]. Each cell names its own track, so a row with
+   no source leaves column 1 empty rather than sliding its badge in beside the text. */
 .wpr-row {
   display: grid; grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: baseline; gap: 10px;
@@ -107,8 +79,6 @@
 a.wpr-row { cursor: pointer; }
 a.wpr-row:hover { background: var(--panel); border-radius: var(--r-md); }
 
-/* The module the decision lives in. It is the whole argument of the card, so it reads
-   as a label rather than as a whisper. */
 .wpr-src {
   grid-column: 1; min-width: 92px;
   font-size: 10.5px; font-weight: 800; letter-spacing: 0.07em; text-transform: uppercase;
@@ -116,7 +86,6 @@ a.wpr-row:hover { background: var(--panel); border-radius: var(--r-md); }
 }
 .wpr-t { grid-column: 2; min-width: 0; font-size: 13.5px; font-weight: 700; color: var(--ink); line-height: 1.35; }
 .wpr-t.mut { font-weight: 600; color: var(--ink-3); }
-/* The named decisions under the tally — the pointers themselves. */
 .wpr-t s {
   display: block; margin-top: 3px;
   font-size: 12px; font-weight: 600; color: var(--ink-2); line-height: 1.45;
@@ -126,7 +95,6 @@ a.wpr-row:hover { background: var(--panel); border-radius: var(--r-md); }
   grid-column: 3;
   font-size: 14px; font-weight: 750; color: var(--ink-2); font-variant-numeric: tabular-nums;
 }
-/* A non-answer is not a number, so it doesn't wear one — it says what it is. */
 .wpr-n.is-none, .wpr-n.is-skipped, .wpr-n.is-parked {
   font-size: 10.5px; font-weight: 750; letter-spacing: 0.05em; text-transform: uppercase;
   color: var(--ink-3); border: 1px solid var(--hair); border-radius: 999px; padding: 2px 8px;
@@ -145,8 +113,6 @@ a.wpr-row:hover { background: var(--panel); border-radius: var(--r-md); }
 .wpr-foot b { font-weight: 800; color: var(--ink-2); }
 
 /* ── Narrow: the seven days become seven rows ────────────────────────────────── */
-/* The mock's phone shape — day and date on the left, the meal and the events stacked on
-   the right — and the two cards stack under it. */
 @media (max-width: 900px) {
   .wpr-week { grid-template-columns: minmax(0, 1fr); gap: 6px; }
   .wpr-day {

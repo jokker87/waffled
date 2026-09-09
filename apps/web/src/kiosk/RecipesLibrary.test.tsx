@@ -4,12 +4,11 @@ import { RecipesLibrary } from './RecipesLibrary'
 import { TopbarSlotProvider } from './topbar-slot'
 import type { Recipe } from '../lib/api'
 
-// Drive the library off a fixed recipe set by mocking the data hook; everything
-// else in the api slice stays real (the component only reads useRecipes here).
+// Drive the library off a fixed recipe set by mocking the data hook; the rest of the api
+// slice stays real.
 const recipesRef: { current: Recipe[] } = { current: [] }
-// Saved plates are stubbed out too: the empty state below is only correct when BOTH
-// halves of the unified library are known to be empty, so the test has to own both
-// rather than race a real fetch that resolves to [] a tick later.
+// Saved plates are stubbed too: the empty state below is only correct when BOTH halves of
+// the unified library are known empty, so the test owns both rather than racing a fetch.
 vi.mock('../lib/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/api')>()
   return {
@@ -92,9 +91,6 @@ describe('RecipesLibrary — New / never-cooked filter', () => {
   })
 })
 
-// The old empty state read as a mistake: "0 of 0" over a search box, a sort and four
-// filter dropdowns that could not narrow anything, plus a SECOND primary "＋ New
-// recipe" jammed mid-sentence next to the one already in the topbar.
 describe('RecipesLibrary — the empty library', () => {
   beforeEach(() => { recipesRef.current = [] })
 
@@ -112,7 +108,6 @@ describe('RecipesLibrary — the empty library', () => {
     expect(screen.queryByLabelText(/^sort$/i)).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /favorites/i })).not.toBeInTheDocument()
     expect(screen.queryByText('Collection')).not.toBeInTheDocument()
-    // …and no "0 of 0", which was counting nothing against nothing.
     expect(screen.queryByText(/0 of 0/)).not.toBeInTheDocument()
   })
 

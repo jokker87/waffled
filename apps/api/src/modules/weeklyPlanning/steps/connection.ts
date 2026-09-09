@@ -1,65 +1,43 @@
 // Weekly Planning · step 5 (Connection) — "Who gets time with whom?"
 //
-// THE STEP STORES NOTHING, AND THAT IS THE WHOLE DESIGN. A pairing is not a record: it
-// is a QUERY over event_participants for an event whose people are exactly those two.
-// Picking one of the slots below writes an ordinary calendar event with those
-// participants — through the app's own event modal — so it shows up in the week view,
-// on both phones, and in the Meals step as an evening that is already taken. There is
-// no `pairings` table, no migration, and no write route in this module. If a future
-// change here starts to want one, that is the signal that the step has been misread.
+// THE STEP STORES NOTHING, AND THAT IS THE WHOLE DESIGN. A pairing is a QUERY over
+// event_participants for an event whose people are exactly those two; picking a slot writes an
+// ordinary calendar event through the app's own event modal. There is no `pairings` table, no
+// migration and no write route here — if a change starts to want one, the step has been misread.
 //
-// Two rules this file exists to keep honest:
-//
-//  1. TIME THAT ALREADY EXISTS GETS CREDIT. Often the true answer to "who gets time
-//     with whom" is "you're already doing this on Saturday". A planning tool that can
-//     only add obligations is a worse tool, so `alreadyThisWeek` is computed first and
-//     is what the row leads with. Saturday's yard work is usually a RECURRING series,
-//     which lives in event_occurrences rather than in `events` — hence rangeEvents()
-//     rather than a bare select, which is also what keeps this step and the Calendar
-//     step (step 2) agreeing about what is on the week.
-//  2. NO INVENTED TIMES. A slot is a gap the week left behind: it opens when the day's
-//     last event ends. A day with nothing on it produces a slot with NO time at all —
-//     the event modal's own picker decides that. A default "evening is 7pm" constant
-//     here would be exactly the arbitrary clock time the design forbids.
+// TIME THAT ALREADY EXISTS GETS CREDIT: `alreadyThisWeek` is computed first and is what the row
+// leads with. Recurring answers live in event_occurrences rather than `events`, hence
+// rangeEvents() rather than a bare select — which is also what keeps this step and the Calendar
+// step agreeing about what is on the week.
 import { DateTime } from 'luxon'
 import { query } from '../../../platform/db'
 import { rangeEvents, type EventRow } from '../../events/events'
 import { householdTz, todayDate } from '../../chores/chores.service'
 
-// How far back "the last time it was just the two of you" looks. Bounded by the
-// recurrence expansion window (expansion.service PAST_MONTHS = 3): occurrences older
-// than that have aged out of event_occurrences, so asking for more would quietly drop
-// recurring history and report a wrong date. Falling off the end reads as "never",
-// which overstates the staleness rather than understating it — the safe direction.
+// How far back "the last time it was just the two of you" looks. Bounded by the recurrence
+// expansion window (expansion.service PAST_MONTHS = 3): occurrences older than that have aged
+// out of event_occurrences, so asking for more would report a wrong date. Falling off the end
+// reads as "never", which overstates the staleness — the safe direction.
 const LOOKBACK_DAYS = 90
 
-// A gap that opens after this hour isn't an evening anybody can use. Not a suggested
-// time — a floor under what counts as a gap at all.
 const LATEST_START_HOUR = 22
 
-// "Wed after Scouts" reads better than "Wed after 8:30 PM" — but only while the name
-// still fits on a chip. Past this, the time is the more useful half.
 const SHORT_TITLE = 18
 
 export interface ConnectionSlot {
   /** The day inside the planned week (YYYY-MM-DD, household-local). */
   date: string
   /**
-   * When the gap opens, or null for a day with nothing on it. NULL IS NOT "unknown":
-   * it means the whole day is free and the event modal's time picker should decide,
-   * rather than this file naming an hour nothing in the week justifies.
+   * When the gap opens, or null for a day with nothing on it. NULL IS NOT "unknown": the whole
+   * day is free and the event modal's picker should decide, rather than this file naming an hour.
    */
   startsAt: string | null
   kind: 'after' | 'open'
-  /** The event the gap opens after ('after' only) — what makes the label a sentence. */
   afterTitle: string | null
   /**
-   * "Wed after Scouts" / "Tue after 8:30 PM" / "Sun · free all day". Built server-side
-   * so web and iOS say it the same way.
-   *
-   * Both halves spell their meaning out. An empty day reads "Sun · free all day", never "Sun ·
-   * open" — one word cannot carry "this day has nothing on it at all" while sitting next to a
-   * sibling that spells its own meaning out in full.
+   * "Wed after Scouts" / "Tue after 8:30 PM" / "Sun · free all day". Built server-side so web and
+   * iOS say it the same way, and both halves spell their meaning out — an empty day reads "free
+   * all day", never a bare "open".
    */
   label: string
 }
@@ -70,53 +48,29 @@ export interface ConnectionEvent {
   startsAt: string
   endsAt: string | null
   allDay: boolean
-  /** Length in minutes, when the event has an end. "two hours of Kevin and Wally". */
   minutes: number | null
-  /** "Saturday" — household-local. Split out because the row's sentence needs the possessive ("Saturday's yard work"). */
   day: string
-  /** "1:00 PM", or null on an all-day row. */
   time: string | null
-  /** "Saturday 1:00 PM" — one place, so nothing formats a household-local time twice. */
   when: string
 }
 
 export interface ConnectionPairing {
-  /** Exactly the pairing's people, in household order. */
   personIds: string[]
-  /** "Kevin and Kelly" — the row's title, and the sentence's subject. */
   who: string
-  /** The most recent event before the planned week whose people were exactly these two. */
   lastTogetherOn: string | null
   lastTogetherTitle: string | null
-  /** Events in the planned week whose people are EXACTLY these two — the credit. */
   alreadyThisWeek: ConnectionEvent[]
-  /** Events in the week with both of them AND somebody else: "you're both there, and it still isn't that". */
   togetherThisWeek: ConnectionEvent[]
-  /** Ranked gaps, roomiest first. All of them — how many chips fit is a layout decision. */
   slots: ConnectionSlot[]
 }
 
 export interface ConnectionBoard {
-  /** The week the server resolved (snapped and floored). Echoed so no client does week arithmetic. */
   weekStart: string
-  /**
-   * Every pair in the household, ranked. The step draws the top three — "the three rows
-   * are only the pairings the app can already see, they are not the list" — but the cut
-   * is the client's, so the two platforms can't disagree about the ranking while
-   * disagreeing about how many rows fit.
-   */
   pairings: ConnectionPairing[]
 }
 
 interface Person { id: string; name: string }
 
-/**
- * Who an event is actually with. Participants when it has them; otherwise its owner
- * alone (the modal writes participants, but a Google/ICS import or an older row may
- * only carry person_id). An event with neither belongs to the household as a whole,
- * which is nobody in particular — it can never be a pairing, but it does occupy the
- * evening, so it still closes a gap.
- */
 function peopleOf(e: EventRow): string[] {
   const ids = (e.participants ?? []).map((p) => p.id)
   if (ids.length) return [...new Set(ids)]
@@ -145,20 +99,16 @@ function present(e: EventRow, tz: string): ConnectionEvent {
   }
 }
 
-/** "Kevin and Kelly"; "Kevin, Wally and Lottie" for a three. */
 export function whoLabel(names: string[]): string {
   if (names.length <= 1) return names[0] ?? ''
   return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
 }
 
 /**
- * The gaps a set of people have left in the planned week.
- *
- * A day is considered busy for the set if ANY of them is on a timed event that day
- * (plus household-wide events, which are everybody's). All-day rows are deliberately
- * ignored: they have no end to open a gap after, and most of them are birthdays and
- * notes rather than something that actually occupies the evening. A day where the last
- * of those events ends past LATEST_START_HOUR offers nothing at all.
+ * The gaps a set of people have left in the planned week. A day is busy for the set if ANY of
+ * them is on a timed event that day (plus household-wide events). All-day rows are deliberately
+ * ignored: they have no end to open a gap after, and most are birthdays and notes rather than
+ * something that occupies the evening.
  */
 export function slotsFor(
   weekStart: string,
@@ -173,7 +123,6 @@ export function slotsFor(
   for (const e of events) {
     if (e.all_day) continue
     const who = peopleOf(e)
-    // A household event (nobody named) occupies everyone's evening.
     if (who.length && !who.some((id) => set.has(id))) continue
     const key = DateTime.fromJSDate(new Date(e.starts_at), { zone: tz }).toISODate()!
     const list = byDay.get(key)
@@ -193,8 +142,8 @@ export function slotsFor(
       out.push({ date, startsAt: null, kind: 'open', afterTitle: null, label: `${dow} · free all day` })
       continue
     }
-    // The gap opens when the LAST thing on the day ends (an event with no end is
-    // treated as an hour, which is what the event modal defaults a new one to).
+    // The gap opens when the LAST thing on the day ends (an event with no end is treated as an
+    // hour, which is what the event modal defaults a new one to).
     let after: EventRow | null = null
     let end = 0
     for (const e of onDay) {
@@ -213,9 +162,6 @@ export function slotsFor(
     })
   }
 
-  // Roomiest first: a whole free day beats a sliver at the end of a busy one, and an
-  // evening that opens at 5 beats one that opens at 8:30. Date breaks the tie, so the
-  // order is stable across refreshes.
   return out.sort((a, b) => {
     const ra = a.kind === 'open' ? -1 : DateTime.fromISO(a.startsAt!, { zone: tz }).hour * 60 + DateTime.fromISO(a.startsAt!, { zone: tz }).minute
     const rb = b.kind === 'open' ? -1 : DateTime.fromISO(b.startsAt!, { zone: tz }).hour * 60 + DateTime.fromISO(b.startsAt!, { zone: tz }).minute
@@ -235,13 +181,9 @@ export async function householdPeople(householdId: string): Promise<Person[]> {
 }
 
 /**
- * The week's events as this step reads them.
- *
- * `viewerPersonId` is the DRIVER's person, not null: `visibleTo` hides personal-
- * visibility events from everyone but their owner, so reading as nobody would hide the
- * driver's own personal calendar and offer a slot in a gap step 2 draws as full. The
- * two steps have to agree about what is on the week or the whole "the slots are the
- * gaps step 2 left behind" claim is a lie.
+ * The week's events as this step reads them. `viewerPersonId` is the DRIVER's person, not null:
+ * `visibleTo` hides personal-visibility events from everyone but their owner, so reading as
+ * nobody would hide the driver's own calendar and offer a slot in a gap step 2 draws as full.
  */
 async function weekAndHistory(householdId: string, weekStart: string, viewerPersonId: string) {
   const start = DateTime.fromISO(weekStart)
@@ -276,8 +218,6 @@ export async function getConnectionBoard(
         else if (set.size && [...set].every((id) => who.includes(id))) together.push(present(e, tz))
       }
 
-      // The last exclusive one before the week. rangeEvents orders ascending, so the
-      // last match is the most recent.
       let last: EventRow | null = null
       for (const e of history) if (sameSet(peopleOf(e), set)) last = e
 
@@ -293,10 +233,6 @@ export async function getConnectionBoard(
     }
   }
 
-  // Longest since it was just the two of them, first. "Never" outranks any date — it is
-  // the whole reason to prompt. Ties break on how much the week already throws them
-  // together WITHOUT it being that (the mock's "you're in the car together twice this
-  // week"), then on household order, so the list is stable across refreshes.
   const staleness = (p: ConnectionPairing) =>
     p.lastTogetherOn === null
       ? Number.MAX_SAFE_INTEGER
@@ -314,11 +250,6 @@ export async function getConnectionBoard(
   return { weekStart, pairings }
 }
 
-/**
- * Slots for an arbitrary set of people — what "Make a pairing" needs, because a pairing
- * the app can't already see still deserves the week's real gaps rather than a blank
- * date picker. Same computation as a suggested row's, on purpose.
- */
 export async function getConnectionSlots(
   householdId: string,
   weekStart: string,
@@ -328,8 +259,6 @@ export async function getConnectionSlots(
 ): Promise<{ weekStart: string; personIds: string[]; who: string; slots: ConnectionSlot[] }> {
   const [tz, people] = await Promise.all([householdTz(householdId), householdPeople(householdId)])
   const wanted = new Set(personIds)
-  // Household order, not the order they were typed — so two clients asking for the same
-  // people get the same answer, and an id from another household simply isn't here.
   const chosen = people.filter((p) => wanted.has(p.id))
   if (chosen.length !== wanted.size || chosen.length < 2) {
     throw new InvalidPairingError('a pairing needs at least two people from this household')
@@ -354,32 +283,16 @@ export class InvalidPairingError extends Error {}
 /**
  * WHICH EVENT ANSWERS EACH PAIRING, merged onto the step row.
  *
- * The step's rule is still "nothing new is stored": this records no event, no pairing
- * and no time — only a pointer from a pairing to an event that already exists. An id
- * cannot drift from itself, which is why it does not breach the rule the rest of this
- * file keeps (the row's sentence — title, duration, the household's clock — stays
- * composed server-side from the live calendar).
+ * Still "nothing new is stored": this records no event, no pairing and no time — only a pointer
+ * from a pairing to an event that already exists, because a link is the ANSWER to a pairing and
+ * has to outlive the render that made it.
  *
- * It exists because a link is the ANSWER to a pairing and has to outlive the render that
- * made it. Asked for directly: "I want to be able to select an existing event that has
- * both people on it."
+ * MERGED, AND NOT A DECISION. On conflict `status` and `decided_at` are left alone (as the Goals
+ * step's `writeFocus` does): the shell's `decideStep` stamps `decided_at = now()` on every write,
+ * which is right when somebody presses the primary and wrong here — re-linking on a settled step
  *
- * MERGED, AND NOT A DECISION. On conflict, `status` and `decided_at` are left alone —
- * exactly as the Goals step's `writeFocus` does, and for the same reason: a mid-step
- * write is not a decision about the step. The shell's `decideStep` stamps
- * `decided_at = now()` on EVERY write, which is right when somebody presses the primary
- * and wrong here: re-linking on a settled step would quietly move when it was settled,
- * and that is the guarantee this function exists to keep.
- *
- * On INSERT the column takes its own default (`now()`), because `planning_session_steps.
- * decided_at` is NOT NULL — there is no way to spell "not decided yet" in this schema, so
- * a row created by a mid-step write carries a timestamp it hasn't earned. Harmless today
- * (`status` is what every reader gates on, and it stays `pending`) and not worth a
- * migration on its own; noted because the row is not quite what it looks like. Goals'
- * `writeFocus` has had the same shape since it shipped.
- *
- * `jsonb_set` keeps whatever else the step has already written, and the step body mirrors
- * this map back through `setDecisionData` so pressing the primary doesn't wipe it.
+ * `jsonb_set` keeps whatever else the step wrote, and the step body mirrors this map back through
+ * `setDecisionData` so pressing the primary doesn't wipe it.
  */
 export async function writeConnectionLinks(sessionId: string, links: Record<string, string>): Promise<void> {
   await query(

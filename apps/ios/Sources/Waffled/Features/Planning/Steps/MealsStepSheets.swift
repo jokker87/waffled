@@ -1,28 +1,18 @@
 import SwiftUI
 
-// Weekly Planning · step 7 (Meals) — the two surfaces a night opens.
-//
-// Both are this step's own files, and both are deliberately thin wrappers over things the
-// app already has: the night picker IS the Recipes library in pick mode (the same
-// `RecipesLibraryView` behind the Meals screen's picker, PlanMonth's manual swap and the
-// Meal Builder's "add a side"), and the shopper sheet writes a REAL one-off chore through
-// this step's own route.
+// Weekly Planning · step 7 (Meals) — the two surfaces a night opens, both thin wrappers over
+// things the app already has: the night picker IS `RecipesLibraryView` in pick mode, and the
+// shopper sheet writes a REAL one-off chore through this step's own route.
 
-/// "Overwriting a set night is a tap on that night." What that tap opens is the app's OWN
-/// recipe library — search, sort, facet filters, the two-up card grid, "＋ New recipe" in
-/// the bar, and saved PLATES beside the recipes. Drawing a flat chip list here instead
-/// works at one recipe and falls apart at fifty, which is exactly the mistake the web
-/// version made and undid.
+/// What a tap on a night opens is the app's OWN recipe library — search, sort, facet filters,
+/// the two-up card grid, "＋ New recipe" in the bar, and saved PLATES beside the recipes.
 ///
-/// THE THREE PLACEHOLDER CARDS are the point of the header band. "Eating out",
-/// "Leftovers" and "Try something new" write exactly the literals the Meals screen writes,
-/// which are exactly what `TonightMeal.isEatingOut` classifies — so a night planned here
-/// and the same night planned on the Meals screen are the same row, and the dish tile's
-/// takeout state keeps agreeing with the rest of the app.
+/// THE THREE PLACEHOLDER CARDS write exactly the literals the Meals screen writes, which are
+/// exactly what `TonightMeal.isEatingOut` classifies — so a night planned here and the same
+/// night planned on the Meals screen are the same row.
 ///
-/// The free-text field is kept for the one thing neither the cards nor "＋ New recipe"
-/// covers: the one-off named dish nobody wants to write a recipe for — "Grandma's
-/// lasagne", "breakfast for dinner" — which the step's own design copy names.
+/// The free-text field covers the one thing neither the cards nor "＋ New recipe" does: the
+/// one-off named dish nobody wants to write a recipe for.
 struct MealsStepNightPicker: View {
     let night: PlanningMealsNightRow
     let onPickRecipe: (String) -> Void
@@ -33,24 +23,22 @@ struct MealsStepNightPicker: View {
     @Environment(\.dismiss) private var dismiss
 
     /// The library is loaded fresh per picker mount and never cached behind a
-    /// `if !recipes.isEmpty { return }` guard: an EMPTY library is a perfectly valid
-    /// answer, and caching on emptiness is how a household that opened the picker before
-    /// writing its first recipe got told "no recipes yet" forever.
+    /// `if !recipes.isEmpty { return }` guard: an EMPTY library is a valid answer, and caching
+    /// on emptiness is how a household got told "no recipes yet" forever.
     @State private var recipes = RecipesModel()
     @State private var freeText = ""
     @FocusState private var freeTextFocused: Bool
 
-    /// One of the three canonical recipe-less nights. A named struct rather than a tuple
-    /// because `ForEach(_:id:)` needs a key path, and Swift has none into a tuple element.
+    /// A named struct rather than a tuple because `ForEach(_:id:)` needs a key path, and Swift
+    /// has none into a tuple element.
     struct Placeholder: Identifiable {
         let emoji: String
-        /// EXACTLY the literal the Meals screen writes, so `TonightMeal.isEatingOut` and
-        /// its siblings classify a night planned here the same way.
+        /// EXACTLY the literal the Meals screen writes, so `TonightMeal.isEatingOut` and its
+        /// siblings classify a night planned here the same way.
         let title: String
         var id: String { title }
     }
 
-    /// Order and wording match `Meals.tsx` and the web picker.
     private static let placeholders: [Placeholder] = [
         Placeholder(emoji: "🥡", title: "Eating out"),
         Placeholder(emoji: "🍱", title: "Leftovers"),
@@ -62,10 +50,9 @@ struct MealsStepNightPicker: View {
             VStack(spacing: 0) {
                 header
                 Divider().background(WF.hair)
-                // The library's own screen, in pick mode. `onPickMeal` is supplied
-                // because this caller knows WHERE a plate goes (the date is in this
-                // closure) — that is the whole of plate parity, and without it the grid
-                // hides plates rather than showing a control that does nothing.
+                // The library's own screen, in pick mode. `onPickMeal` is supplied because
+                // this caller knows WHERE a plate goes (the date is in this closure) — without
+                // it the grid hides plates rather than showing a control that does nothing.
                 RecipesLibraryView(
                     model: recipes,
                     onPick: { recipe in
@@ -155,12 +142,9 @@ struct MealsStepNightPicker: View {
     }
 }
 
-/// Who's shopping, and when. Saving writes a REAL one-off chore, so this is the same
-/// decision the Tasks step would make — taken here because this is where you can see what
-/// the week needs bought.
-///
-/// `onSave` reports `(dueOn, personId, dueTime)`; `dueOn == nil` is "no trip this week",
-/// which removes the chore rather than leaving one nobody planned on somebody's board.
+/// Who's shopping, and when. Saving writes a REAL one-off chore. `onSave` reports `(dueOn,
+/// personId, dueTime)`; `dueOn == nil` is "no trip this week", which removes the chore rather
+/// than leaving one nobody planned on somebody's board.
 struct MealsStepShopperSheet: View {
     let weekStart: String
     let nights: [PlanningMealsNightRow]
@@ -168,9 +152,8 @@ struct MealsStepShopperSheet: View {
     let people: [SyncedMember]
     let myPersonId: String?
     /// `chore.manage`. Handing the trip to somebody ELSE is that capability; putting it on
-    /// yourself, or leaving it up for grabs, is not. The server enforces this
-    /// (`meals.routes.ts`), and the picker states it so it never offers a tap that 403s —
-    /// the same thing `TasksStep` does with its face row.
+    /// yourself, or leaving it up for grabs, is not. The server enforces it, and the picker
+    /// states it so it never offers a tap that 403s.
     let canManage: Bool
     let busy: Bool
     let onSave: (_ dueOn: String?, _ personId: String?, _ dueTime: String?) -> Void
@@ -197,8 +180,7 @@ struct MealsStepShopperSheet: View {
         self.busy = busy
         self.onSave = onSave
         _personId = State(initialValue: trip?.personId)
-        // Default to the LAST night of the week: a trip that hasn't been decided is more
-        // useful pencilled in than blank, and the day is one tap to change.
+        // Default to the LAST night of the week: pencilled in beats blank, one tap to change.
         _dueOn = State(initialValue: trip?.dueOn ?? nights.last?.date ?? weekStart)
         _hasTime = State(initialValue: trip?.dueTime != nil)
         _time = State(initialValue: MealsStepShopperSheet.parse(trip?.dueTime))
@@ -297,8 +279,7 @@ struct MealsStepShopperSheet: View {
         .opacity(allowed ? 1 : 0.4)
     }
 
-    /// "09:00" → a `Date` carrying just that clock, defaulting to a plausible 9am rather
-    /// than to whatever o'clock it happens to be.
+    /// "09:00" → a `Date` carrying just that clock, defaulting to a plausible 9am.
     private static func parse(_ hhmm: String?) -> Date {
         var c = DateComponents()
         c.hour = 9
@@ -313,8 +294,8 @@ struct MealsStepShopperSheet: View {
         return Calendar.current.date(from: c) ?? Date()
     }
 
-    /// Back to the `HH:mm` the route validates — POSIX and 24-hour, never a localized
-    /// clock, because the server matches `^\d{2}:\d{2}$` and quietly drops anything else.
+    /// Back to the `HH:mm` the route validates — POSIX and 24-hour, never a localized clock,
+    /// because the server matches `^\d{2}:\d{2}$` and quietly drops anything else.
     static func hhmm(_ date: Date) -> String {
         let c = Calendar.current.dateComponents([.hour, .minute], from: date)
         return String(format: "%02d:%02d", c.hour ?? 0, c.minute ?? 0)

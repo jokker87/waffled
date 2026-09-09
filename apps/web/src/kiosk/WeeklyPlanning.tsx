@@ -20,27 +20,16 @@ import { HandoffCtx, type HandoffAction } from './planning/handoff'
 import { ParkedNoteEditor, type ParkedTag } from './planning/ParkedNoteEditor'
 import '../styles/planning.css'
 
-// Weekly Planning — the session shell.
+// Weekly Planning — the session shell: a step counter, a title, the step's ONE question and
+// a 2px progress hair. The ten steps are reachable from the counter (the agenda sheet), not a
+// permanent rail. Every step's BODY lives in its own component; this file owns the chrome,
+// the lobby, the agenda sheet and the saved record. The step catalog comes from the server so
+// this screen and iOS cannot drift.
 //
-// v4's whole argument is that the week is the content and the chrome is four things:
-// a step counter, a title, the ONE question the step asks, and a 2px progress hair.
-// The ten steps behind the counter are reachable from the counter itself (the agenda
-// sheet) rather than a permanent rail — a rail teaches the shape of the session once
-// and then costs a fifth of the display forever.
-//
-// Every step's BODY lives in its own component, landing one commit at a time; this
-// file owns only the chrome, the lobby, the agenda sheet and the saved record. The
-// step catalog (order, titles, questions, primary labels, which module each step
-// reads) comes from the server so this screen and iOS cannot drift.
-//
-// THE URL IS THE STATE. `/planning/:step` names the step and `?week=` names the week,
-// so refresh, back and a pasted link all land where you were — and the session's own
-// `currentStep` stays the cross-DEVICE resume pointer. Both matter: the URL is where
-// *this* browser is, the session row is where the *family* is.
+// THE URL IS THE STATE: `/planning/:step` names the step, `?week=` the week — while the
+// session's own `currentStep` is the cross-DEVICE resume pointer. The URL is where *this*
+// browser is; the session row is where the *family* is.
 
-// "Mon 31 – Sun 6" for the week being planned. This sits where v4's mock put the
-// presence faces: the session is single-driver, so showing a row of avatars would be
-// inventing presence we don't track — the week itself is the honest thing to name.
 function weekLabel(weekStart: string): string {
   const start = new Date(`${weekStart}T00:00:00`)
   const end = new Date(start)
@@ -49,10 +38,9 @@ function weekLabel(weekStart: string): string {
   return `${f(start)} – ${f(end)}`
 }
 
-// Hoisted, NOT defined inside WeeklyPlanning. A component declared in the render body
-// is a new component type on every render, so React unmounts and remounts it and
-// replaces its DOM nodes — which drops focus mid-interaction and made a click land on a
-// node that had already been detached. Anything with a handler belongs out here.
+// Hoisted, NOT defined inside WeeklyPlanning: a component declared in the render body is a
+// new component type on every render, so React remounts it and replaces its DOM nodes —
+// dropping focus mid-interaction. Anything with a handler belongs out here.
 function WeekStepper({ weekStart, canGoBack, busy, onGo, className }: {
   weekStart: string
   canGoBack: boolean
@@ -77,8 +65,6 @@ function WeekStepper({ weekStart, canGoBack, busy, onGo, className }: {
   )
 }
 
-// Offered from the agenda sheet mid-session and from the record afterwards — the two
-// places you'd look for "no, do this week again".
 function DiscardBlock({ confirming, setConfirming, busy, onDiscard }: {
   confirming: boolean
   setConfirming: (v: boolean) => void
@@ -108,31 +94,13 @@ function DiscardBlock({ confirming, setConfirming, busy, onDiscard }: {
 /**
  * A parked note handed to the step it was tagged for.
  *
- * THE SHELL OWNS THIS, not the ten steps. `planning_parked_items.step_key` names a
- * DESTINATION — "which step is going to look at this" — and for a while nothing read it:
- * only steps 1, 3 and 10 touched the table, so a note tagged for Meals or Tasks was
- * never seen again until the recap's last call. It was reported exactly that way: "I
- * added a bunch to the park it thing, expecting to go over them in the appropriate step
- * but I never saw them again, where did they go?"
- *
- * It belongs here because the banner is identical on every step, because this component
- * already refetches the session view after every write (so a note dealt with anywhere
- * stops being offered everywhere), and because each step's OWN affordances are what act
- * on the note — the banner's job is to put it back in front of you at the moment it is
- * actionable, not to grow a tenth way to add a chore.
- *
- * Two answers, both of which the resolve route already understands. "Handled" resolves
- * the note (you did the thing with the step's own controls). "Drop it" says it was never
- * really a thing. Leaving it alone is the third answer and writes nothing — the note
- * stays parked and turns up again in the recap, which is what parking is for.
- *
- * …and, when the step lends one, a THIRD answer that actually does the thing: "Make a
- * task" on Tasks, "Make an event" on Calendar. Reported as "while handled vs not kind
- * of works, I feel like we should have an action relevant to the page we are on". It
- * opens the STEP'S own composer (see `./handoff`) rather than growing a composer here,
- * and the note is settled only if something was really created. A step with no composer
- * lends nothing and the banner stays as it was — a button promising an action it does
- * not perform is worse than the plain one.
+ * THE SHELL OWNS THIS, not the ten steps: the banner is identical on every step, this
+ * component already refetches the session view after every write (so a note dealt with
+ * anywhere stops being offered everywhere), and each step's OWN affordances are what act on
+ * the note. Three answers — "Handled" and "Drop it" both go through the resolve route;
+ * leaving it alone writes nothing and the note turns up again in the recap. When the step
+ * lends one, a third opens the STEP'S own composer (see `./handoff`) and settles the note
+ * only if something was really created; a step with no composer lends nothing.
  */
 function Handoff({ step, steps, sessionId, busy, onDone, action, onAct }: {
   step: PlanningStep
@@ -146,15 +114,11 @@ function Handoff({ step, steps, sessionId, busy, onDone, action, onAct }: {
 }) {
   const [working, setWorking] = useState<string | null>(null)
   const [hidden, setHidden] = useState<string[]>([])
-  // Which note is being corrected, if any. One at a time: the box is a nudge, not a form.
   const [editing, setEditing] = useState<string | null>(null)
 
-  // EVERY STEP THIS HOUSEHOLD RUNS, except the one that triages notes (the server refuses
-  // that as a circle). Wider than the park bar's forward-only list on purpose: this note
-  // has already LANDED somewhere, and a correction must not be narrower than the mistake
-  // — including sending it back to a step you have already walked past, which is the same
-  // thing routing it there in step 1 would have done. Titles come from the server-owned
-  // catalog, so a retitled step renames every chip at once.
+  // EVERY STEP THIS HOUSEHOLD RUNS, except the note-triage step itself (the server refuses
+  // that as a circle). Wider than the park bar's forward-only list on purpose: a correction
+  // must not be narrower than the mistake. Titles come from the server-owned catalog.
   const tags: ParkedTag[] = useMemo(
     () => availableSteps(steps).filter((s) => s.key !== 'looseEnds').map((s) => ({ stepKey: s.key, label: s.title })),
     [steps]
@@ -165,12 +129,11 @@ function Handoff({ step, steps, sessionId, busy, onDone, action, onAct }: {
     setWorking(id)
     try {
       await looseEndsApi.resolve('parked', id, action, sessionId)
-      // Hidden locally as well as refetched: the refetch is what makes it true, and this
-      // is what makes it feel true before the round trip lands.
+              // Hidden locally as well as refetched: the refetch makes it true, this makes
+              // it feel true before the round trip lands.
       setHidden((h) => [...h, id])
       onDone()
     } catch {
-      // Left on screen rather than half-answered. The next refetch is authoritative.
     } finally {
       setWorking(null)
     }
@@ -189,14 +152,9 @@ function Handoff({ step, steps, sessionId, busy, onDone, action, onAct }: {
         {notes.map((n) => (
           <li key={n.id} className="wp-handoff-row" data-testid={`wp-handoff-${n.id}`}>
             {editing === n.id ? (
-              // In place, replacing the row: the note is one line, and a dialog for one
-              // line loses the list you were reading it in.
               <ParkedNoteEditor
                 id={n.id}
                 note={n.note}
-                // The box raises a note BECAUSE it is tagged for this step, so that is
-                // the tag the editor opens on. (`step.parked` carries no `stepKey` — it
-                // does not need to; the step it arrived on is the answer.)
                 stepKey={step.key}
                 tags={tags}
                 sessionId={sessionId}
@@ -204,8 +162,6 @@ function Handoff({ step, steps, sessionId, busy, onDone, action, onAct }: {
                 onCancel={() => setEditing(null)}
                 onSaved={() => {
                   setEditing(null)
-                  // The refetch is what makes it true — and a re-tagged note has to leave
-                  // this box, which only the session view can decide.
                   onDone()
                 }}
               />
@@ -216,10 +172,6 @@ function Handoff({ step, steps, sessionId, busy, onDone, action, onAct }: {
               {n.byline && <em>{n.byline}</em>}
             </span>
             <span className="wp-handoff-acts">
-              {/* FIRST, and quiet. "I have no way to edit the item or change the category
-                  and I should" — until this, a typo or the wrong tag could only be fixed
-                  by dropping the note and typing it again, and Drop is supposed to mean
-                  "it was never really a thing". */}
               <button
                 type="button"
                 className="btn btn-ghost wp-handoff-act"
@@ -267,25 +219,16 @@ function Handoff({ step, steps, sessionId, busy, onDone, action, onAct }: {
 /**
  * "I've stepped out of this session" — remembered on THIS DEVICE only.
  *
- * Coming back to `/planning` resumes the active session, deliberately: it is what lets
- * another device pick a session up mid-way, and it is why the lobby is otherwise
- * unreachable once a week is started. But it also made leaving meaningless — "leave for
- * now just takes me out of the planning tab, but if I tap the planning tab it brings me
- * right back" — and a button that does no more than the nav rail already does is
- * decoration.
- *
- * So leaving records the intent, and it is stored rather than put in the URL because it
- * has to survive tapping the Planning tab, which navigates to a plain `/planning`.
- *
- * `sessionStorage`, NOT the server: "not right now" is one person at one screen, and
- * writing it to the session would reach into the very device the resume feature exists
- * for. It is also why this is not a session status — the session is untouched, still
- * active, still exactly where it was.
+ * Coming back to `/planning` always resumes the active session (that is what lets another
+ * device pick one up mid-way), so leaving has to record the intent somewhere — stored rather
+ * than in the URL because it must survive tapping the Planning tab, which navigates to a
+ * plain `/planning`. `sessionStorage`, not the server: "not right now" is one person at one
+ * screen, and it is not a session status either — the session is untouched.
  */
 const PAUSED_KEY = 'waffled.planning.pausedSession'
 const readPaused = (): string | null => {
-  // Storage can throw outright (private mode, blocked site data), and a session you
-  // cannot pause is a great deal better than a screen that will not render.
+  // Storage can throw outright (private mode, blocked site data), and a session you cannot
+  // pause beats a screen that will not render.
   try { return sessionStorage.getItem(PAUSED_KEY) } catch { return null }
 }
 const writePaused = (id: string | null) => {
@@ -304,14 +247,10 @@ export function WeeklyPlanning() {
   const { view, loading, refetch } = useWeeklyPlanning(weekParam)
   const [sheet, setSheet] = useState(false)
   const [busy, setBusy] = useState(false)
-  // What a failed write left on screen. Cleared when the next one starts.
   const [error, setError] = useState<string | null>(null)
-  // Two-tap confirm on discarding a session — it can't be undone, and it sits next to
-  // the everyday "Close".
   const [confirmDiscard, setConfirmDiscard] = useState(false)
-  // What the current step wants kept on the record. A ref, not state: it changes as the
-  // step is used and only matters at the moment the answer is sent, so re-rendering the
-  // whole session on every keystroke inside a step would be waste.
+  // What the step wants kept on the record. A ref, not state: it only matters at the moment
+  // the answer is sent, so keystrokes inside a step must not re-render the session.
   const decisionData = useRef<Record<string, unknown> | null>(null)
   const setDecisionData = useCallback((d: Record<string, unknown> | null) => { decisionData.current = d }, [])
 
@@ -321,18 +260,14 @@ export function WeeklyPlanning() {
   const next = current ? nextStepAfter(steps, current.key) : null
   const session = view?.session ?? null
   const stepMod = useStepModule(current?.key)
-  // The finished week's read-back. Fetched here — above every early return — because the
-  // record is one of them.
-  // Capitalised because it IS a component — a lowercase name in JSX is an HTML tag.
+  // Fetched here — above every early return — because the record is one of them. Capitalised
+  // because it IS a component: a lowercase name in JSX is an HTML tag.
   const RecordRecap = useRecapPanel(session?.status === 'completed')
 
-  // THE VERB THIS STEP LENDS THE BANNER, if it has one. See `./handoff` — the shell
-  // keeps the banner and the step keeps its composer, so there is still exactly one way
-  // to add a chore in this app.
   const [handoffAction, setHandoffAction] = useState<HandoffAction | null>(null)
   const register = useCallback((a: HandoffAction | null) => setHandoffAction(a), [])
-  // The note whose composer is currently open. A ref, not state: nothing renders from
-  // it, and it must survive the re-render the composer opening causes.
+  // A ref, not state: nothing renders from it, and it must survive the re-render that
+  // opening the composer causes.
   const acting = useRef<string | null>(null)
   const sessionId = session?.id ?? null
 
@@ -348,14 +283,10 @@ export function WeeklyPlanning() {
     (created: boolean) => {
       const id = acting.current
       acting.current = null
-      // A CANCELLED composer settles nothing. Ticking the note off here would throw away
-      // the only record that it still needs doing, on the strength of somebody having
-      // opened a box and closed it again.
       if (!created || !id || !sessionId) return
       looseEndsApi
         .resolve('parked', id, 'done', sessionId)
         .then(() => refetch())
-        // Left on the banner rather than half-answered; the next refetch is the truth.
         .catch(() => {})
     },
     [sessionId, refetch]
@@ -364,63 +295,46 @@ export function WeeklyPlanning() {
   const handoffCtx = useMemo(() => ({ register, finish }), [register, finish])
 
 
-  // A crumb belongs to the step that set it. Moving on must not carry it onto the next
-  // step's answer.
   useEffect(() => { decisionData.current = null }, [current?.key])
 
-  // A link to a step of a week. The week rides in the query only when it isn't the
-  // default, so the everyday URL stays `/planning/calendar`.
   const hrefFor = (stepKey: string | null, week?: string) => {
     const w = week ?? view?.weekStart
     const q = w && view && w !== view.defaultWeekStart ? `?week=${w}` : ''
     return `/planning${stepKey ? `/${stepKey}` : ''}${q}`
   }
 
-  // "Stepped out" on this device. Read into state so leaving re-renders this screen
-  // rather than needing a navigation to somewhere else — both doors land on `/planning`.
-  // Declared HERE rather than beside `leave` below because the URL-sync effect depends on
-  // it, and a dependency array naming a `const` declared later in the body is a TDZ
-  // error, not a lint warning.
+  // "Stepped out" on this device, in state so leaving re-renders rather than needing a
+  // navigation. Declared HERE, not beside `leave`: the URL-sync effect's dependency array
+  // names it, and naming a `const` declared later in the body is a TDZ error.
   const [paused, setPaused] = useState<string | null>(() => readPaused())
 
-  // Is the view we're holding actually about the week the URL asks for? While a week
-  // change is in flight it is NOT, and acting on a stale view here would shove the URL
-  // back to the old week's step. Every correction below waits for the fresh view.
+  // While a week change is in flight the view we hold is about the OLD week, and acting on
+  // it would shove the URL back to that week's step. Every correction below waits.
   const viewMatchesUrlWeek = !!view && view.weekStart === (weekParam ?? view.defaultWeekStart)
 
-  // Keep the address bar honest. Corrections are driven by the VIEW, never fired
-  // alongside a deliberate navigation — two routing updates racing in one tick is
-  // exactly how the URL ended up back on a step the session had just left.
-  //
-  // `replace` throughout: a correction must never become a back-button stop.
+  // Keep the address bar honest. Corrections are driven by the VIEW and never fired
+  // alongside a deliberate navigation — two routing updates racing in one tick put the URL
+  // back on a step the session had just left. `replace` throughout: never a back-button stop.
   useEffect(() => {
     if (!view || !viewMatchesUrlWeek || !session) return
     if (session.status === 'completed') {
-      // Saved: the record is the surface, so the step leaves the path.
       if (urlStep) navigate(hrefFor(null), { replace: true })
       return
     }
     if (!current) return
-    // STEPPED OUT: `/planning` is a destination now, not a path missing its step. Without
-    // this the correction below resumes the session a tick after "Leave for now" left it
-    // — which is precisely what leaving used to look like from the outside: "if I tap the
-    // planning tab it brings me right back".
+    // STEPPED OUT: `/planning` is a destination now, not a path missing its step — without
+    // this the correction below resumes a tick after "Leave for now" left.
     if (paused === session.id && !urlStep) return
-    // A path naming a step that can't run (or naming none at all) resumes instead. A
-    // path naming a runnable step is left alone — a pasted link outranks the pointer.
+    // A path naming a step that can't run resumes instead; a runnable one is left alone —
+    // a pasted link outranks the pointer.
     if (!runnable.some((s) => s.key === urlStep)) navigate(hrefFor(current.key), { replace: true })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, viewMatchesUrlWeek, session?.id, session?.status, current?.key, urlStep, paused])
 
-  // EVERY WRITE ON THIS SCREEN GOES THROUGH HERE, so this is the one place that has to
-  // notice a failure. It used to be `try/finally` with no catch: a rejected write was an
-  // unhandled rejection, nothing appeared, and the refetch redrew the screen as though it
-  // had worked — a failed `complete()` left the session active while the record read as
-  // saved. iOS's `PlanningModel` has always set an `errorMessage` here; this was the gap.
-  //
-  // The refetch still runs on the failure path, deliberately: the server's answer is what
-  // the screen should show, and a write that half-happened is exactly when a stale local
-  // view is most misleading.
+  // EVERY WRITE ON THIS SCREEN GOES THROUGH HERE, so this is the only place that can surface
+  // a failure — without the catch, a rejected write redraws the screen as though it worked.
+  // The refetch runs on the failure path too, deliberately: the server's answer is what
+  // should show, and a half-happened write is when a stale local view misleads most.
   async function go(fn: () => Promise<unknown>) {
     if (busy) return
     setBusy(true)
@@ -437,14 +351,9 @@ export function WeeklyPlanning() {
 
   const start = () => go(async () => {
     const { session: s } = await weeklyPlanningApi.startSession(view?.weekStart)
-    // Defensive: a start that comes back without a session is a server problem, and
-    // throwing here would take down the click handler rather than the refetch showing
-    // whatever actually happened.
     if (s?.currentStep) navigate(hrefFor(s.currentStep))
   })
 
-  // Answering a step is two writes that belong together: record the answer, then move
-  // the driver on. The last step's answer is the save, which is what ends the session.
   async function answer(status: 'done' | 'skipped') {
     if (!session || !current) return
     await go(async () => {
@@ -454,8 +363,8 @@ export function WeeklyPlanning() {
         await weeklyPlanningApi.patchSession(session.id, { currentStep: next.key })
         navigate(hrefFor(next.key))
       } else {
-        // No navigate here: the effect above drops the step from the path once the
-        // completed session actually arrives, so the URL can't get ahead of the state.
+        // No navigate: the effect above drops the step from the path once the completed
+        // session arrives, so the URL can't get ahead of the state.
         await weeklyPlanningApi.complete(session.id)
       }
     })
@@ -468,9 +377,8 @@ export function WeeklyPlanning() {
     go(() => weeklyPlanningApi.patchSession(session.id, { currentStep: key }))
   }
 
-  // Start the week over. The lobby is otherwise unreachable once a session exists —
-  // coming back to Planning always resumes — so without this a week started by mistake
-  // could never be undone.
+  // Start the week over. The lobby is otherwise unreachable once a session exists — coming
+  // back to Planning always resumes — so without this a mistaken week could never be undone.
   const discard = () => {
     if (!session) return
     setSheet(false)
@@ -486,7 +394,6 @@ export function WeeklyPlanning() {
   const leave = () => {
     setSheet(false)
     if (session) { writePaused(session.id); setPaused(session.id) }
-    // Drops any `/planning/<step>` from the path: the step is what you just left.
     navigate(hrefFor(null))
   }
 
@@ -496,10 +403,8 @@ export function WeeklyPlanning() {
     if (session?.currentStep) navigate(hrefFor(session.currentStep))
   }
 
-  // Moving to another week drops the step: that week has its own session (or none),
-  // and carrying this week's step across would name a step of a different record.
-  // ONE navigate, not a setSearch plus a navigate — two routing updates in the same tick
-  // race, and the query survived the one that was meant to clear it.
+  // Moving weeks drops the step: that week has its own session. ONE navigate, not a
+  // setSearch plus a navigate — two routing updates in one tick race.
   const goWeek = (week: string) => {
     setSheet(false)
     if (!view) return
@@ -526,20 +431,6 @@ export function WeeklyPlanning() {
   const discardProps = { confirming: confirmDiscard, setConfirming: setConfirmDiscard, busy, onDiscard: discard }
 
   // ── Saved: the record ────────────────────────────────────────────────────────
-  // v4 step 10: "after that Today is the surface, not this session." So the finished
-  // session is a receipt, not a dashboard — what it decided, and a way back in.
-  //
-  // AND WHAT IT DECIDED IS THE WEEK, NOT THE STEP LIST. This screen used to be ten green
-  // ticks against ten step names, which tells you the session finished and nothing at all
-  // about the week it decided: "the web recap page shows just the checklist. On the
-  // iPhone recap page we had a better experience where we showed the actual week
-  // decisions." So it leads with step 10's own read-back — the same panel, the same
-  // payload, on both clients — and keeps the per-step list UNDERNEATH, because that list
-  // is the only place that records which steps were skipped on purpose.
-  //
-  // The panel is a lazy chunk and the recap step can be turned off, so neither is assumed
-  // present: without it this screen is exactly what it was before, which is a working
-  // record rather than a hole.
   if (session?.status === 'completed') {
     const decided = runnable.filter((s) => s.status !== 'pending')
     const recapStep = steps.find((s) => s.key === 'recap')
@@ -563,9 +454,6 @@ export function WeeklyPlanning() {
               {weekLabel(view.weekStart)} · saved {new Date(session.completedAt ?? session.startedAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
             </div>
           </div>
-          {/* The read-back has no boundary above it on this screen — the shell is the one
-              component whose failure has nowhere to fall back to — so a panel that throws
-              costs the read-back and leaves the record standing. */}
           {readBack && (
             <div className="wp-record-read">
               <StepErrorBoundary key="record-recap" title="the week">{readBack}</StepErrorBoundary>
@@ -603,13 +491,6 @@ export function WeeklyPlanning() {
   }
 
   // ── Stepped out: the session is active, but not right now ───────────────────
-  // Where "Leave for now" puts you, and the answer to "I expected to leave the planning
-  // session and then go back to where I can select a week to plan for". It is the lobby's
-  // job with a session in hand: the week you were planning is OFFERED rather than forced,
-  // and the week stepper — which was only reachable through the agenda sheet once a
-  // session existed — is right here.
-  //
-  // `urlStep` overrides it: asking for a step by URL is asking for the step.
   if (session?.status === 'active' && paused === session.id && !urlStep) {
     return (
       <div className="wp-screen">
@@ -671,18 +552,9 @@ export function WeeklyPlanning() {
         <div className="wp-title wf-serif">{current?.title}</div>
         <div className="wp-ask">{current?.ask}</div>
         <div className="wp-week">{weekLabel(view.weekStart)}</div>
-        {/* THE DOOR, in the chrome rather than only inside the agenda sheet.
-            "We do need some sort of exit button without going through the whole thing."
-            There was already a way out — but it lived behind the step counter, in a sheet
-            you have to know opens, which is no use to somebody who has decided to stop
-            halfway. A ten-step surface with no visible exit reads as one you are
-            committed to finishing.
-            The words are the sheet's, deliberately: "for now" is the part that matters,
-            because leaving keeps the session and everything it has already decided. */}
         <button type="button" className="wp-exit" data-testid="wp-exit" onClick={leave}>
           Leave for now
         </button>
-        {/* The 2px hair — the only progress indicator v4 keeps. */}
         <div className="wp-prog"><div style={{ width: `${pct}%` }} /></div>
       </div>
 
@@ -753,8 +625,6 @@ export function WeeklyPlanning() {
             ))}
             <div className="wp-sheet-f">
               <button type="button" className="btn btn-ghost" onClick={closeSheet}>Close</button>
-              {/* The sheet already promises you can "leave whenever" — so it has to
-                  offer the door. Leaving keeps the session exactly where it is. */}
               <button type="button" className="btn btn-ghost" onClick={leave}>Leave for now</button>
             </div>
             <DiscardBlock {...discardProps} />
@@ -766,24 +636,11 @@ export function WeeklyPlanning() {
   )
 }
 
-// WHERE A ROW ON THE FINISHED RECORD GOES.
-//
-// Inside a session the recap's rows point back at the step that owns them. On the record
-// they cannot: the effect above force-drops the step from the path once a session is
-// completed ("Saved: the record is the surface"), so a `/planning/<step>` link would
-// bounce straight back to the record it was clicked on. Carving an exception into that
-// correction is not worth an affordance — it is the one piece of this screen with a scar
-// on it ("two routing updates racing in one tick").
-//
-// So a row goes to the MODULE the decision lives in, which is what the recap's own
-// footnote has always promised: "already live in Calendar, Meals, Lists, Chores and
-// Goals". Wanting to change the DECISION rather than look at it is what "Reopen the
-// session" is for, two rows below.
-//
-// PARTIAL ON PURPOSE. A step whose decisions have no single module of their own — loose
-// ends spans chores, lists and rhythms; family night and the kids' step write events plus
-// their own state — gets no href and renders as a plain row, because a row that looks
-// tappable and isn't is worse than a plain one.
+// WHERE A ROW ON THE FINISHED RECORD GOES — the MODULE the decision lives in, not the step
+// that made it: the effect above force-drops the step from a completed session's path, so a
+// `/planning/<step>` link would bounce straight back here. Changing a decision is "Reopen the
+// session". Partial on purpose — a step whose decisions span several modules (loose ends,
+// family night, kids) gets no href, because a row that looks tappable and isn't is worse.
 const RECORD_MODULE_HREF: Record<string, string> = {
   calendar: '/calendar',
   meals: '/meals',
@@ -791,10 +648,8 @@ const RECORD_MODULE_HREF: Record<string, string> = {
   goals: '/goals',
 }
 
-// The recap panel, in its own chunk. Deliberately not through `useStepModule`: the
-// registry's `Body` is typed for the step contract alone, and the record needs the two
-// extra props (`hrefForStep`, `saved`) that make the same read-back honest on a saved
-// week. Loaded only when a record is actually on screen.
+// Deliberately not through `useStepModule`: the registry's `Body` is typed for the step
+// contract alone, and the record needs `hrefForStep` + `saved` as well.
 function useRecapPanel(active: boolean): ComponentType<RecapPanelProps> | null {
   const [panel, setPanel] = useState<ComponentType<RecapPanelProps> | null>(null)
   useEffect(() => {
@@ -808,14 +663,10 @@ function useRecapPanel(active: boolean): ComponentType<RecapPanelProps> | null {
   return panel
 }
 
-// A step body may hand the session a crumb to keep. The record cannot answer a step, so
-// there is nothing for a crumb to be attached TO — and a module-level constant keeps the
-// panel's effect from re-firing on every render of this screen.
+// A module-level constant: the record cannot answer a step, and an inline `() => {}` would
+// re-fire the panel's effect on every render.
 const NO_CRUMB = () => {}
 
-// Load the step's module from the registry. Each step is its own chunk, so reaching
-// step 7 never downloaded steps 1–6, and — the reason the registry exists at all — a
-// step is built by editing its own files and never this one.
 function useStepModule(key: string | undefined): PlanningStepModule | null {
   const [mod, setMod] = useState<PlanningStepModule | null>(null)
   useEffect(() => {

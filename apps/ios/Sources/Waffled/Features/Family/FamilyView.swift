@@ -1,8 +1,6 @@
 import SwiftUI
 
-/// Family — the 5th-tab hub from the handoff (`screens-ios-hub.js`): a people row
-/// plus a launcher grid for every overflow area. Static in Phase 0; the people row
-/// becomes the first PowerSync-backed surface in Phase 1.
+/// Family — the 5th-tab hub: a people row plus a launcher grid for every overflow area.
 struct FamilyView: View {
     @Environment(SyncManager.self) private var sync
     @State private var hub = FamilyHubModel()
@@ -71,13 +69,12 @@ struct FamilyView: View {
                 SectionLabel(text: "Everything else").padding(.bottom, 11)
                 RestStateNotice(state: hub.state, retry: { Task { await loadHub() } })
                     .padding(.bottom, hub.state.isAuthoritative ? 0 : 11)
-                // Module-gated tiles drop out when a household turns that feature off
-                // (Settings → Modules). Photos + Settings are core and never gated.
+                // Module-gated tiles drop out when a household turns that feature off.
+                // Photos + Settings are core and never gated.
                 LazyVGrid(columns: cols, spacing: 12) {
                     // First, because it is the weekly ritual that FEEDS the rest of this
                     // grid — the session hands out chores, fills the meal plan and books
-                    // the events the other tiles then show. It was also the tile a tester
-                    // came to this screen looking for and didn't find.
+                    // the events the other tiles then show.
                     if sync.module(.weeklyPlanning) {
                         tile("🗓️", "Weekly Planning", "Plan the week ahead", FamilyColor.person2.tint, .weeklyPlanning)
                     }
@@ -152,7 +149,7 @@ struct FamilyView: View {
         case "display": return .settingsDisplay
         // The Weekly Planning CONFIG panel, not a session — a nav-stack screen two taps
         // deep, and the simulator has no tap API, so without a name here its controls
-        // (the per-step switches, and the per-list ones) cannot be looked at headlessly.
+        // cannot be looked at headlessly.
         case "settingsPlanning": return .settingsWeeklyPlanning
         default: return nil
         }
@@ -185,8 +182,8 @@ struct FamilyView: View {
         }
     }
 
-    // Live from the local SQLite mirror once synced; the static sample until then,
-    // so the design still reads pre-sync.
+    // Live from the local SQLite mirror once synced; the static sample until then, so
+    // the design still reads pre-sync.
     private var peopleRow: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {

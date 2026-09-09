@@ -1,15 +1,12 @@
 import { Component, type ReactNode } from 'react'
 
-// A step body that throws must not take the session down with it.
+// A step body that throws must not take the session down with it. The route-level
+// `ScreenBoundary` would replace the WHOLE planning screen — counter, agenda sheet and
+// footer included — stranding you with no way to skip past the broken step. This boundary
+// is tighter: the chrome survives, so a broken step costs that step and nothing else.
 //
-// The route-level `ScreenBoundary` would catch it, but it would replace the WHOLE
-// planning screen — the counter, the agenda sheet and the footer included — so one
-// step failing would strand you with no way to skip past it or reach the other nine.
-// This boundary is deliberately tighter: the chrome survives, and Skip and the
-// affirmative still work, so a broken step costs you that step and nothing else.
-//
-// Reset by giving it `key={step.key}` — moving to another step should try again
-// rather than inheriting the last one's failure.
+// Reset by giving it `key={step.key}`, so moving on tries again rather than inheriting
+// the last step's failure.
 export class StepErrorBoundary extends Component<{ children: ReactNode; title: string }, { failed: boolean }> {
   state = { failed: false }
 

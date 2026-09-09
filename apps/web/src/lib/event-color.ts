@@ -1,12 +1,9 @@
-// Event → color resolution, family-aware. An event whose people cover the whole
-// household renders in the household's *family* color (Settings → Family &
-// People → Family color, stored in settings.display.familyColorHex) instead of
-// whichever member happened to own it — so the calendar reads at a glance:
-// everyone / some of us / one person / unassigned.
+// Event → color resolution, family-aware: an event whose people cover the whole household
+// renders in the household's *family* color (settings.display.familyColorHex) instead of
+// whichever member owned it.
 import { useMemo, useSyncExternalStore, type CSSProperties } from 'react'
 import { personsApi, HOUSEHOLD_CHANGED, type Household, type Person } from './api/persons'
 
-/** The grey used across every view for events with no assignee. */
 export const UNASSIGNED_COLOR = '#6B6B70'
 /** Default whole-family color — deliberately not one of the member swatches. */
 export const DEFAULT_FAMILY_COLOR = '#F97316'
@@ -20,17 +17,13 @@ export interface ColorableEvent {
   participants?: { id: string }[] | null
 }
 
-/** The household's whole-family event color (settings.display.familyColorHex). */
 export function familyColorHex(household: Household | null | undefined): string {
   const v = (household?.settings as { display?: { familyColorHex?: unknown } } | undefined)?.display?.familyColorHex
   return typeof v === 'string' && HEX.test(v) ? v : DEFAULT_FAMILY_COLOR
 }
 
-/**
- * A "family event" = its people (participants + the owner) cover every household
- * member. One-person households never qualify — there's no whole-vs-part
- * distinction to draw.
- */
+/** Its people (participants + owner) cover every member. One-person households never
+ *  qualify — there is no whole-vs-part distinction to draw. */
 export function isFamilyEvent(e: Pick<ColorableEvent, 'personId' | 'participants'>, memberIds: string[]): boolean {
   if (memberIds.length < 2) return false
   const ids = new Set((e.participants ?? []).map((p) => p.id))
@@ -101,16 +94,12 @@ function inkFor(background: string): string {
   return contrastRatio(background, '#FFFFFF') >= contrastRatio(background, '#000000') ? '#FFFFFF' : '#000000'
 }
 
-/** The readable ink for a solid chip of this color, in each theme. */
 export function solidChipInk(color: string): { light: string; dark: string } {
   return { light: inkFor(solidChipBackground(color, 'light')), dark: inkFor(solidChipBackground(color, 'dark')) }
 }
 
-/**
- * The inline custom properties every event chip carries: its color plus the ink
- * that stays legible on it. Spread into a chip's `style` — the stylesheet reads
- * `--ev` for the fill/wash and `--ev-on` / `--ev-on-dark` for solid text.
- */
+/** Spread into a chip's `style`: the stylesheet reads `--ev` for the fill/wash and
+ *  `--ev-on` / `--ev-on-dark` for solid text. */
 export function evVars(color: string): CSSProperties {
   if (!parseHex(color)) return { '--ev': color } as CSSProperties
   const ink = solidChipInk(color)
@@ -166,7 +155,6 @@ function subscribe(onChange: () => void): () => void {
   }
 }
 
-/** The shared members + household behind every event chip on screen. */
 export function useEventColorSource(): EventColorSource {
   return useSyncExternalStore(
     subscribe,
@@ -175,11 +163,8 @@ export function useEventColorSource(): EventColorSource {
   )
 }
 
-/**
- * Hook form for the calendar views: `const colorOf = useEventColor()`.
- * `fallback` is the unassigned grey (the agenda surfaces use a lighter one).
- * Falls back to the plain owner color while members/household are still loading.
- */
+/** Hook form for the calendar views. `fallback` is the unassigned grey; falls back to the
+ *  plain owner color while members/household are still loading. */
 export function useEventColor(fallback: string = UNASSIGNED_COLOR): (e: ColorableEvent) => string {
   const { persons, household } = useEventColorSource()
   return useMemo(() => {

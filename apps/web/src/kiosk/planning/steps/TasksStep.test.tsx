@@ -6,18 +6,11 @@ import { HandoffCtx, type HandoffAction } from '../handoff'
 
 // Step 8 · Tasks — "Who's doing what?"
 //
-// The board is the kiosk Chores layout: everything nobody has taken sits in a strip
-// across the top with the member faces under it, and each column shows what that person
-// is CARRYING for the week — from the server read, not from what this sitting happened
-// to move. What's asserted here is that difference (a hand-out shows up because the
-// board was re-read), the two answers the step records (handed over / deliberately left),
-// and that "+ Add for …" opens the app's EXISTING chore modal with Who already filled
-// in — a second chore form would be the bug.
-//
-// Every move is REVERSIBLE, by tap or by drag, and both directions have to carry every
-// open day of the chore with them or the kiosk board ends up disagreeing with this one.
-// Drag is the kiosk board's own pointer-event mechanism, so the test drives it the same
-// way: grip pointerdown → pointermove over a column → pointerup.
+// The board is the kiosk Chores layout, and each column shows what that person is CARRYING
+// for the week FROM THE SERVER READ — so a hand-out only shows up because the board was
+// re-read. Every move is reversible, by tap or by drag, and both directions carry every
+// open day of the chore or the two boards disagree. Drag is the kiosk board's own
+// pointer-event mechanism: grip pointerdown → pointermove over a column → pointerup.
 
 const { Body } = mod
 
@@ -33,24 +26,16 @@ const step: PlanningStep = {
   status: 'pending',
   data: {},
   decidedAt: null,
-  // The shell renders the parked-note handoff, not the step — see Handoff in
-  // WeeklyPlanning.tsx. A step test mounts `Body` alone, so there is never one here.
+  // The shell renders the parked-note handoff, not the step, so a `Body` mount has none.
   parked: [],
 }
 
 const WEEK = '2026-09-06' // a Sunday; 09-09 is Wed, 09-12 is Sat
 
-// THE CLOCK IS PART OF THE FIXTURE, because `WEEK` is.
-//
-// This suite plans one hard-coded week, and a planning session behaves differently for a
-// week that is already over — the server floors the plannable week at the household's
-// CURRENT one, so a week in the past is a state the product cannot reach. Left to the real
-// clock, this file described a reachable week until 2026-09-06 and an unreachable one
-// afterwards: "a task added here lands in the week being planned" began failing on its
-// own, with no change to any source file, because the Sunday it plans had gone by.
-//
-// Only `Date` is faked. The timers stay real, so `waitFor` and the rest of
-// @testing-library's async helpers behave exactly as they did.
+// THE CLOCK IS PART OF THE FIXTURE, because `WEEK` is. The server floors the plannable
+// week at the household's CURRENT one, so a hard-coded week left to the real clock stops
+// being reachable once its Sunday goes by — and the suite starts failing with no source
+// change. Only `Date` is faked; the timers stay real so `waitFor` behaves as before.
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'] })
   vi.setSystemTime(new Date('2026-09-03T12:00:00Z')) // the Thursday before WEEK
@@ -69,18 +54,14 @@ const chore = (over: Partial<Card> & { id: string; title: string }): Card => ({
   ...over,
 })
 
-// Shaped like the real /api/weekly-planning/tasks payload, day chips included.
 const BOARD = {
   weekStart: WEEK,
-  // The day the server says a task added during this session belongs on: inside the
-  // week being planned, never whatever day the board happened to be opened on.
+  // Inside the week being planned, never whatever day the board was opened on.
   newTaskDay: WEEK,
   people: [
     {
       id: 'p1', name: 'Kevin', avatarEmoji: '🧔', colorHex: '#7A5AF8', memberType: 'adult', isAdmin: true,
       recurringChores: 4,
-      // Two days of it are already sitting on a kiosk board — both have to follow it
-      // wherever it goes next, including back.
       chores: [chore({ id: 'k1', title: 'Dishes', cadence: 'daily', rrule: 'FREQ=DAILY', days: ['2026-09-06', '2026-09-07', '2026-09-08', '2026-09-09', '2026-09-10', '2026-09-11', '2026-09-12'], pendingInstanceIds: ['i7', 'i8'] })],
     },
     {
@@ -102,10 +83,8 @@ const BOARD = {
 
 let calls: { url: string; method: string; body: Record<string, unknown> | null }[] = []
 
-// A STATEFUL double: a PATCH really moves the chore out of the strip and into that
-// person's column, so what the screen shows after a hand-out is the re-read — which is
-// the whole point of the columns being server-owned. A double that replayed one fixture
-// couldn't tell that apart from component bookkeeping.
+// A STATEFUL double: a PATCH really moves the chore, so what the screen shows after a
+// hand-out is the re-read rather than component bookkeeping.
 function mockApi(opts: { capabilities?: string[]; unassigned?: unknown[] } = {}) {
   calls = []
   const state = JSON.parse(JSON.stringify(BOARD)) as typeof BOARD
@@ -135,7 +114,6 @@ function mockApi(opts: { capabilities?: string[]; unassigned?: unknown[] } = {})
     if (/\/api\/chores\/[^/]+$/.test(u) && method === 'PATCH') {
       const id = u.split('/').pop()!
       const patch = (body ?? {}) as { personId?: string | null; dueOn?: string; title?: string }
-      // Pull the card out of wherever it currently is…
       let card: Card | undefined
       const i = state.unassigned.findIndex((c) => c.id === id)
       if (i >= 0) card = state.unassigned[i]
@@ -144,8 +122,6 @@ function mockApi(opts: { capabilities?: string[]; unassigned?: unknown[] } = {})
         if (j >= 0) card = p.chores[j]
       }
       if (card && 'personId' in patch) {
-        // …and put it wherever the PATCH says, in EITHER direction: a person's column,
-        // or (personId null) back in the strip.
         state.unassigned = state.unassigned.filter((c) => c.id !== id)
         for (const p of state.people) p.chores = p.chores.filter((c) => c.id !== id)
         const target = state.people.find((p) => p.id === patch.personId)
@@ -153,7 +129,6 @@ function mockApi(opts: { capabilities?: string[]; unassigned?: unknown[] } = {})
         else state.unassigned.push(card)
       }
       if (card && typeof patch.title === 'string') {
-        // An edit through the modal: the fields the card actually shows.
         card.title = patch.title
         if ('emoji' in patch) card.emoji = (patch as { emoji: string | null }).emoji
         if (typeof (patch as { rewardAmount?: number }).rewardAmount === 'number') {
@@ -161,7 +136,6 @@ function mockApi(opts: { capabilities?: string[]; unassigned?: unknown[] } = {})
         }
       }
       if (card && typeof patch.dueOn === 'string') {
-        // The server moves the day's instance and recomputes where it lands in the week.
         card.dueOn = patch.dueOn
         card.days = patch.dueOn >= WEEK ? [patch.dueOn] : []
         card.carriedOver = false
@@ -188,13 +162,8 @@ const strip = () => screen.getByTestId('wpt-strip')
 const wrote = (method: string, match: string) => calls.filter((c) => c.method === method && c.url.includes(match))
 
 describe('TasksStep · the verb it lends the parked-note banner', () => {
-  // "while handled vs not kind of works, I feel like we should have an action relevant
-  // to the page we are on, like for tasks it should be 'make a task'".
-  //
-  // The banner stays in the shell — it is identical on ten steps, and the shell is what
-  // refetches after a write. What the step lends it is one VERB, and the verb opens the
-  // step's OWN composer. That is the part worth pinning: no second way to add a chore,
-  // and the note's words carried across so nobody retypes them.
+  // The banner stays in the SHELL. What the step lends it is one VERB, and that verb opens
+  // the step's OWN composer: no second way to add a chore.
   const lend = () => {
     let action: HandoffAction | null = null
     const finish = vi.fn()
@@ -214,8 +183,6 @@ describe('TasksStep · the verb it lends the parked-note banner', () => {
 
     act()!.run('book the campsite')
 
-    // The app's own ChoreModal — not a composer grown inside the banner — and the words
-    // that were parked are already in it.
     const title = await screen.findByPlaceholderText('Feed the dog')
     expect((title as HTMLInputElement).value).toBe('book the campsite')
   })
@@ -227,8 +194,7 @@ describe('TasksStep · the verb it lends the parked-note banner', () => {
     act()!.run('book the campsite')
     await screen.findByPlaceholderText('Feed the dog')
 
-    // Closed without saving. A banner that ticked the note off here would throw away the
-    // only record that it still needs doing.
+    // Ticking the note off here would throw away the only record that it still needs doing.
     fireEvent.click(screen.getByRole('button', { name: 'Close' }))
     await waitFor(() => expect(finish).toHaveBeenCalledWith(false))
   })
@@ -240,12 +206,9 @@ describe('TasksStep', () => {
     render(<Body {...props()} />)
     await waitFor(() => expect(screen.getByText(/Sweep the porch/)).toBeTruthy())
 
-    // A column per household member, in the order the kiosk board uses.
     for (const name of ['Kevin', 'Wally', 'Lottie']) expect(column(name)).toBeTruthy()
 
-    // The header counts what that person is holding for the week…
     expect(within(column('Kevin')).getByText('1 this week')).toBeTruthy()
-    // …the card names where it came from and when it lands…
     const wally = column('Wally')
     expect(within(wally).getByText(/Vacuum upstairs/)).toBeTruthy()
     expect(within(wally).getByText('Recurring chore')).toBeTruthy()
@@ -254,10 +217,8 @@ describe('TasksStep', () => {
     expect(within(column('Lottie')).getByText('Carried over')).toBeTruthy()
     expect(within(column('Lottie')).getByText('Left over from before this week')).toBeTruthy()
     expect(within(strip()).getByText('Sun')).toBeTruthy()
-    // …and a one-off with no day invites one rather than inventing one.
     expect(within(strip()).getByRole('button', { name: 'Set the day for Fold the towels' }).textContent).toBe('Set a day')
 
-    // Fairness is visible without anyone computing it.
     expect(within(column('Kevin')).getByText(/4 recurring chores/)).toBeTruthy()
     expect(within(column('Wally')).getByText(/1 recurring chore\b/)).toBeTruthy()
     expect(within(column('Lottie')).getByText(/No recurring chores/)).toBeTruthy()
@@ -271,21 +232,17 @@ describe('TasksStep', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Give Sweep the porch to Wally' }))
 
-    // The definition covers every future occurrence…
     await waitFor(() => expect(wrote('PATCH', '/api/chores/c1')).toHaveLength(1))
     expect(wrote('PATCH', '/api/chores/c1')[0].body).toEqual({ personId: 'p2' })
-    // …and EVERY day already sitting unclaimed on a board gets moved with it, not just
-    // the first — otherwise the kiosk Chores screen keeps showing those up for grabs.
+    // EVERY day already sitting unclaimed on a board moves with it, not just the first —
+    // otherwise the kiosk Chores screen keeps showing those up for grabs.
     expect(wrote('POST', '/api/chore-instances/i1/assign')[0].body).toEqual({ personId: 'p2' })
     await waitFor(() => expect(wrote('POST', '/api/chore-instances/i2/assign')).toHaveLength(1))
     expect(wrote('POST', '/api/chore-instances/i2/assign')[0].body).toEqual({ personId: 'p2' })
 
-    // The board was re-read, and Wally's column now holds it: server-owned, so this
-    // survives a refresh instead of living in component state.
     await waitFor(() => expect(wrote('GET', '/api/weekly-planning/tasks').length).toBeGreaterThan(reads))
     await waitFor(() => expect(within(column('Wally')).getByText(/Sweep the porch/)).toBeTruthy())
     expect(within(strip()).queryByText(/Sweep the porch/)).toBeNull()
-    // Its header count grew with it.
     expect(within(column('Wally')).getByText('2 this week')).toBeTruthy()
   })
 
@@ -295,17 +252,13 @@ describe('TasksStep', () => {
     render(<Body {...props({ setDecisionData })} />)
     await waitFor(() => expect(screen.getByText(/Sweep the porch/)).toBeTruthy())
 
-    // The discriminating case is a MIXED sitting: one chore is handed over and the
-    // other is deliberately left. "Nobody" has to survive the same pass that assigns.
     fireEvent.click(screen.getByRole('button', { name: 'Give Sweep the porch to Lottie' }))
     await waitFor(() => expect(within(column('Lottie')).getByText(/Sweep the porch/)).toBeTruthy())
 
-    // The one nobody took is untouched and still on offer — no write, no flag.
     expect(wrote('PATCH', '/api/chores/c2')).toHaveLength(0)
     expect(within(strip()).getByText(/Fold the towels/)).toBeTruthy()
     expect(strip().textContent).toMatch(/up for grabs/i)
-    // …and the session records it as a decision, not as a gap. Counts only: the recap
-    // reads through to chores, so a copy of the rows here could only disagree.
+    // Counts only: the recap reads through to chores, so a copy here could only disagree.
     await waitFor(() => expect(setDecisionData).toHaveBeenLastCalledWith({ assigned: 1, leftUpForGrabs: 1 }))
   })
 
@@ -322,8 +275,6 @@ describe('TasksStep', () => {
     await waitFor(() => expect(screen.getByText(/Sweep the porch/)).toBeTruthy())
 
     fireEvent.click(within(column('Wally')).getByRole('button', { name: /Add for Wally/ }))
-    // ChoreModal, not a second chore form of our own: its own title, its own fields,
-    // and its Who select pre-set to the column we added from.
     await waitFor(() => expect(screen.getByText('New chore')).toBeTruthy())
     expect(screen.getByPlaceholderText('Feed the dog')).toBeTruthy()
     await waitFor(() => expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('p2'))
@@ -347,12 +298,10 @@ describe('TasksStep', () => {
     expect(screen.queryByRole('button', { name: 'Give Sweep the porch to Wally' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Put Dishes back up for grabs' })).toBeNull()
     expect(screen.queryByRole('button', { name: /^Drag / })).toBeNull()
-    // No day to set either — so the chip goes back to stating the plain fact.
     expect(screen.queryByRole('button', { name: 'Set the day for Fold the towels' })).toBeNull()
     expect(within(strip()).getByText('No day set')).toBeTruthy()
   })
 
-  // Handing a chore over is a decision, and a decision you can't take back is a trap.
   it('takes an assignment back — the chore AND every open day of it', async () => {
     mockApi()
     render(<Body {...props()} />)
@@ -360,17 +309,13 @@ describe('TasksStep', () => {
 
     fireEvent.click(within(column('Kevin')).getByRole('button', { name: 'Put Dishes back up for grabs' }))
 
-    // Back to nobody on the definition…
     await waitFor(() => expect(wrote('PATCH', '/api/chores/k1')).toHaveLength(1))
     expect(wrote('PATCH', '/api/chores/k1')[0].body).toEqual({ personId: null })
-    // …and EVERY day already sitting on a kiosk board is released with it, not just the
-    // first: leaving one behind is exactly how the two boards end up disagreeing.
     for (const id of ['i7', 'i8']) {
       await waitFor(() => expect(wrote('POST', `/api/chore-instances/${id}/assign`)).toHaveLength(1))
       expect(wrote('POST', `/api/chore-instances/${id}/assign`)[0].body).toEqual({ personId: null })
     }
 
-    // The board re-read: it's up for grabs again, and Kevin's column has let it go.
     await waitFor(() => expect(within(strip()).getByText(/Dishes/)).toBeTruthy())
     expect(within(column('Kevin')).queryByText(/Dishes/)).toBeNull()
   })
@@ -385,13 +330,10 @@ describe('TasksStep', () => {
     await waitFor(() => expect(wrote('PATCH', '/api/chores/k1')[0]?.body).toEqual({ personId: 'p3' }))
     expect(wrote('POST', '/api/chore-instances/i8/assign')[0].body).toEqual({ personId: 'p3' })
     await waitFor(() => expect(within(column('Lottie')).getByText(/Dishes/)).toBeTruthy())
-    // The owner never offers themselves — that tap would do nothing.
     expect(within(column('Lottie')).queryByRole('button', { name: 'Give Dishes to Lottie' })).toBeNull()
   })
 
-  // Drag is the gesture people reach for on a board like this. It's the kiosk Chores
-  // board's own mechanism (pointer events, so a mouse and the kiosk touchscreen behave
-  // the same), and it must do exactly what tapping a face does — no second write path.
+  // Drag must do exactly what tapping a face does — no second write path.
   describe('dragging a card', () => {
     const elementFromPoint = document.elementFromPoint
     afterEach(() => {
@@ -416,7 +358,6 @@ describe('TasksStep', () => {
       dropOn(within(strip()).getByRole('button', { name: 'Drag Sweep the porch to another column' }), column('Wally'))
 
       await waitFor(() => expect(wrote('PATCH', '/api/chores/c1')[0]?.body).toEqual({ personId: 'p2' }))
-      // The days already on a board follow a drop exactly as they follow a tap.
       await waitFor(() => expect(wrote('POST', '/api/chore-instances/i2/assign')[0]?.body).toEqual({ personId: 'p2' }))
       await waitFor(() => expect(within(column('Wally')).getByText(/Sweep the porch/)).toBeTruthy())
     })
@@ -444,37 +385,28 @@ describe('TasksStep', () => {
     })
   })
 
-  // "I assigned it and had nowhere to say when." The day chip is the way in — but it
-  // opens the SAME editor the title opens, rather than a second inline date picker.
-  // One card had two edit surfaces that could disagree; now it has one.
+  // The day chip opens the SAME editor the title opens: two edit surfaces can disagree.
   it('the day chip opens the chore editor, and the day saves from there', async () => {
     mockApi()
     render(<Body {...props()} />)
-    // Sweep the porch has pending instances (i1, i2) — the second write is the one that
-    // fails, which is the whole point. Fold the towels has none, so nothing would throw.
     await waitFor(() => expect(screen.getByText(/Sweep the porch/)).toBeTruthy())
 
     fireEvent.click(screen.getByRole('button', { name: 'Set the day for Fold the towels' }))
     await waitFor(() => expect(screen.getByText('Edit chore')).toBeTruthy())
 
-    // The editor opens on this chore's own day and moves it from there.
     fireEvent.change(screen.getByLabelText('On'), { target: { value: '2026-09-09' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
-    // dueOn on the chore itself — the chores module moves the day's instance with it.
     await waitFor(() => expect(wrote('PATCH', '/api/chores/c2')).toHaveLength(1))
     expect(wrote('PATCH', '/api/chores/c2')[0].body).toMatchObject({ dueOn: '2026-09-09' })
-    // And the chip now names the day, because the board was re-read.
     await waitFor(() => expect(within(strip()).getByText('Wed')).toBeTruthy())
   })
 
-  // The inline picker is GONE, not hidden: two ways to edit one card is how a title
-  // change and a day change end up racing each other on the same chore.
+  // The inline picker is GONE, not hidden: two ways to edit one card is how a title change
+  // and a day change end up racing each other on the same chore.
   it('has no inline date picker left on the card', async () => {
     mockApi()
     render(<Body {...props()} />)
-    // Sweep the porch has pending instances (i1, i2) — the second write is the one that
-    // fails, which is the whole point. Fold the towels has none, so nothing would throw.
     await waitFor(() => expect(screen.getByText(/Sweep the porch/)).toBeTruthy())
     fireEvent.click(screen.getByRole('button', { name: 'Set the day for Fold the towels' }))
     await waitFor(() => expect(screen.getByText('Edit chore')).toBeTruthy())
@@ -485,8 +417,7 @@ describe('TasksStep', () => {
     mockApi()
     render(<Body {...props()} />)
     await waitFor(() => expect(screen.getByText(/Sweep the porch/)).toBeTruthy())
-    // 'Sweep the porch' repeats weekly: its days come from its rrule, so the chip is a
-    // statement, not a picker — a date here could only contradict the recurrence.
+    // 'Sweep the porch' repeats weekly, so the chip is a statement, not a picker.
     expect(screen.queryByRole('button', { name: 'Set the day for Sweep the porch' })).toBeNull()
   })
 
@@ -499,11 +430,8 @@ describe('TasksStep', () => {
     await waitFor(() => expect(screen.getByText('New chore')).toBeTruthy())
     expect(screen.getByRole('button', { name: 'Just once' }).className).toContain('on')
     expect(screen.getByRole('button', { name: 'Every day' }).className).not.toContain('on')
-    // …which means the modal offers the day, too.
     expect(screen.getByText('On')).toBeTruthy()
   })
-  // "I added a task for next week and it landed today." The modal is told which day
-  // the week being planned starts on, so a new one-off lands inside that week.
   it('a task added here lands in the week being planned, not on today', async () => {
     mockApi()
     render(<Body {...props()} />)
@@ -515,31 +443,22 @@ describe('TasksStep', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add chore' }))
 
     await waitFor(() => expect(wrote('POST', '/api/chores')).toHaveLength(1))
-    // One-off (the planning default) AND dated to the planned week, in one write.
     expect(wrote('POST', '/api/chores')[0].body).toMatchObject({ title: 'Book the sitter', rrule: null, dueOn: WEEK })
   })
-  // A card has several interactive regions now, so what each one does has to be exact:
-  // the grip drags, the chip sets the day, the faces move it, and the title — the one
-  // part that was inert — opens the app's own chore editor. Sending someone to the
-  // Chores screen to fix a typo is the ejection this module exists to avoid.
   describe('editing a task from the board', () => {
     it('opens the app’s chore editor, and a rename shows on the board', async () => {
       mockApi()
       render(<Body {...props()} />)
-      // Sweep the porch has pending instances (i1, i2) — the second write is the one that
-    // fails, which is the whole point. Fold the towels has none, so nothing would throw.
     await waitFor(() => expect(screen.getByText(/Sweep the porch/)).toBeTruthy())
 
       fireEvent.click(within(strip()).getByRole('button', { name: 'Edit Fold the towels' }))
 
-      // ChoreModal in EDIT mode — its own form, prefilled, not a second one of ours.
       await waitFor(() => expect(screen.getByText('Edit chore')).toBeTruthy())
       fireEvent.change(screen.getByDisplayValue('Fold the towels'), { target: { value: 'Fold the tea towels' } })
       fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
       await waitFor(() => expect(wrote('PATCH', '/api/chores/c2')).toHaveLength(1))
       expect(wrote('PATCH', '/api/chores/c2')[0].body).toMatchObject({ title: 'Fold the tea towels' })
-      // The board re-read, so the card shows the new name (and the modal is gone).
       await waitFor(() => expect(within(strip()).getByText(/Fold the tea towels/)).toBeTruthy())
       expect(screen.queryByText('Edit chore')).toBeNull()
     })
@@ -552,20 +471,17 @@ describe('TasksStep', () => {
       fireEvent.click(within(column('Wally')).getByRole('button', { name: 'Edit Vacuum upstairs' }))
       await waitFor(() => expect(screen.getByText('Edit chore')).toBeTruthy())
 
-      // Cadence, time and Who come back as they are…
       expect(screen.getByRole('button', { name: 'Certain days' }).className).toContain('on')
       expect(await screen.findByDisplayValue('18:00')).toBeTruthy()
       await waitFor(() => expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('p2'))
-      // …and so does "Needs a parent's OK", which the card never draws. A blank prefill
-      // here would quietly switch approval OFF the moment anybody fixed a typo.
+      // …and so does "Needs a parent's OK", which the card never draws. A blank prefill here
+      // would quietly switch approval OFF the moment anybody fixed a typo.
       expect(screen.getByText('Needs a parent’s OK').closest('button')!.className).toContain('on')
     })
 
     it('offers no Delete — a planning session decides who does what, not what exists', async () => {
       mockApi()
       render(<Body {...props()} />)
-      // Sweep the porch has pending instances (i1, i2) — the second write is the one that
-    // fails, which is the whole point. Fold the towels has none, so nothing would throw.
     await waitFor(() => expect(screen.getByText(/Sweep the porch/)).toBeTruthy())
 
       fireEvent.click(within(strip()).getByRole('button', { name: 'Edit Fold the towels' }))
@@ -587,7 +503,6 @@ describe('TasksStep', () => {
       document.elementFromPoint = elementFromPoint
 
       await waitFor(() => expect(wrote('PATCH', '/api/chores/c1')).toHaveLength(1))
-      // The drop moved it; it did not also open a modal over the board.
       expect(screen.queryByText('Edit chore')).toBeNull()
     })
 
@@ -598,10 +513,8 @@ describe('TasksStep', () => {
       // PATCH /api/chores/:id needs chore.manage, so a modal here could only 403.
       expect(screen.queryByRole('button', { name: /^Edit / })).toBeNull()
     })
-    // The discriminating drop: the pointer lands not on a column's empty space but on
-    // ANOTHER card's title button — which is now an enabled control inside the drop
-    // zone. The drop must still resolve to the zone (closest('[data-colkey]') walks up)
-    // and must not leave an editor open behind it.
+    // The discriminating drop: the pointer lands on ANOTHER card's title button, an enabled
+    // control inside the drop zone. It must still resolve to the zone and leave no editor.
     it('drops onto a card’s own title button and still just moves the chore', async () => {
       mockApi()
       render(<Body {...props()} />)
@@ -624,33 +537,27 @@ describe('TasksStep', () => {
   })
 })
 
-// HANDING A CHORE OVER IS TWO WRITES, and the second one can fail on its own.
-//
-// `handOut` PATCHes the chore DEFINITION and then assigns each pending instance. The catch
-// asserted "nothing moved, so there's nothing to undo" — false the moment the definition
-// PATCH has already succeeded — and then skipped the re-read and said nothing, so the card
-// sat in its old column and the tally was wrong until some unrelated refetch.
+// HANDING A CHORE OVER IS TWO WRITES, and the second can fail on its own: `handOut`
+// PATCHes the chore DEFINITION and then assigns each pending instance. Once the
+// definition PATCH has landed, "nothing moved, so there's nothing to undo" is false —
+// the failure path still has to re-read and still has to say something.
 describe('tasks · when handing a chore over half-fails', () => {
   it('re-reads the board and says so, rather than claiming nothing moved', async () => {
     mockApi()
     const inner = globalThis.fetch as unknown as typeof fetch
-    // The definition PATCH succeeds; assigning the instance does not.
     globalThis.fetch = vi.fn(async (url: string, init?: RequestInit) => {
       if (String(url).includes('/assign')) throw new Error('offline')
       return (inner as (u: string, i?: RequestInit) => Promise<unknown>)(url, init)
     }) as unknown as typeof fetch
 
     render(<Body {...props()} />)
-    // Sweep the porch has pending instances (i1, i2) — the second write is the one that
-    // fails, which is the whole point. Fold the towels has none, so nothing would throw.
+    // Sweep the porch has pending instances, so the second write is the one that fails.
     await waitFor(() => expect(screen.getByText(/Sweep the porch/)).toBeTruthy())
     const before = calls.filter((c) => c.method === 'GET' && c.url.includes('/weekly-planning/tasks')).length
 
     fireEvent.click(within(strip()).getAllByRole('button', { name: /Give Sweep the porch to/ })[0])
 
-    // It said something…
     expect(await screen.findByRole('alert')).toBeTruthy()
-    // …and went back to the server rather than trusting a board it knows is now wrong.
     await waitFor(() => expect(
       calls.filter((c) => c.method === 'GET' && c.url.includes('/weekly-planning/tasks')).length
     ).toBeGreaterThan(before))

@@ -4,11 +4,10 @@ import { RecipeBrowser } from './RecipeBrowser'
 import { TopbarSlotProvider } from '../topbar-slot'
 import type { Meal, Recipe } from '../../lib/api'
 
-// The picker could write a new RECIPE but not a new PLATE — so "a whole meal" was
-// only ever pickable if somebody had already built one on the Meal Builder screen.
-// Filling a slot with a two-dish dinner meant abandoning the picker, walking to the
-// builder, building it, walking back. The picker now builds the plate itself, with
-// the builder's own body rather than a second, lesser plate editor.
+// The picker could write a new RECIPE but not a new PLATE, so filling a slot with a
+// two-dish dinner meant abandoning the picker for the Meal Builder screen. It now
+// builds the plate itself, with the builder's own body rather than a second, lesser
+// plate editor.
 
 interface Sent { method: string; url: string; body: unknown }
 const sent: Sent[] = []
@@ -69,9 +68,9 @@ function mockApi() {
       return { ok: true, json: async () => ({ meal: PLATE({ name: (body as { name: string }).name }) }) }
     }
     // Swapping to the new id makes the builder REFETCH the plate by id — answer that
-    // with the plate, not the list. Getting this wrong made `meal` undefined a beat
-    // after the dish landed, which read as "the Use button did nothing", and only
-    // under load, because it is a race between the refetch and the click.
+    // with the plate, not the list. Getting it wrong leaves `meal` undefined a beat
+    // after the dish lands, which reads as "the Use button did nothing", and only
+    // under load.
     if (/\/api\/meals\/[^/?]+$/.test(u) && method === 'GET') {
       return {
         ok: true,
@@ -110,9 +109,9 @@ describe('RecipeBrowser — building a plate without leaving the slot', () => {
     expect(screen.getByRole('button', { name: /New meal/i })).toBeInTheDocument()
   })
 
-  // The same render contract "＋ New recipe" follows, and for the same reason the file
-  // already documents: a caller with nowhere to schedule a plate to (the plan-my-week
-  // draft overlay) doesn't advertise plates at all, so it must not get this either.
+  // The same render contract "＋ New recipe" follows: a caller with nowhere to
+  // schedule a plate to (the plan-my-week draft overlay) doesn't advertise plates at
+  // all.
   it('stays out of the way when plates aren’t on offer', () => {
     renderBrowser({ onPick: () => {} })
     expect(screen.queryByRole('button', { name: /New meal/i })).not.toBeInTheDocument()
@@ -123,15 +122,14 @@ describe('RecipeBrowser — building a plate without leaving the slot', () => {
     renderBrowser({ onPick: () => {}, onPickMeal })
 
     fireEvent.click(screen.getByRole('button', { name: /New meal/i }))
-    // The builder's own body, lazily loaded.
     await screen.findByLabelText('Meal name')
-    // A plate needs a dish before it can fill a night — the bar disables every
-    // action on an empty one, this included.
+    // A plate needs a dish before it can fill a night — the bar disables every action
+    // on an empty one, this included.
     fireEvent.click(await screen.findByRole('button', { name: 'Add Chicken Parmesan' }))
-    // Deliberately no rename here: the name field debounces 600ms before writing,
-    // and every bar action is disabled while a write is in flight — so renaming and
-    // then racing to click would test the debounce, not the plate. The rename is
-    // covered below, where the assertion is the request rather than a click.
+    // Deliberately no rename here: the name field debounces 600ms before writing, and
+    // every bar action is disabled while a write is in flight, so renaming and racing
+    // to click would test the debounce. The rename is covered below, where the
+    // assertion is the request.
     await waitFor(() =>
       expect((screen.getByRole('button', { name: /Use this plate/i }) as HTMLButtonElement).disabled).toBe(false),
     )
@@ -141,9 +139,9 @@ describe('RecipeBrowser — building a plate without leaving the slot', () => {
     expect(onPickMeal.mock.calls[0][0]).toMatchObject({ id: 'm-new' })
   })
 
-  // A plate built here belongs in the library, like a recipe written here does —
-  // and `isSaved` is what makes scheduling COPY it, so the library plate survives
-  // the night being edited later.
+  // A plate built here belongs in the library, like a recipe written here does — and
+  // `isSaved` is what makes scheduling COPY it, so the library plate survives the
+  // night being edited.
   it('saves the new plate to the library, under the name it was given', async () => {
     renderBrowser({ onPick: () => {}, onPickMeal: () => {} })
     fireEvent.click(screen.getByRole('button', { name: /New meal/i }))
@@ -156,9 +154,8 @@ describe('RecipeBrowser — building a plate without leaving the slot', () => {
   })
 
   // Scheduling and "add to grocery list" are the builder SCREEN's answers to "now
-  // what?". In a picker the answer is already decided — the slot that opened it — so
-  // offering them here would be two ways to do one thing, one of which silently
-  // abandons the slot.
+  // what?". In a picker the answer is the slot that opened it, so offering them would
+  // be two ways to do one thing, one of which silently abandons the slot.
   it('offers no competing destination inside the picker', async () => {
     renderBrowser({ onPick: () => {}, onPickMeal: () => {} })
     fireEvent.click(screen.getByRole('button', { name: /New meal/i }))
@@ -167,11 +164,10 @@ describe('RecipeBrowser — building a plate without leaving the slot', () => {
     expect(screen.queryByRole('button', { name: /Add plate to list/i })).toBeNull()
   })
 
-  // The plate is created LAZILY, on the first dish — so a half-built one is a real,
-  // saved row in the library by the time somebody changes their mind. Closing has to
-  // take it back out, or every abandoned "＋ New meal" leaves a permanent plate called
-  // "New meal" sitting in the library with nothing in it. Cancel means cancel, the
-  // same as it does for the recipe half.
+  // The plate is created LAZILY, on the first dish, so a half-built one is a real
+  // saved row by the time somebody changes their mind. Closing has to take it back
+  // out, or every abandoned "＋ New meal" leaves a permanent empty plate in the
+  // library.
   it('takes a half-built plate back out of the library when cancelled', async () => {
     const onPickMeal = vi.fn()
     renderBrowser({ onPick: () => {}, onPickMeal })
@@ -187,7 +183,6 @@ describe('RecipeBrowser — building a plate without leaving the slot', () => {
     expect(onPickMeal).not.toHaveBeenCalled()
   })
 
-  // The plate somebody actually USED is theirs to keep, obviously.
   it('keeps the plate that was chosen', async () => {
     const onPickMeal = vi.fn()
     renderBrowser({ onPick: () => {}, onPickMeal })
@@ -211,7 +206,6 @@ describe('RecipeBrowser — building a plate without leaving the slot', () => {
     await waitFor(() => expect(screen.queryByLabelText('Meal name')).not.toBeInTheDocument())
     expect(onPickMeal).not.toHaveBeenCalled()
     expect(screen.getByText('Chicken Parmesan')).toBeInTheDocument()
-    // Nothing was written for a plate nobody finished.
     expect(sent.some((s) => s.method === 'POST')).toBe(false)
   })
 })

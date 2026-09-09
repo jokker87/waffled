@@ -90,11 +90,9 @@ export interface PersonOverview {
   streak: StreakSummary
   /**
    * "This week's one thing", said at Weekly Planning's Kids step. Null when the module is
-   * off, when no session covers today, or when nobody answered for this person — three
-   * reasons that all mean the same thing to a reader, so the card simply isn't there.
-   *
-   * READ from the session record rather than copied onto the person, so the profile and
-   * the Kids step can never disagree about what somebody said.
+   * off, no session covers today, or nobody answered — three reasons that read the same,
+   * so the card simply isn't there. READ from the session record rather than copied onto
+   * the person, so the profile and the Kids step can never disagree.
    */
   planningFocus: PlanningFocus | null
 }

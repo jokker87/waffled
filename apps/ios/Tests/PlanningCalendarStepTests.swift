@@ -2,12 +2,11 @@ import Foundation
 import Testing
 @testable import Waffled
 
-// Weekly Planning · step 2 "Calendar" — the week's arithmetic and the little state the
-// step keeps. There is no network in this step (`calendar.routes.ts` deliberately
-// registers nothing), so what is worth pinning is: the seven days really are the SERVER'S
-// week plus 0…6 with no device timezone anywhere near them, the one line under the week
-// range says the true thing about what is open, and the crumb never erases what it found
-// on the step's own row.
+// Weekly Planning · step 2 "Calendar" — the week's arithmetic and the little state the step
+// keeps. There is no network in this step, so what is worth pinning is: the seven days
+// really are the SERVER'S week plus 0…6 with no device timezone near them, the one line
+// under the week range says the true thing about what is open, and the crumb never erases
+// what it found.
 
 @MainActor
 @Suite struct PlanningCalendarStepTests {
@@ -26,7 +25,6 @@ import Testing
         #expect(days.first?.full == "Sunday")
         #expect(days.first?.date == "Sep 6")
         #expect(days.last?.full == "Saturday")
-        // Exactly one day is today, and it is the one the household says it is.
         #expect(days.filter(\.isToday).map(\.key) == ["2026-09-09"])
     }
 
@@ -36,8 +34,8 @@ import Testing
     }
 
     /// A week start is a calendar LABEL, not an instant: the arithmetic is UTC string
-    /// arithmetic precisely so a DST boundary or a negative device offset can't land the
-    /// week on the Saturday or the Monday.
+    /// arithmetic precisely so a DST boundary or a negative device offset can't shift the
+    /// week by a day.
     @Test func daysStepAcrossDstAndTheYearWithoutSlipping() {
         // US spring-forward is 2026-03-08.
         #expect(PlanningWeekDays.addDays("2026-03-07", 1) == "2026-03-08")
@@ -93,12 +91,10 @@ import Testing
 
     // MARK: - The crumb
     //
-    // WHAT STEP 1 ROUTED HERE IS NO LONGER THIS STEP'S STATE. It used to be — the model
-    // held the routes addressed to `calendar` and the ones it had turned into events, so
-    // the body could draw them in a section at the BOTTOM of the screen, while a parked
-    // note tagged for the same step appeared in the shell's box at the top. One box holds
-    // both now, and the rule for what goes in it is asserted against
-    // `PlanningRouteSeed.sentHere` in `PlanningSentHereTests` (PlanningLooseEndsTests.swift).
+    // WHAT STEP 1 ROUTED HERE IS NOT THIS STEP'S STATE. One box holds both a routed loose
+    // end and a parked note tagged for this step, and the rule for what goes in it is
+    // asserted against `PlanningRouteSeed.sentHere` in `PlanningSentHereTests`
+    // (PlanningLooseEndsTests.swift).
 
     @Test func addingAnEventIsOnlyEverACount() {
         let model = PlanningCalendarModel()
@@ -113,10 +109,9 @@ import Testing
     }
 
     /// THE CRUMB REPLACES THE STEP'S DATA when the step is answered — and it stays a pure
-    /// count because everything else this step touches lives in the module that owns it:
-    /// the events are the real calendar's, and what step 1 routed here is persisted on step
-    /// 1's row. (A step whose OWN row carries a mid-step write — Goals, Kids, Connection —
-    /// must mirror it back, or the affirmative wipes it.)
+    /// count because everything else this step touches lives in the module that owns it. (A
+    /// step whose OWN row carries a mid-step write — Goals, Kids, Connection — must mirror
+    /// it back, or the affirmative wipes it.)
     @Test func theCrumbStaysACountBecauseNothingElseLivesOnThisStepsRow() {
         let model = PlanningCalendarModel()
         model.recordEventAdded()

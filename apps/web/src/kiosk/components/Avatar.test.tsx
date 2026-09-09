@@ -13,8 +13,7 @@ describe('PersonAv', () => {
     expect(av.style.background).toContain('rgba(37, 163, 104')
   })
 
-  // A person with no colour or emoji yet still has to render as a face rather than a
-  // hole. Every hand-rolled copy of this repeated the same two fallbacks.
+  // A person with no colour or emoji still has to render as a face rather than a hole.
   it('falls back to the neutral tint and a plain face', () => {
     render(<PersonAv person={{ personId: 'p2', name: null, avatarEmoji: null, colorHex: null }} />)
     const av = screen.getByText('🙂')

@@ -6,8 +6,7 @@ import { MonthDayPanel } from './MonthDayPanel'
 import { RhythmMark } from './RhythmMark'
 
 // The visible 6-week (42-cell) grid for a month, including leading/trailing days.
-// `monthGridStart` is shared with Calendar's fetch window on purpose — this used to
-// hold its own copy of the formula, and the two must never disagree.
+// `monthGridStart` is shared with Calendar's fetch window — the two must never disagree.
 function monthGrid(year: number, month: number, firstDay: number): Date[] {
   const gridStart = monthGridStart(year, month, firstDay)
   return Array.from({ length: 42 }, (_, i) => {
@@ -43,14 +42,10 @@ export function MonthView({
   onCountdownTap?: (cds: Countdown[]) => void
   onCreateOnDay: (date: string) => void
   onMore: (date: string) => void
-  /// Which day starts the week (0 = Sunday, 1 = Monday) — passed from Calendar so the
-  /// grid and the fetched range are always cut the same way.
+  /// Which day starts the week (0 = Sunday) — passed from Calendar so the grid and the fetched range match.
   firstDay: number
-  /// How many event chips a day cell draws before it collapses the rest into "+N more".
-  /// Three on the Calendar page, where the month owns the screen. Weekly Planning's
-  /// Horizon scan passes 2: it has a parked-notes board under the grid that has to stay
-  /// on screen, and a chip is never allowed to shrink to make room (that is the squash
-  /// this was reported as), so the only honest saving is drawing one fewer of them.
+  /// How many event chips a day cell draws before collapsing the rest into "+N more". Three on
+  /// Calendar; Horizon passes 2 to keep its parked-notes board on screen (a chip never shrinks).
   maxChips?: number
 }) {
   const chipCap = maxChips ?? 3
@@ -112,12 +107,9 @@ export function MonthView({
                       onOpenEvent(e)
                     }}
                   >
-                    {/* A month cell gives a chip ~100px. Two leading glyphs on a
-                        recurring rhythm ("↻ 🔁 Third-…") left six characters of the title
-                        readable — and an auto-scheduled rhythm is always recurring, so
-                        that's the ordinary case, not an edge one. The rhythm marker is the
-                        more specific fact, so here it wins and the repeat arrow stands
-                        down; week, day and agenda have room for both. */}
+                    {/* A month cell gives a chip ~100px, and two leading glyphs leave six
+                        characters of the title readable. The rhythm marker is the more specific
+                        fact, so it wins here; week, day and agenda have room for both. */}
                     {e.occurrenceStart && !e.rhythmId && <span className="ev-rep" title="Repeats">↻ </span>}
                     <RhythmMark event={e} />
                     {e.title}

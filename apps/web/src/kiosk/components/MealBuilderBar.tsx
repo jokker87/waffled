@@ -1,8 +1,6 @@
-// The dark stat bar pinned under the Meal Builder: serves stepper · hands-on
-// time · groceries · "keep in library" · the two actions.
-//
-// `servings` is stored and displayed only — v1 deliberately does not rescale
-// ingredient quantities (decision 4).
+// The dark stat bar pinned under the Meal Builder: serves stepper · hands-on time · groceries ·
+// "keep in library" · the two actions. `servings` is stored and displayed only — v1
+// deliberately does not rescale ingredient quantities.
 
 function hoursMinutes(total: number | null): string {
   if (!total || total <= 0) return '—'
@@ -38,18 +36,14 @@ export function MealBuilderBar({
   busy: boolean
   onServings: (n: number) => void
   onToggleSaved: () => void
-  // The three actions are PRESENCE-GATED: each button exists only if it has somewhere
-  // to go. The builder screen passes all three; the plate builder embedded in the
-  // recipe picker passes none of them and an `onUse` instead — inside a picker the
-  // "now what?" is already answered by the slot that opened it, so a second
-  // destination could only take you somewhere you didn't ask to go.
+  // The three actions are PRESENCE-GATED: each button exists only if it has somewhere to go.
+  // The plate builder embedded in the recipe picker passes none of them and an `onUse` instead
+  // — inside a picker the "now what?" is already answered by the slot that opened it.
   onAddToList?: () => void
   onSchedule?: () => void
-  // Cook the whole plate — tabbed across its dishes with one shared timer dock.
   onCook?: () => void
-  // "This plate is the answer" — hands the finished plate back to whatever opened
-  // the builder. Its label names the destination, which the caller knows and this
-  // bar doesn't.
+  // "This plate is the answer" — hands the finished plate back to whatever opened the builder.
+  // Its label names the destination, which the caller knows and this bar doesn't.
   onUse?: () => void
   useLabel?: string
 }) {
@@ -91,16 +85,12 @@ export function MealBuilderBar({
         />
         <span className="mb-bar-save-b">
           <span className="mb-bar-save-t">Keep in library</span>
-          {/* The toggle applies immediately — it is a state, not a pending action
-              waiting on Schedule or Add-to-list. Say so, because "Save…" read as
-              something you still had to commit. */}
+          {/* The toggle applies immediately — a state, not a pending action. */}
           <span className="mb-bar-save-h">{isSaved ? 'Saved — it’s in your library' : 'One-off — not saved'}</span>
         </span>
       </div>
 
       <div className="mb-bar-actions">
-        {/* Cooking is what you do with a plate TONIGHT; scheduling and shopping are
-            what you do with it later. Hidden on an empty plate — nothing to cook. */}
         {onCook && !empty && (
           <button type="button" className="btn btn-ghost" disabled={busy} onClick={onCook}>
             <span aria-hidden>👨‍🍳</span> Cook this meal

@@ -2,40 +2,27 @@ import Foundation
 import Testing
 @testable import Waffled
 
-// Weekly Planning · step 9 — Kids, on iOS.
+// Weekly Planning · step 9 — Kids, on iOS. Two of these tests are the point of the file.
 //
-// TWO OF THESE TESTS ARE THE POINT OF THE FILE.
-//
-//   1. THE FOUR-STATE ANSWER. `focus` and `forward` each mean four different things on the
-//      wire — absent (leave the other answer alone), null (clear it), `{key}` and `{text}`
-//      — and a `String?` can only say two. One test per state, asserting the exact body, so
-//      that "simplifying" `.absent` into a null cannot pass. That collapse is not
-//      theoretical: it is what a synthesized `Encodable` struct does by itself, which is
-//      exactly why the body is built as a dictionary.
-//
-//   2. THE UNSAVED DRAFT. Type into "something else", change your mind and tap an option
-//      that was already offered: the option becomes the answer, ONLY ONE chip reads as
-//      chosen, and going back to the hatch still shows the words they said. The reported
-//      bug was half expected behaviour and half real data loss — the typing had been saved
-//      nowhere, so an empty box said it was gone for good.
-//
-// Everything else here is provenance and the loading contract. The JSON is the shape
-// `apps/api/test/weekly-planning-kids.integration.test.ts` asserts on: Wally's habit goal
-// (2 of 5 THIS WEEK against a much larger lifetime total), his overdue chore, the standing
-// chore with no detail line, and events already on his week.
+//   1. THE FOUR-STATE ANSWER. `focus` and `forward` each mean four things on the wire —
+//      absent (leave the other answer alone), null (clear it), `{key}` and `{text}` — and
+//      a `String?` can only say two. One test per state, asserting the exact body, so that
+//      "simplifying" `.absent` into a null cannot pass; that collapse is what a
+//      synthesized `Encodable` does, which is why the body is a dictionary.
+//   2. THE UNSAVED DRAFT. Typing into "something else" and then tapping an offered option
+//      must not throw the typing away.
 
 // MARK: - Fixtures
 
 private enum KidsFixture {
-    // Real UUIDs: the server's `answerKid` rejects a `personId` that isn't one, so the
-    // fixtures use the shape a client would actually send.
+    // Real UUIDs: the server's `answerKid` rejects a `personId` that isn't one.
     static let session = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
     static let week = "2026-09-06"
     static let wally = "11111111-1111-4111-8111-111111111111"
     static let lottie = "22222222-2222-4222-8222-222222222222"
 
-    /// Wally's habit: 340 lifetime reps, 2 of 5 THIS WEEK. The whole reason a goal-sourced
-    /// option carries its goal is so the card reads the second number, not the first.
+    /// Wally's habit: 340 lifetime reps, 2 of 5 THIS WEEK. A goal-sourced option carries its
+    /// goal so the card reads the second number, not the first.
     static let readGoalJSON = """
     {"id":"g-read","goalListId":"list-wally","title":"Read together","emoji":"📚",
      "category":"intellectual","goalType":"habit","unit":null,"habitPeriod":"week",
@@ -47,8 +34,6 @@ private enum KidsFixture {
      "createdAt":"2026-01-01T00:00:00.000Z","participants":[]}
     """
 
-    /// What a chosen option looks like once the server has snapshotted it back onto the
-    /// card. Keyed by the option's own `key`, exactly as `answerKid` resolves it.
     static func focusSnapshot(forKey key: String) -> String? {
         switch key {
         case "goal:g-read":
@@ -77,8 +62,8 @@ private enum KidsFixture {
         }
     }
 
-    /// Free text names nothing in any module, which is exactly how the read-back tells it
-    /// apart from a picked option — and why it can live in the same field.
+    /// Free text names nothing in any module, which is how the read-back tells it apart from
+    /// a picked option — and why it can live in the same field.
     static func customFocus(_ label: String) -> String {
         #"{"source":"custom","id":null,"emoji":"✨","label":"\#(label)","detail":null}"#
     }
@@ -161,9 +146,9 @@ private enum KidsFixture {
 
 private enum KidsStepFailure: Error { case rejected }
 
-/// A stand-in for the server that MERGES the way `answerKid` does — absent leaves the
-/// other answer alone, null clears, a key is resolved against the options that were
-/// actually offered. Without the merge, the draft test would prove nothing.
+/// A stand-in for the server that MERGES the way `answerKid` does — absent leaves the other
+/// answer alone, null clears, a key resolves against the options offered. Without the
+/// merge, the draft test would prove nothing.
 @MainActor
 private final class KidsFeed {
     var wallyFocus = "null"
@@ -245,8 +230,8 @@ private func model(_ feed: KidsFeed) -> PlanningKidsStepModel {
     }
 
     @Test func absentPutsNoKeyInTheBodyAtAll() {
-        // The two questions are answered ONE AT A TIME at the board. Answering the focus
-        // must not so much as mention `forward`, or the other half is erased.
+        // Answering the focus must not so much as mention `forward`, or the other half is
+        // erased.
         let sent = body(focus: .key("goal:g-read"), forward: .absent)
         #expect(sent["forward"] == nil)
         #expect(sent.keys.contains("forward") == false)
@@ -254,9 +239,8 @@ private func model(_ feed: KidsFeed) -> PlanningKidsStepModel {
     }
 
     @Test func clearPutsAnExplicitNullInTheBody() {
-        // THIS IS THE ONE A "SIMPLIFICATION" BREAKS. Encode `.clear` as an omitted key and
-        // "forget this answer" silently becomes "leave it alone" — the button does nothing
-        // and nothing anywhere says so.
+        // THIS IS THE ONE A "SIMPLIFICATION" BREAKS: encode `.clear` as an omitted key and
+        // "forget this answer" silently becomes "leave it alone".
         let sent = body(focus: .clear)
         #expect(sent["focus"] == .null)
         #expect(sent.keys.contains("focus"))
@@ -265,7 +249,6 @@ private func model(_ feed: KidsFeed) -> PlanningKidsStepModel {
     @Test func aPickedOptionIsSentAsItsKey() {
         let sent = body(forward: .key("event:e-party"))
         #expect(sent["forward"] == .object(["key": .string("event:e-party")]))
-        // …and only the question that was answered is named.
         #expect(sent["focus"] == nil)
     }
 
@@ -285,13 +268,10 @@ private func model(_ feed: KidsFeed) -> PlanningKidsStepModel {
         #expect(sent["sessionId"] == .string(KidsFixture.session))
         #expect(sent["personId"] == .string(KidsFixture.wally))
         #expect(sent["weekStart"] == .string(KidsFixture.week))
-        // Neither question answered ⇒ neither question mentioned.
         #expect(sent.count == 3)
     }
 
     @Test func anEmptyWeekStartIsOmittedRatherThanSentBlank() {
-        // The session's own week wins server-side anyway; a blank string would be a
-        // malformed date rather than "no opinion".
         let sent = WaffledAPI.planningKidsAnswerBody(
             sessionId: KidsFixture.session, personId: KidsFixture.wally,
             weekStart: "", focus: .absent, forward: .absent)
@@ -299,8 +279,6 @@ private func model(_ feed: KidsFeed) -> PlanningKidsStepModel {
     }
 
     @Test func theFourStatesAreFourDistinctWireValues() {
-        // Belt and braces on the enum itself, so the distinction can't be lost one level
-        // down from the body builder.
         #expect(PlanningKidPick.absent.wireValue == nil)
         #expect(PlanningKidPick.clear.wireValue == .null)
         #expect(PlanningKidPick.key("k").wireValue == .object(["key": .string("k")]))
@@ -318,31 +296,26 @@ private func model(_ feed: KidsFeed) -> PlanningKidsStepModel {
         let model = model(feed)
         await model.load(sessionId: KidsFixture.session, weekStart: KidsFixture.week)
 
-        // They open the escape hatch and start typing.
         model.beginTyping(personId: KidsFixture.wally, which: .focus)
         #expect(model.isTyping(personId: KidsFixture.wally, which: .focus))
 
-        // Then they change their mind and tap an option that was already offered. Picking
-        // an existing option IS a change of answer, so the box closes as it lands…
         await model.answer(
             sessionId: KidsFixture.session, personId: KidsFixture.wally,
             weekStart: KidsFixture.week, focus: .key("goal:g-read"))
         #expect(model.isTyping(personId: KidsFixture.wally, which: .focus) == false)
 
-        // …and on its way out the box records what was in it (the view's `.onDisappear`,
-        // which is why the draft is written ONCE rather than per keystroke).
+        // The box records what was in it on its way out (the view's `.onDisappear`, which is
+        // why the draft is written ONCE rather than per keystroke).
         model.recordDraft(personId: KidsFixture.wally, which: .focus, text: "Be kind to Lottie")
 
         let card = try #require(model.kids.first { $0.personId == KidsFixture.wally })
 
-        // ONLY ONE CHIP READS AS CHOSEN.
         let read = try #require(card.focusOptions.first { $0.key == "goal:g-read" })
         let homework = try #require(card.focusOptions.first { $0.key == "chore:c-homework" })
         #expect(PlanningKidsChoice.focusChosen(card, read))
         #expect(PlanningKidsChoice.focusChosen(card, homework) == false)
         #expect(PlanningKidsChoice.focusIsCustom(card) == false)
 
-        // …AND THE WORDS THEY TYPED ARE STILL THERE when they go back to the hatch.
         #expect(model.typeInSeed(card, .focus) == "Be kind to Lottie")
     }
 
@@ -356,7 +329,6 @@ private func model(_ feed: KidsFeed) -> PlanningKidsStepModel {
         let wally = try #require(model.kids.first { $0.personId == KidsFixture.wally })
         let lottie = try #require(model.kids.first { $0.personId == KidsFixture.lottie })
         #expect(model.typeInSeed(wally, .focus) == "Be kind to Lottie")
-        // It must not leak into the other question, or the other child's card.
         #expect(model.typeInSeed(wally, .forward) == "")
         #expect(model.typeInSeed(lottie, .focus) == "")
     }
@@ -371,13 +343,9 @@ private func model(_ feed: KidsFeed) -> PlanningKidsStepModel {
             weekStart: KidsFixture.week, focus: .text("Be kind to Lottie"))
 
         let card = try #require(model.kids.first { $0.personId == KidsFixture.wally })
-        // The hatch now reads as CHOSEN and says their words — not "＋ Something else",
-        // which would look like nothing had been picked.
         #expect(PlanningKidsChoice.focusIsCustom(card))
         #expect(card.focus?.label == "Be kind to Lottie")
-        // …and no offered option claims to be the answer.
         #expect(card.focusOptions.allSatisfy { PlanningKidsChoice.focusChosen(card, $0) == false })
-        // Reopening it seeds the box with what they said, with no draft recorded at all.
         #expect(model.typeInSeed(card, .focus) == "Be kind to Lottie")
     }
 
@@ -398,8 +366,8 @@ private func model(_ feed: KidsFeed) -> PlanningKidsStepModel {
     }
 
     @Test func withNothingAnsweredNoChipReadsAsChosen() async throws {
-        // The guard that matters: a bare `forward?.eventId == option.eventId` reads TRUE
-        // for every option when both sides are nil, lighting up the whole card.
+        // The guard that matters: a bare `forward?.eventId == option.eventId` reads TRUE for
+        // every option when both sides are nil, lighting up the whole card.
         let feed = KidsFeed()
         let model = model(feed)
         await model.load(sessionId: KidsFixture.session, weekStart: KidsFixture.week)
@@ -435,7 +403,6 @@ private func model(_ feed: KidsFeed) -> PlanningKidsStepModel {
         #expect(wally.week[0].when == "Tue 4:00 PM")
         #expect(wally.week[0].allDay == false)
         #expect(wally.chores.count == 2)
-        // An overdue chore is as much a part of a kid's week as a scheduled one.
         #expect(wally.chores[1].late)
         #expect(wally.settled == false)
     }
@@ -454,23 +421,19 @@ private func model(_ feed: KidsFeed) -> PlanningKidsStepModel {
         let goal = try #require(read.goal)
 
         #expect(goal.totalProgress == 340)
-        // 2 of 5 THIS WEEK — 340 is the number that would tell a kid they'd read 340 times
-        // since Sunday.
+        // 2 of 5 THIS WEEK — 340 would tell a kid they'd read 340 times since Sunday.
         #expect(GoalDisplay.progress(goal) == 2)
         #expect(GoalDisplay.target(goal) == 5)
         #expect(GoalDisplay.fraction(goal) == 0.4)
-        // The server's own sentence for the same fact says it the same way.
         #expect(read.detail == "2 of 5 this week")
     }
 
     @Test func aStandingChoreHasNoDetailLineAndThatAbsenceIsTheDesign() throws {
         let wally = try KidsFixture.decoded().kids[0]
         let homework = try #require(wally.focusOptions.first { $0.source == "routine" })
-        // Nothing is late and nothing is behind, so there is nothing to say.
         #expect(homework.detail == nil)
         #expect(homework.goal == nil)
 
-        // A chore step 1 routed here is shown as such rather than silently reordered.
         let garage = try #require(wally.focusOptions.first { $0.key == "chore:c-garage" })
         #expect(garage.routed)
         #expect(garage.detail == "open since Wednesday")
@@ -485,15 +448,14 @@ private func model(_ feed: KidsFeed) -> PlanningKidsStepModel {
             Issue.record("the crumb must carry a `kids` object")
             return
         }
-        // Only kids who answered something appear…
         #expect(kids.count == 1)
         guard case let .object(entry)? = kids[KidsFixture.wally],
               case let .object(focus)? = entry["focus"] else {
             Issue.record("Wally's answers must be mirrored back")
             return
         }
-        // …and the field names are the ones the server's `parseAnswers` reads back. Rename
-        // or drop `source` / `label` and the answers are discarded on the next read.
+        // …and the field names are the ones the server's `parseAnswers` reads back. Rename or
+        // drop `source` / `label` and the answers are discarded on the next read.
         #expect(focus["source"] == .string("goal"))
         #expect(focus["label"] == .string("Read together"))
         #expect(focus["id"] == .string("g-read"))
@@ -520,9 +482,8 @@ private func model(_ feed: KidsFeed) -> PlanningKidsStepModel {
     }
 
     @Test func noCrumbIsOfferedBeforeAReadHasLanded() async throws {
-        // The shell REPLACES the step's data with the crumb when the affirmative is
-        // pressed, so an empty map offered after a failed fetch would throw away the two
-        // sentences the whole step exists to produce.
+        // The shell REPLACES the step's data with the crumb when the affirmative is pressed,
+        // so an empty map after a failed fetch would throw away the two sentences.
         let feed = KidsFeed()
         feed.fetchFails = true
         let model = model(feed)
@@ -566,11 +527,9 @@ private func model(_ feed: KidsFeed) -> PlanningKidsStepModel {
             weekStart: KidsFixture.week, focus: .key("goal:g-read"))
 
         let card = try #require(model.kids.first { $0.personId == KidsFixture.wally })
-        // Both answers stand — the second write named only `focus`, so the first survived.
         #expect(card.focus?.label == "Read together")
         #expect(card.forward?.label == "Ezra’s party")
         #expect(card.settled)
-        // …and the wire calls prove it: `.absent` on the question that wasn't asked.
         #expect(feed.answers[1].forward == .absent)
     }
 
@@ -580,24 +539,20 @@ private func model(_ feed: KidsFeed) -> PlanningKidsStepModel {
         await model.load(sessionId: KidsFixture.session, weekStart: KidsFixture.week)
         #expect(model.isReadBack == false)
 
-        // Wally, both questions. Half the room is not the read-back.
         await model.answer(
             sessionId: KidsFixture.session, personId: KidsFixture.wally,
             weekStart: KidsFixture.week, focus: .key("goal:g-read"),
             forward: .key("event:e-party"))
         #expect(model.isReadBack == false)
 
-        // Lottie has no events, so hers is typed.
         await model.answer(
             sessionId: KidsFixture.session, personId: KidsFixture.lottie,
             weekStart: KidsFixture.week, focus: .key("chore:c-vacuum"),
             forward: .text("Baking with Mum"))
         #expect(model.isReadBack)
 
-        // "Change something" puts the picker back…
         model.beginChanging()
         #expect(model.isReadBack == false)
-        // …and answering again is how you get out of it, rather than being told twice.
         await model.answer(
             sessionId: KidsFixture.session, personId: KidsFixture.wally,
             weekStart: KidsFixture.week, focus: .key("chore:c-homework"))
@@ -620,7 +575,6 @@ private func model(_ feed: KidsFeed) -> PlanningKidsStepModel {
 
         let card = try #require(model.kids.first { $0.personId == KidsFixture.wally })
         #expect(card.focus == nil)
-        // The other half was never named, so it stands.
         #expect(card.forward?.label == "Ezra’s party")
         #expect(card.settled == false)
         #expect(model.isReadBack == false)
@@ -656,7 +610,6 @@ private func model(_ feed: KidsFeed) -> PlanningKidsStepModel {
         let model = model(feed)
         await model.load(sessionId: KidsFixture.session, weekStart: KidsFixture.week)
 
-        // The catalog says "Kids" and is server-owned; the card's title is who they are.
         #expect(model.heading == "Wally Sites and Lottie Sites")
     }
 

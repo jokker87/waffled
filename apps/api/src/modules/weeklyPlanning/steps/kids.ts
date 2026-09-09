@@ -1,18 +1,12 @@
-// Weekly Planning · step 9 (Kids) — "What's your week about?"
+// Weekly Planning · step 9 (Kids) — one focus and one thing to look forward to, per kid.
+// Both answers are picked from what already exists; this step must never invent options.
 //
-// THE ONE STEP THE KIDS THEMSELVES READ: a card each, with one thing to focus on and one
-// thing to look forward to. BOTH ANSWERS ARE PICKED FROM WHAT ALREADY EXISTS — their own
-// goals and overdue chores, and events already on their week. There is no catalog of
-// age-appropriate suggestions and there must not be one; the moment this step invents an
-// option it stops being a read over the family's own week.
+// Answers live on `planning_session_steps.data` as `{ kids: { <personId>: {...} } }` via a
+// real route write, not `setDecisionData`, so the read-back survives a remount.
 //
-// It writes to no module: nothing owns "Wally's one thing this week", so the answers live
-// on `planning_session_steps.data` as `{ kids: { <personId>: { focus, forward } } }` — a
-// real route write, not `setDecisionData`, because the read-back has to survive a remount.
-//
-// NO `requiresModule` IN THE CATALOG, deliberately: this reads goals AND chores, which a
+// NO `requiresModule` in the catalog, deliberately: this reads goals AND chores, which a
 // household toggles separately, so gating on either would delete the step for a family
-// that runs the other. An off module contributes nothing instead.
+// that runs the other.
 import type { PoolClient } from 'pg'
 import { query, getPool } from '../../../platform/db'
 import { moduleEnabled, rewardsEnabled, type ModuleKey } from '../../../platform/modules'
@@ -26,54 +20,38 @@ import { listRoutes } from './looseEnds'
 
 const STEP_KEY = 'kids'
 
-// ---------------------------------------------------------------------------
-// The shape the step reads
-// ---------------------------------------------------------------------------
-
 type Goal = Awaited<ReturnType<typeof listGoals>>[number]
 
-// Where an option came from. `routine` is a standing chore they already carry — the one
-// with nothing under it. `custom` is what somebody typed into the escape hatch.
 export type KidsFocusSource = 'goal' | 'chore' | 'routine' | 'custom'
 
 export interface KidsFocusOption {
-  // Stable across refetches and unique across sources — the client's list key and what a
-  // write names. A routed chore and the same chore found overdue share one key on
-  // purpose, so step 1's triage promotes the row rather than duplicating it.
+  // A routed chore and the same chore found overdue share one key on purpose, so step 1's
+  // triage promotes the row rather than duplicating it.
   key: string
   source: KidsFocusSource
-  // The referent in its own module (a goal id, a chore id). null for free text.
   id: string | null
   emoji: string
   label: string
-  // The one line under the label, composed here so web and iOS say the same thing. NULL
-  // is meaningful: a standing chore has nothing wrong with it, so it gets no line.
+  // Composed here so web and iOS say the same thing. Null is meaningful: a standing chore
+  // has nothing wrong with it, so it gets no line.
   detail: string | null
-  // Sent here by step 1's triage — the routes contract in the plan doc names step 9 a
-  // consumer. Promoted to the top of the list.
   routed: boolean
-  // The whole goal, for a goal-sourced option, so the CLIENT reads its number through the
-  // shared display helper (a habit is this period's count, a checklist is steps, anything
-  // else the lifetime total) instead of inlining `totalProgress`. `detail` above says the
-  // same thing in words, for iOS and for the read-back.
+  // The whole goal, so the CLIENT reads its number through the shared display helper
+  // instead of inlining `totalProgress` (see goalDetail below).
   goal: Goal | null
 }
 
 export interface KidsForwardOption {
   key: string
-  // The event it names, or null for free text.
   eventId: string | null
   emoji: string
   label: string
-  // The day, in the household's own zone ("Sat"). The read-back reads
-  // "<when> — the bit to look forward to".
   when: string
 }
 
 export interface KidsWeekEvent {
   id: string
   title: string
-  // "Tue 4:00 PM", or just the weekday for an all-day event.
   when: string
   startsAt: string
   allDay: boolean
@@ -83,15 +61,13 @@ export interface KidsWeekChore {
   id: string
   title: string
   emoji: string | null
-  // "every day" · "Sat" · "open since Wednesday". Composed here for the same reason.
   when: string
   late: boolean
 }
 
-// What a card settled on. A SNAPSHOT of the label as it read when chosen — the module
-// still owns the item, exactly as `LooseEndRoute.title` is a label and not a truth. That
-// is what lets the read-back render without re-reading four modules, and what lets free
-// text (which refers to nothing at all) live in the same field.
+// A SNAPSHOT of the label as it read when chosen — the module still owns the item. That
+// lets the read-back render without re-reading four modules, and lets free text (which
+// refers to nothing) live in the same field.
 export interface KidsFocusAnswer {
   source: KidsFocusSource
   id: string | null
@@ -111,7 +87,6 @@ export interface KidsCard {
   name: string
   avatarEmoji: string | null
   colorHex: string | null
-  // Null when we have no birthday on file — the card drops the age rather than guessing.
   age: number | null
   // Null when the reward economy is off (it is funded by chores, so chores off ⇒ off).
   stars: number | null
@@ -122,30 +97,20 @@ export interface KidsCard {
   forwardOptions: KidsForwardOption[]
   focus: KidsFocusAnswer | null
   forward: KidsForwardAnswer | null
-  // Both answered. Only then does the card flip to its read-back face — half an answer
-  // is not the thing they'll remember.
   settled: boolean
 }
 
 export interface KidsStepView {
   weekStart: string
   kids: KidsCard[]
-  // Which modules actually contributed, so an empty card can say why rather than looking
-  // broken. Never a claim to have read a module that is off.
   sources: { goals: boolean; chores: boolean; rewards: boolean }
-  // A previous session left answers that could be copied forward ("Same as last week").
   canRepeat: boolean
 }
 
-// ---------------------------------------------------------------------------
-// Small shared bits
-// ---------------------------------------------------------------------------
-
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const MAX_TEXT = 120
-// Three is the mock's shape; four leaves room for step 1's triage to promote something
-// without pushing a real option off the card. Beyond that a picker stops being readable
-// to a six-year-old, which is the constraint this whole step is built around.
+// Four leaves room for step 1's triage to promote something without pushing a real option
+// off the card; beyond that the picker stops being readable to a six-year-old.
 const MAX_FOCUS_OPTIONS = 4
 const MAX_FORWARD_OPTIONS = 6
 
@@ -180,10 +145,6 @@ const addDays = (iso: string, n: number) => {
   return d.toISOString().slice(0, 10)
 }
 
-// ---------------------------------------------------------------------------
-// Who is a kid
-// ---------------------------------------------------------------------------
-
 interface KidPerson {
   id: string
   name: string
@@ -192,11 +153,9 @@ interface KidPerson {
   age: number | null
 }
 
-// `member_type = 'kid'` is how the persons module says "child" (adult | teen | kid) — the
-// age on the card is decoration, never the test, so a household that hasn't filled in a
-// birthday still gets its cards. Teens are deliberately NOT here: type sized to be read
-// by a six-year-old is the wrong screen for a fifteen-year-old, and including them is a
-// one-line change if a family asks.
+// `member_type = 'kid'` is the test, never the age, so a household with no birthday on
+// file still gets its cards. Teens are deliberately excluded: a screen sized for a
+// six-year-old is the wrong one for a fifteen-year-old.
 async function kidsOf(householdId: string): Promise<KidPerson[]> {
   const { rows } = await query<{
     id: string; name: string; avatar_emoji: string | null; color_hex: string | null; age: number | null
@@ -212,23 +171,16 @@ async function kidsOf(householdId: string): Promise<KidPerson[]> {
   return rows.map((r) => ({ id: r.id, name: r.name, avatarEmoji: r.avatar_emoji, colorHex: r.color_hex, age: r.age }))
 }
 
-// ---------------------------------------------------------------------------
-// Their week — events
-// ---------------------------------------------------------------------------
-
-// The week's events, once, then partitioned per kid. THE VIEWER IS THE DRIVER, never the
-// kid: `visibleTo` is the calendar's privacy gate, and passing a kid's id would serve
-// their personal-visibility events to whoever happens to be running the session.
+// THE VIEWER IS THE DRIVER, never the kid: `visibleTo` is the calendar's privacy gate, and
+// passing a kid's id would serve their personal events to whoever is running the session.
 async function weekEvents(householdId: string, weekStart: string, viewerPersonId: string | null) {
   const rows = await rangeEvents(householdId, weekStart, addDays(weekStart, 6), viewerPersonId)
   return rows.map(presentEvent).filter((e) => !MIRROR_ORIGINS.has(e.origin ?? ''))
 }
 
-// Planning a dinner mirrors it onto the calendar as a real event with the household on
-// it, so without this every kid's week read "Dinner · chicken, Dinner · Spaghetti, …"
-// and their look-forward-to options became the meal plan. Nobody is looking forward to
-// Wednesday's spaghetti, and the Meals step already owns the week's dinners. The same
-// exclusion `goal-calendar.ts` makes when it picks calendar events for a goal.
+// Planned dinners mirror onto the calendar as real events; without this exclusion every
+// kid's look-forward-to options become the meal plan. Same exclusion `goal-calendar.ts`
+// makes when it picks calendar events for a goal.
 const MIRROR_ORIGINS = new Set(['meal_plan', 'meal_prep'])
 
 type PresentedEvent = ReturnType<typeof presentEvent>
@@ -236,8 +188,6 @@ type PresentedEvent = ReturnType<typeof presentEvent>
 const eventIsFor = (e: PresentedEvent, personId: string) =>
   e.personId === personId || (e.participants ?? []).some((p) => p.id === personId)
 
-// "Tue 4:00 PM" — the household's own zone, so a chip never names a day the family isn't
-// living in. An all-day event has no time to give.
 function eventWhen(e: PresentedEvent, timezone: string): string {
   const d = new Date(e.startsAt)
   const day = new Intl.DateTimeFormat('en-US', { timeZone: timezone, weekday: 'short' }).format(d)
@@ -249,12 +199,8 @@ function eventWhen(e: PresentedEvent, timezone: string): string {
 const eventDay = (e: PresentedEvent, timezone: string) =>
   new Intl.DateTimeFormat('en-US', { timeZone: timezone, weekday: 'short' }).format(new Date(e.startsAt))
 
-// ---------------------------------------------------------------------------
-// Their week — chores
-// ---------------------------------------------------------------------------
-
-// How a chore chip reads. Straight off the days the TASKS step already computed for this
-// week, so the two boards can't disagree about which day a chore lands on.
+// Off the days the TASKS step already computed, so the two boards can't disagree about
+// which day a chore lands on.
 function choreWhen(c: TasksBoardChore): string {
   if (c.days.length >= 7) return 'every day'
   if (c.days.length > 0) return c.days.map((d) => weekdayOf(d)).join(', ')
@@ -270,13 +216,10 @@ interface OverdueChore {
   dueOn: string
 }
 
-// A kid's own chores that are STILL OPEN from before today. The predicate is deliberately
-// the same one `overdueChores` uses in looseEnds.ts — pending or expired, not deleted,
-// due before the household's own today, and 'awaiting' excluded because it has been done
-// and is sitting in the approvals queue. Keep the two in sync: a kid seeing a different
-// set of "still open" here than step 1 showed the grown-ups is the bug this note exists
-// to prevent. What is NOT shared is the attribution — looseEnds reads the household, this
-// reads one child, which is why it is a query and not an import.
+// Predicate deliberately identical to `overdueChores` in looseEnds.ts ('awaiting' excluded
+// because it is already done and sitting in approvals). Keep the two in sync or a kid sees
+// a different "still open" set than step 1 showed the grown-ups. It is a separate query
+// only because this one attributes per child.
 async function overdueFor(householdId: string, today: string): Promise<Map<string, OverdueChore[]>> {
   const { rows } = await query<{
     person_id: string; instance_id: string; chore_id: string; title: string; emoji: string | null; due_on: string
@@ -302,8 +245,7 @@ async function overdueFor(householdId: string, today: string): Promise<Map<strin
   return out
 }
 
-// "open since Wednesday" reads to a nine-year-old the way "4 days late" doesn't — but a
-// weekday name stops being a date once it could mean either of two Wednesdays, so past a
+// A weekday name stops being a date once it could mean either of two Wednesdays, so past a
 // week it falls back to counting.
 function lateLabel(dueOn: string, today: string): string {
   const n = daysBetween(dueOn, today)
@@ -313,14 +255,9 @@ function lateLabel(dueOn: string, today: string): string {
   return `${n} days late`
 }
 
-// ---------------------------------------------------------------------------
-// Their goals
-// ---------------------------------------------------------------------------
-
-// The goal's own axis, in words. Mirrors `goalDisplayProgress` / `goalDisplayTarget` on
-// the client exactly — a habit is THIS PERIOD's count (which resets), a checklist is its
-// steps, everything else the lifetime total. A sentence built off `totalProgress` for a
-// habit would tell a kid they've read 99 times this week.
+// Mirrors `goalDisplayProgress` / `goalDisplayTarget` on the client exactly: a habit is
+// THIS PERIOD's count, a checklist its steps, everything else the lifetime total. Using
+// `totalProgress` for a habit would tell a kid they read 99 times this week.
 function goalDetail(g: Goal): string {
   if (g.goalType === 'habit') {
     const target = g.habitTargetPerPeriod ?? g.target ?? null
@@ -334,7 +271,6 @@ function goalDetail(g: Goal): string {
   return `${fmtNum(g.totalProgress)}${unit} so far`
 }
 
-// 0..1 on the same axis, used only to sort the ones they're furthest behind on to the top.
 function goalFraction(g: Goal): number {
   const p = g.goalType === 'habit' ? g.periodDone : g.goalType === 'checklist' ? g.stepDone : g.totalProgress
   const t = g.goalType === 'habit'
@@ -345,10 +281,8 @@ function goalFraction(g: Goal): number {
   return t != null && t > 0 ? Math.min(p / t, 1) : 0
 }
 
-// The goals a kid may be shown, on THIS driver's screen. Two filters, and the second is
-// the one that isn't obvious: `listGoals` does not enforce `goal_lists.is_private` (the
-// goals step is the first place in the codebase that does), so a kid's goal sitting in a
-// list private to the other parent would leak straight onto this card.
+// `listGoals` does not enforce `goal_lists.is_private`, so without the visibility filter a
+// kid's goal in a list private to the other parent leaks onto this card.
 async function goalsPerKid(tenant: Tenant, kids: KidPerson[]): Promise<Map<string, Goal[]>> {
   const [lists, goals] = await Promise.all([listGoalLists(tenant.householdId), listGoals(tenant.householdId)])
   const visible = new Set(
@@ -364,10 +298,6 @@ async function goalsPerKid(tenant: Tenant, kids: KidPerson[]): Promise<Map<strin
   }
   return out
 }
-
-// ---------------------------------------------------------------------------
-// What this session decided — the only thing the step stores
-// ---------------------------------------------------------------------------
 
 interface StoredAnswer {
   focus: KidsFocusAnswer | null
@@ -400,9 +330,8 @@ function parseAnswers(data: unknown): AnswerMap {
   return out
 }
 
-// `runner` is the pool for a plain read, or the transaction's client when the map is
-// about to be rewritten — reading it outside the transaction that updates it is how one
-// kid's answer loses the other's (the same reasoning as the goals step's readFocus).
+// `runner` must be the transaction's client when the map is about to be rewritten —
+// reading outside that transaction is how one kid's answer loses the other's.
 type Runner = Pick<PoolClient, 'query'> | null
 async function readAnswers(sessionId: string, runner: Runner = null): Promise<AnswerMap> {
   const sql = `select data from planning_session_steps where session_id = $1 and step_key = $2`
@@ -412,12 +341,9 @@ async function readAnswers(sessionId: string, runner: Runner = null): Promise<An
   return parseAnswers(rows[0]?.data)
 }
 
-// Merge onto the step row WITHOUT claiming the step is answered: `status` and
-// `decided_at` stay the shell's to set when somebody presses the primary, and `jsonb_set`
-// keeps any other crumb the step may grow later.
-//
-// The shell REPLACES `data` when the primary is pressed, so the body mirrors this map
-// back through `setDecisionData` — otherwise "Done" would wipe what this write persisted.
+// Merges without claiming the step is answered: `status`/`decided_at` stay the shell's.
+// The shell REPLACES `data` when the primary is pressed, so the body mirrors this map back
+// through `setDecisionData` — otherwise "Done" would wipe what this write persisted.
 async function writeAnswers(client: Pick<PoolClient, 'query'>, sessionId: string, answers: AnswerMap): Promise<void> {
   await client.query(
     `insert into planning_session_steps (session_id, step_key, status, data)
@@ -427,10 +353,6 @@ async function writeAnswers(client: Pick<PoolClient, 'query'>, sessionId: string
     [sessionId, STEP_KEY, JSON.stringify(answers)]
   )
 }
-
-// ---------------------------------------------------------------------------
-// Building the options
-// ---------------------------------------------------------------------------
 
 const focusFromGoal = (g: Goal, routed: boolean): KidsFocusOption => ({
   key: `goal:${g.id}`,
@@ -454,8 +376,6 @@ const focusFromOverdue = (c: OverdueChore, today: string, routed: boolean): Kids
   goal: null,
 })
 
-// A standing chore they already carry. NO detail line, on purpose — nothing is late and
-// nothing is behind, so there is nothing to say. This is the mock's third option.
 const focusFromRoutine = (c: TasksBoardChore, routed: boolean): KidsFocusOption => ({
   key: `chore:${c.id}`,
   source: 'routine',
@@ -467,10 +387,8 @@ const focusFromRoutine = (c: TasksBoardChore, routed: boolean): KidsFocusOption 
   goal: null,
 })
 
-// A countdown event is one the family has ALREADY said it is looking forward to — the
-// calendar's own signal, so the card doesn't have to guess which of a kid's four
-// commitments is the treat. Events carry no emoji of their own (see the report), so the
-// rest get the same neutral marker rather than an invented one.
+// A countdown is the calendar's own signal that the family is looking forward to it, so
+// the card needn't guess. Events carry no emoji, so the rest get one neutral marker.
 const forwardFromEvent = (e: PresentedEvent, timezone: string): KidsForwardOption => ({
   key: `event:${e.id}`,
   eventId: e.id,
@@ -478,10 +396,6 @@ const forwardFromEvent = (e: PresentedEvent, timezone: string): KidsForwardOptio
   label: e.title,
   when: eventDay(e, timezone),
 })
-
-// ---------------------------------------------------------------------------
-// The read
-// ---------------------------------------------------------------------------
 
 export async function getKidsStepView(
   tenant: Tenant,
@@ -491,8 +405,6 @@ export async function getKidsStepView(
   return (await buildKidsStep(tenant, weekStart, sessionId)).view
 }
 
-// The same read, plus the UNCAPPED set of ids that could legitimately be each kid's one
-// thing. Only "same as last week" needs that second half — see `pool` below.
 async function buildKidsStep(
   tenant: Tenant,
   weekStart: string,
@@ -523,10 +435,6 @@ async function buildKidsStep(
     priorAnswersExist(tenant.householdId, weekStart),
   ])
 
-  // Step 1 routes; it does not resolve. What it sent HERE is a chore instance or a goal,
-  // and both resolve to a person — a parked note or a list row does not, so those can't
-  // be put on any one kid's card (see the report). Resolving to a `key` rather than to a
-  // new option is what makes a route a PROMOTION: the row was already going to be there.
   const routedKeys = await resolveRoutedKeys(tenant.householdId, routes)
   const defaultSymbol = balances?.currencies.find((c) => c.isDefault)?.symbol ?? '⭐'
 
@@ -536,8 +444,6 @@ async function buildKidsStep(
     const late = overdue.get(k.id) ?? []
     const goals = goalsByKid.get(k.id) ?? []
 
-    // Their week: what they're holding for it, plus what is still open from before it.
-    // An overdue chore is as much a part of a kid's week as a scheduled one.
     const heldIds = new Set(held.map((c) => c.id))
     const chores: KidsWeekChore[] = [
       ...held.map((c) => ({ id: c.id, title: c.title, emoji: c.emoji, when: choreWhen(c), late: false })),
@@ -546,11 +452,9 @@ async function buildKidsStep(
         .map((c) => ({ id: c.choreId, title: c.title, emoji: c.emoji, when: lateLabel(c.dueOn, today), late: true })),
     ]
 
-    // EVERYTHING that could honestly be this kid's one thing, in priority order. The
-    // card only ever shows the first few — a wall of options is unreadable to a
-    // six-year-old — but the full list is what "same as last week" is validated
-    // against, or a perfectly live goal would be dropped on the way forward just for
-    // having slipped to third place this week.
+    // EVERYTHING that could be this kid's one thing, in priority order. The card shows
+    // only the first few, but the full list is what "same as last week" validates against
+    // — otherwise a live goal that slipped to third place would be dropped.
     const pool = [
       ...goals.map((g) => focusFromGoal(g, routedKeys.has(`goal:${g.id}`))),
       ...late.map((c) => focusFromOverdue(c, today, routedKeys.has(`chore:${c.choreId}`))),
@@ -561,9 +465,6 @@ async function buildKidsStep(
     const seen = new Set<string>()
     const all = pool.filter((o) => (seen.has(o.key) ? false : (seen.add(o.key), true)))
     allKeys.set(k.id, new Set(all.map((o) => o.id).filter((id): id is string => id != null)))
-    // What the card SHOWS: two from each of the two "something's up" sources and one
-    // standing commitment — the mock's shape — with whatever step 1 triaged here pulled
-    // to the top, so it isn't the option they have to scroll to.
     const focusOptions = [
       ...all.filter((o) => o.source === 'goal').slice(0, 2),
       ...all.filter((o) => o.source === 'chore').slice(0, 2),
@@ -607,11 +508,9 @@ async function buildKidsStep(
   }
 }
 
-// A routed chore names a chore INSTANCE (that is what step 1's rows are), so it has to be
-// mapped back to its definition before it can meet the option built from the same chore.
-// Goals are already named by id. Everything else step 1 can route — a parked note, a list
-// row, a rhythm — belongs to no particular child, and is left alone rather than shown on
-// every card.
+// A routed chore names a chore INSTANCE, so it must be mapped back to its definition
+// before it can meet the option built from the same chore. Everything else step 1 can
+// route belongs to no particular child, so it is left alone rather than shown on every card.
 async function resolveRoutedKeys(
   householdId: string,
   routes: Awaited<ReturnType<typeof listRoutes>>
@@ -633,13 +532,8 @@ async function resolveRoutedKeys(
   return out
 }
 
-// ---------------------------------------------------------------------------
-// The write
-// ---------------------------------------------------------------------------
-
-// `{ key }` picks one of the offered options; `{ text }` is the "＋ Something else"
-// escape hatch; `null` clears the answer; ABSENT leaves it alone (the two questions are
-// answered one at a time, and a client sending only one must not erase the other).
+// `{ key }` picks an offered option, `{ text }` is free text, `null` clears, and ABSENT
+// leaves it alone — a client answering one question must not erase the other.
 export interface KidsAnswerInput {
   sessionId?: unknown
   personId?: unknown
@@ -680,22 +574,17 @@ export async function answerKid(tenant: Tenant, input: KidsAnswerInput): Promise
   const forwardPick = readPick(input.forward)
   if (forwardPick.kind === 'bad') return bad(forwardPick.message)
 
-  // THE WEEK COMES OFF THE SESSION, never off the request. A session may plan a week
-  // further out than the default (the plan doc's family getting in front of a trip), and
-  // a caller that omitted `weekStart` would then have its answer validated against a
-  // different week's options — a perfectly real event rejected as "not one of this
-  // week's". The session already knows which week it is about; nothing else may say.
+  // THE WEEK COMES OFF THE SESSION, never the request: a session may plan a week further
+  // out than the default, and a request-derived week would validate the answer against a
+  // different week's options.
   const session = await getSessionById(tenant.householdId, sessionId)
   if (!session) return { ok: false, status: 404, message: 'session not found' }
   const weekStart = session.weekStart
 
   // The view is what the write is validated against: an option this driver was never
-  // offered (a private list's goal, another kid's chore) must not be settable by naming
-  // its key. It also gives us the label snapshot to store.
+  // offered must not be settable by naming its key. It also supplies the label snapshot.
   const view = await getKidsStepView(tenant, weekStart, sessionId)
   const card = view.kids.find((k) => k.personId === personId)
-  // Same 404 for "no such person", "an adult" and "someone else's household" — this step
-  // has nothing to say about anybody who isn't a child here.
   if (!card) return { ok: false, status: 404, message: 'no card for that person' }
 
   let focus: KidsFocusAnswer | null | undefined
@@ -737,13 +626,8 @@ export async function answerKid(tenant: Tenant, input: KidsAnswerInput): Promise
   return { ok: true, view: await getKidsStepView(tenant, weekStart, sessionId) }
 }
 
-// ---------------------------------------------------------------------------
-// "Same as last week"
-// ---------------------------------------------------------------------------
-
-// The most recent session BEFORE this week that left kids answers. Deliberately not
-// `weekStart - 7`: a family that skips a week (or plans two ahead in one sitting) still
-// has a last week, and it is whichever one they actually sat down for.
+// The most recent session BEFORE this week that left answers — deliberately not
+// `weekStart - 7`, so a family that skips a week still has a "last week".
 async function priorAnswers(householdId: string, weekStart: string): Promise<AnswerMap> {
   const { rows } = await query<{ data: unknown }>(
     `select st.data
@@ -762,34 +646,21 @@ async function priorAnswersExist(householdId: string, weekStart: string): Promis
   return Object.values(await priorAnswers(householdId, weekStart)).some((a) => a.focus || a.forward)
 }
 
-/** One child's "one thing", as another screen shows it. */
 export interface PlanningFocus {
   emoji: string
   label: string
   /** "3 of 20 books" — the line the Kids step composed, reused rather than recomputed. */
   detail: string | null
-  /** Which week said it (YYYY-MM-DD), so a caller can say "this week" truthfully. */
   weekStart: string
 }
 
 /**
- * This person's focus for the week we are IN, or null.
- *
- * Answers a question the design left open: "where would I be able to see that focus
- * outside of the weekly planning?" It was nowhere — the answers live in
- * `planning_session_steps.data.kids`, read only by this step and the recap, so a child
- * said what their one thing was on planning night and never saw it again.
- *
- * READ, never copied. The session record stays the single place it is stored, exactly as
- * the recap treats it: nothing to keep in sync, and changing the answer changes every
- * screen at once.
+ * This person's focus for the week we are IN, or null. READ, never copied — the session
+ * record stays the single place it is stored.
  *
  * The week is found by CONTAINMENT (`week_start <= today < week_start + 7`) rather than by
- * computing a boundary here. A session run on Sunday plans the week ahead, so by
- * Wednesday the focus somebody is living with belongs to the session whose week contains
- * today — and containment gets that right without this query needing to know how the
- * household cuts a week (`week_start` is SUNDAY or MONDAY per household, and a boundary
- * computed here could disagree with the one the session was created under).
+ * computing a boundary here: `week_start` is SUNDAY or MONDAY per household, and a
+ * boundary computed here could disagree with the one the session was created under.
  */
 export async function focusForPerson(householdId: string, personId: string): Promise<PlanningFocus | null> {
   const { rows } = await query<{ data: unknown; week_start: string }>(
@@ -821,16 +692,13 @@ export async function focusForPerson(householdId: string, personId: string): Pro
 
 export type KidsRepeatResult = { ok: true; view: KidsStepView } | { ok: false; status: 404; message: string }
 
-// Copy last week's answers forward — but only the ones that still STAND. An answer naming
-// a goal that has since been finished (or a chore already done, or an event that moved out
-// of the week) would have the read-back proudly telling a kid to do something that is
-// over, which is the one thing this frame must never do. Free text refers to nothing, so
-// it copies verbatim.
+// Copies last week's answers forward, but only the ones that still STAND: an answer naming
+// a finished goal or a departed event would tell a kid to do something that is over. Free
+// text refers to nothing, so it copies verbatim.
 export async function repeatLastWeek(tenant: Tenant, sessionId: unknown): Promise<KidsRepeatResult> {
   if (typeof sessionId !== 'string' || !UUID_RE.test(sessionId)) {
     return { ok: false, status: 404, message: 'session not found' }
   }
-  // The week is the SESSION's, for the same reason it is in `answerKid`.
   const session = await getSessionById(tenant.householdId, sessionId)
   if (!session) return { ok: false, status: 404, message: 'session not found' }
   const weekStart = session.weekStart
@@ -853,8 +721,7 @@ export async function repeatLastWeek(tenant: Tenant, sessionId: unknown): Promis
       const focus = was.focus && stillStands(was.focus, allKeys.get(card.personId)) ? was.focus : null
       const forward = was.forward && (was.forward.eventId == null
         || card.forwardOptions.some((o) => o.eventId === was.forward!.eventId)) ? was.forward : null
-      // ADDITIVE, strictly: a slot this session has already answered wins. The button is
-      // a shortcut for the blank card, not a way to overwrite what a kid just said.
+      // ADDITIVE, strictly: a slot this session has already answered wins.
       answers[card.personId] = { focus: current.focus ?? focus, forward: current.forward ?? forward }
     }
     await writeAnswers(client, sessionId, answers)
@@ -868,12 +735,7 @@ export async function repeatLastWeek(tenant: Tenant, sessionId: unknown): Promis
   return { ok: true, view: await getKidsStepView(tenant, weekStart, sessionId) }
 }
 
-// Free text always stands (it names nothing that could have gone). Anything else has to
-// still be one of the kid's own things — the same check as "is it still open?", because
-// the options are built from what is open.
-//
-// Checked against the UNCAPPED set, not the four the card shows: a goal that is still
-// live but has slipped to third place this week is not gone, and dropping it would have
-// "same as last week" quietly report that last week decided nothing.
+// Checked against the UNCAPPED set, not the four the card shows: a goal that is still live
+// but has slipped to third place this week is not gone. Free text always stands.
 const stillStands = (focus: KidsFocusAnswer, all: Set<string> | undefined): boolean =>
   focus.source === 'custom' || (focus.id != null && !!all?.has(focus.id))

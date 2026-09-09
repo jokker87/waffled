@@ -1,31 +1,18 @@
 import SwiftUI
 
-/// Weekly Planning · step 10 "Recap" — "Here's the week you just decided."
-///
-/// Ported from `apps/web/src/kiosk/planning/steps/RecapStep.tsx`.
+/// Weekly Planning · step 10 "Recap" — "Here's the week you just decided." Ported from
+/// `apps/web/src/kiosk/planning/steps/RecapStep.tsx`.
 ///
 /// THE BODY COMPUTES NOTHING. Every headline, sentence and tally arrives resolved from the
-/// one read, which joins six modules and nine steps' decisions server-side. That is the
-/// design's governing line — "every line is a pointer rather than a copy" — kept honest at
-/// the seam: a client that re-added the counts, or reformatted a decision into its own
-/// words, would be a second reading of the week free to drift from the server's and from
-/// the web's. The only thing this file decides is layout.
+/// one read — "every line is a pointer rather than a copy" — so re-adding a count or
+/// rewording a decision here would be a second reading of the week, free to drift. The
+/// only thing this file decides is layout, and it is SEVEN ROWS: a phone cannot afford the
+/// web's strip.
 ///
-/// THE WEEK IS SEVEN ROWS, not seven columns. The web can afford a strip beside two cards;
-/// a phone cannot, and a day that grows rather than reporting its remainder is the bug the
-/// server's `DAY_CAP` exists to prevent. Same reading, one column.
-///
-/// WHAT IT DELIBERATELY DOES NOT BUILD:
-///
-///  · A SAVED FRAME. `PlanningShellView` owns the finished record — the timestamp, the
-///    per-step read-back, "Reopen" and "Start this week over" — so a saved frame here
-///    would be duplicated and unreachable. The shell renders THIS body above its own
-///    tick-list once a week is saved, so the reading is shared and the frame is not: what
-///    changes on a saved week is the TENSE, and that comes off the payload's `savedAt`
-///    (see `PlanningRecapText`), never a flag the shell passes down.
-///  · A SECOND WAY TO ANSWER A NOTE. Dropping one is step 1's `/loose-ends/resolve`, the
-///    writer that owns `planning_parked_items`.
-///  · ITS OWN WRITE OF ANY KIND. Saving the week is the shell's affirmative.
+/// It deliberately builds no saved frame (the shell owns the finished record and renders
+/// this body above its own tick-list; the TENSE comes off the payload's `savedAt`), no
+/// second way to answer a note, and no write of any kind — saving the week is the shell's
+/// affirmative.
 struct RecapStepView: View {
     let props: PlanningStepProps
 
@@ -65,9 +52,9 @@ struct RecapStepView: View {
         .onChange(of: model.rev) {
             if let crumb = model.crumb { props.setDecisionData(crumb) }
         }
-        // THIS STEP LENDS THE BANNER NOTHING — it is a read, and it has no composer to
-        // open. Withdrawn explicitly, because the verb is the SHELL's state and would
-        // otherwise still be the previous step's.
+        // THIS STEP LENDS THE BANNER NOTHING — it is a read with no composer to open.
+        // Withdrawn explicitly, because the verb is the SHELL's state and would otherwise
+        // still be step 9's.
         .onAppear { props.lendVerb(nil) }
     }
 
@@ -117,11 +104,9 @@ struct RecapStepView: View {
         }
     }
 
-    /// Tinted by THE EVENT'S OWNER — through `sync.eventPalette`, the app's own resolver,
-    /// which is why the payload carries `participantIds` rather than a resolved colour: an
-    /// event covering the whole household takes the family colour, anybody else's takes
-    /// the owner's, and an unowned one falls back to grey. The strip has to agree with the
-    /// calendar it is describing.
+    /// Tinted by THE EVENT'S OWNER — through `sync.eventPalette`, which is why the payload
+    /// carries `participantIds` rather than a resolved colour. The strip has to agree with
+    /// the calendar it is describing.
     ///
     /// Always the TINTED treatment, matching the web's `ev-tint`: this is an agenda
     /// surface, not a calendar grid, and a row of solid blocks would shout over the week's
@@ -154,11 +139,10 @@ struct RecapStepView: View {
                 }
 
                 ForEach(model.groups) { group in
-                    // A row that names a step IS the door to it — the same gesture as the
-                    // web's `<Link to="/planning/<step>">`. `goToStep` shows the step
+                    // A row that names a step IS the door to it. `goToStep` shows the step
                     // without moving the session's `currentStep`, so following a recap
-                    // line here does not tell the kiosk in the kitchen that the family
-                    // went back to step 4.
+                    // line does not tell the kiosk in the kitchen that the family went
+                    // back to step 4.
                     if let key = group.stepKey {
                         Button { props.goToStep(key) } label: {
                             groupRow(group, tappable: true)
@@ -192,8 +176,7 @@ struct RecapStepView: View {
     // MARK: - Still on the board (the last call)
 
     /// HONESTY 1 — the notes nobody routed anywhere. Two answers, and the quiet one writes
-    /// nothing: a note kept parked is still open next Sunday, which is the whole point of a
-    /// last call rather than an inbox.
+    /// nothing: a note kept parked is still open next Sunday.
     @ViewBuilder private var lastCall: some View {
         let open = model.openLastCall
         if !open.isEmpty || (model.view?.lastCallMore ?? 0) > 0 {
@@ -251,17 +234,15 @@ struct RecapStepView: View {
 
     /// HONESTY 2 — a step that was skipped is a decision, and "nothing this week" is an
     /// answer. These are outcomes, so they are rows of their own rather than gaps in the
-    /// card above.
-    /// One grouped decision. `tappable` only adds the affordance — a chevron — because a
-    /// row that looks tappable and isn't is worse than a plain one.
+    /// card above. `tappable` only adds the affordance — a row that looks tappable and
+    /// isn't is worse.
     @ViewBuilder private func groupRow(
         _ group: WaffledAPI.PlanningRecapGroup, tappable: Bool
     ) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 8) {
-                // The group names the MODULE the decisions live in — which is the
-                // grouping's whole argument: a line names the place you would go to
-                // change it.
+                // The group names the MODULE the decisions live in — a line names the
+                // place you would go to change it.
                 Text(group.label)
                     .font(.system(size: 11.5, weight: .heavy)).tracking(0.4)
                     .foregroundStyle(WF.ink3)

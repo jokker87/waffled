@@ -4,22 +4,13 @@ import mod from './HorizonStep'
 import type { PlanningStep } from '../../../lib/api'
 import type { StepBodyProps } from '../registry'
 
-// Step 3 · Horizon scan. THE MONTH YOU ALREADY SHIP, PLUS ONE BAR.
-//
-// So most of what these tests assert is that the step renders the REAL month view
-// (`MonthView` + `MonthDayPanel`) rather than a second calendar of its own — the mock's
-// own class names (`.cal-grid`, `.cal-cell`, `.ev-tint`, `.cal-day-panel`, `.ag-row`)
-// are the shipped ones, which is the design saying exactly that. A second month grid
-// here would drift from the calendar's, and the whole premise of the step is that this
-// IS the month the family already knows.
-//
-// The one thing the session adds is the park bar, and the distinction it draws is the
-// point of the step: ＋ on a day writes a REAL EVENT; the bar writes a NOTE that is
-// never put on the calendar.
-//
-// `weekStart` is pinned to a fixed Sunday rather than derived from today, because the
-// risk in a calendar step is date handling: `new Date('2026-09-06')` is UTC midnight and
-// renders as the 5th west of Greenwich.
+// Step 3 · Horizon scan. THE MONTH YOU ALREADY SHIP, PLUS ONE BAR. Most of these tests
+// assert that the step renders the REAL month view (`MonthView` + `MonthDayPanel`) rather
+// than a second calendar — the class names asserted on are the shipped ones. The bar is
+// what the session adds, and the distinction is the point: ＋ on a day writes a REAL EVENT,
+// the bar writes a NOTE that never reaches the calendar. `weekStart` is a fixed Sunday,
+// because `new Date('2026-09-06')` is UTC midnight and renders as the 5th west of
+// Greenwich.
 
 const WEEK_START = '2026-09-06' // a Sunday, in September 2026
 // The 42-cell grid for September 2026 on a Sunday-start household: Aug 30 … Oct 10.
@@ -40,7 +31,7 @@ const step: PlanningStep = {
   data: {},
   decidedAt: null,
   // The shell renders the parked-note handoff, not the step — see Handoff in
-  // WeeklyPlanning.tsx. A step test mounts `Body` alone, so there is never one here.
+  // WeeklyPlanning.tsx.
   parked: [],
 }
 
@@ -55,8 +46,8 @@ const TAGS = [
   { stepKey: 'calendar', label: 'Calendar', hint: 'A date to look, or a deadline' },
 ]
 
-// A timed event on `day` at local `time` — LOCAL parse, so the fixture lands on the day
-// it says it does whatever zone the test machine is in.
+// A timed event on `day` at local `time` — LOCAL parse, so the fixture lands on the day it
+// says whatever zone the test machine is in.
 const at = (day: string, time: string) => new Date(`${day}T${time}`).toISOString()
 
 const ev = (over: Record<string, unknown>) => ({
@@ -83,8 +74,8 @@ interface Opts {
   parkFails?: { status: number; message: string }
 }
 
-// A STATEFUL double: a POSTed event really joins the month and a parked note really
-// joins the board, so "it showed up" is what's under test rather than a canned view.
+// A STATEFUL double: a POSTed event really joins the month and a parked note really joins
+// the board, so "it showed up" is what's under test rather than a canned view.
 function mockApi(opts: Opts = {}) {
   const events = [...(opts.events ?? [])]
   const parked = [...(opts.parked ?? [])]
@@ -97,7 +88,7 @@ function mockApi(opts: Opts = {}) {
     const method = init?.method ?? 'GET'
     if (u.startsWith('/api/persons')) return { ok: true, json: async () => ({ persons: PERSONS }) }
     // useEventColorSource + useHousehold both read this. No household ⇒ the device zone,
-    // which is the zone the fixtures above were built in, and a Sunday-start week.
+    // which is what the fixtures were built in, and a Sunday-start week.
     if (u.startsWith('/api/household')) return { ok: true, json: async () => ({ household: null, person: null }) }
     if (u.startsWith('/api/countdowns')) {
       return { ok: true, json: async () => ({ countdowns: opts.countdowns ?? [], sleeps: false, birthdayHorizonDays: 30 }) }
@@ -106,8 +97,7 @@ function mockApi(opts: Opts = {}) {
       return { ok: true, json: async () => ({ tags: opts.tags ?? TAGS, parked: [...parked] }) }
     }
     // Correcting a note already on the board. Same prefix as the park POST, so it has to
-    // be matched FIRST — and it is stateful too, because "the board says the new words"
-    // is the whole assertion.
+    // be matched FIRST — and it is stateful too.
     if (u.startsWith('/api/weekly-planning/loose-ends/parked/') && method === 'PATCH') {
       const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>
       const id = decodeURIComponent(u.split('/').pop()!)
@@ -163,8 +153,8 @@ function mockApi(opts: Opts = {}) {
       // twice hides an add behind React's identity check.
       return { ok: true, json: async () => ({ from: '', to: '', events: [...events] }) }
     }
-    // The shared event modal also reads the goals it could count toward and the Google
-    // calendars it could write to. Empty is the answer, but they must be SHAPED.
+    // The shared event modal also reads its goals and Google calendars. Empty is the
+    // answer, but they must be SHAPED.
     if (u.startsWith('/api/goals')) return { ok: true, json: async () => ({ goals: [] }) }
     if (u.startsWith('/api/calendar/google/status')) return { ok: true, json: async () => ({ calendars: [] }) }
     return { ok: true, json: async () => ({}) }
@@ -194,7 +184,7 @@ function renderStep(over: Partial<StepBodyProps> = {}) {
 const cells = (c: HTMLElement) => Array.from(c.querySelectorAll('.cal-cell')) as HTMLElement[]
 
 // The cell for a YYYY-MM-DD, by its offset from the grid's first day — the day numbers
-// alone are ambiguous (there are two "1"s and two "30"s on a 42-cell grid).
+// alone are ambiguous (two "1"s and two "30"s on a 42-cell grid).
 function cell(c: HTMLElement, key: string): HTMLElement {
   const i = Math.round(
     (Date.parse(`${key}T00:00:00Z`) - Date.parse(`${GRID_START}T00:00:00Z`)) / 86400000
@@ -204,8 +194,7 @@ function cell(c: HTMLElement, key: string): HTMLElement {
 
 const panel = () => document.querySelector('.cal-day-panel') as HTMLElement
 
-// The shared event modal, once it's up. `.modal-card` is the app's own — this step
-// renders `EventModal`, it does not carry a second event form.
+// The shared event modal, once it's up. `.modal-card` is the app's own.
 async function eventModal(name = 'New event'): Promise<HTMLElement> {
   const heading = await screen.findByText(name)
   return heading.closest('.modal-card') as HTMLElement
@@ -224,7 +213,6 @@ describe('Weekly planning · step 3 · Horizon scan', () => {
     mockApi()
 
     await waitFor(() => expect(cells(container).length).toBe(42))
-    // The grid is the real one: seven weekday headings over six weeks of `.cal-cell`.
     expect(container.querySelectorAll('.cal-dow div').length).toBe(7)
     expect(container.querySelector('.cal-grid')).toBeTruthy()
     // Leading/trailing days are dimmed, September's are not — MonthView's own rule.
@@ -238,8 +226,8 @@ describe('Weekly planning · step 3 · Horizon scan', () => {
     renderStep()
 
     expect(await screen.findByText('September 2026')).toBeInTheDocument()
-    // The window is the 42 cells, not the month — an off-by-one here silently empties
-    // the first or the last row. (`monthGridStart`, shared with the calendar.)
+    // The window is the 42 cells, not the month — an off-by-one silently empties the first
+    // or last row. (`monthGridStart`, shared with the calendar.)
     await waitFor(() =>
       expect(eventReads.some((u) => u.includes(`from=${GRID_START}`) && u.includes(`to=${GRID_END}`))).toBe(true)
     )
@@ -261,12 +249,10 @@ describe('Weekly planning · step 3 · Horizon scan', () => {
     expect(chip.className).toContain('ev-tint')
     expect(chip.style.getPropertyValue('--ev')).toBe('#25A368')
 
-    // A repeat keeps its ↻ and a meal-plan dinner keeps its dashed edge.
     expect(within(cell(container, '2026-09-21')).getByTitle('Repeats')).toBeInTheDocument()
     const meal = within(cell(container, '2026-09-22')).getByText('Chili').closest('.ev') as HTMLElement
     expect(meal.className).toContain('ev-meal')
 
-    // …and the countdown badge is on its day.
     expect(cell(container, '2026-09-19').querySelector('.cal-cd')).toBeTruthy()
   })
 
@@ -290,7 +276,6 @@ describe('Weekly planning · step 3 · Horizon scan', () => {
       'Drop-off at the church lot',
     ])
     expect(within(panel()).queryByText('Not this day')).not.toBeInTheDocument()
-    // The selected cell is marked as selected, as it is on the calendar screen.
     expect(cell(container, '2026-09-19').className).toContain('selected')
   })
 
@@ -303,8 +288,8 @@ describe('Weekly planning · step 3 · Horizon scan', () => {
 
     const modal = await eventModal()
     // Prefilled to the day whose ＋ was tapped, and it already asks everything an event
-    // needs — a second event form in this step is exactly the drift the reuse rule exists
-    // to prevent.
+    // needs — a second event form in this step is the drift the reuse rule exists to
+    // prevent.
     expect(within(modal).getByLabelText('Date')).toHaveValue('2026-09-19')
     expect(within(modal).getByLabelText('Duration')).toBeInTheDocument()
     expect(within(modal).getByText('Repeats')).toBeInTheDocument()
@@ -316,7 +301,6 @@ describe('Weekly planning · step 3 · Horizon scan', () => {
     await waitFor(() => expect(eventPosts.length).toBe(1))
     expect(eventPosts[0]).toMatchObject({ title: 'Scout campout' })
     expect(eventPosts[0].startsAt).toBe(at('2026-09-19', '09:00'))
-    // It lands on the grid straight away.
     expect(await within(cell(container, '2026-09-19')).findByText('Scout campout')).toBeInTheDocument()
     // The crumb is a COUNT, never a copy of the calendar — the recap reads through.
     await waitFor(() => expect(setDecisionData).toHaveBeenLastCalledWith({ added: 1, parked: 0 }))
@@ -343,9 +327,9 @@ describe('Weekly planning · step 3 · Horizon scan', () => {
     })
     const { container } = renderStep()
 
-    // TWO chips a day here, not three: the parked board underneath has to stay on
-    // screen, and the month gives height back by drawing one fewer chip rather than by
-    // shrinking them. So four events collapse two, not one.
+    // TWO chips a day here, not three: the parked board underneath has to stay on screen,
+    // and the month gives height back by drawing one fewer chip rather than by shrinking
+    // them.
     fireEvent.click(await within(await waitFor(() => cell(container, '2026-09-23'))).findByText('+2 more'))
     await waitFor(() => expect(within(panel()).getByText('Wednesday, September 23')).toBeInTheDocument())
     expect(panel().querySelectorAll('.ag-row').length).toBe(4)
@@ -370,7 +354,6 @@ describe('Horizon scan · the park bar', () => {
     // THE POINT OF THE STEP: a note is not an event and never reaches the calendar.
     expect(eventPosts.length).toBe(0)
 
-    // It joins the board with the step that will look at it, and the bar empties.
     const board = await screen.findByTestId('wph-board')
     expect(within(board).getByText('Camping — we need to pack')).toBeInTheDocument()
     expect(within(board).getByText('Tasks')).toBeInTheDocument()
@@ -393,9 +376,8 @@ describe('Horizon scan · the park bar', () => {
   })
 
   it('puts the cursor back in the bar, so a second note needs no second click', async () => {
-    // "when I add a parking note, it should refocus me". Parking is a BURST — somebody
-    // reads the month and empties their head into the bar — and a capture line that
-    // makes you re-aim at it between notes is a capture line that gets used once.
+    // Parking is a BURST — somebody reads the month and empties their head into the bar —
+    // so a capture line that makes you re-aim between notes gets used once.
     mockApi()
     renderStep()
 
@@ -407,11 +389,9 @@ describe('Horizon scan · the park bar', () => {
   })
 
   it('says where the note is going to end up — including when it is going nowhere', async () => {
-    // "What does no tag do? where does it put it?" — asked of a chip whose only
-    // explanation was a `title` attribute nobody hovers. Both answers are now on screen,
-    // and both are true: a tagged note is raised by that step's handoff banner when the
-    // session reaches it, and an untagged one is raised by no step at all — it shows in
-    // the recap and is still sitting on the Loose ends board next session.
+    // Both answers are on screen and both are true: a tagged note is raised by that step's
+    // handoff banner when the session reaches it, and an untagged one is raised by no step
+    // — it shows in the recap and is still on the Loose ends board next session.
     mockApi()
     renderStep()
 
@@ -427,8 +407,8 @@ describe('Horizon scan · the park bar', () => {
   })
 
   it('offers only the tags the server sent — a step this household skips is not a home', async () => {
-    // The server filters to the steps that actually run; the bar renders what it is
-    // given rather than hardcoding three names of its own.
+    // The server filters to the steps that actually run; the bar renders what it is given
+    // rather than hardcoding three names.
     mockApi({ tags: TAGS.filter((t) => t.stepKey !== 'meals') })
     renderStep()
 
@@ -453,13 +433,12 @@ describe('Horizon scan · the park bar', () => {
     const board = await screen.findByTestId('wph-board')
     expect(within(board).getByText('Book the campsite')).toBeInTheDocument()
     expect(within(board).getByText('Tasks')).toBeInTheDocument()
-    // …and the crumb counts what's already there rather than starting from zero.
     await waitFor(() => expect(setDecisionData).toHaveBeenLastCalledWith({ added: 0, parked: 1 }))
   })
 
   it('will not park an empty note — and stays a plain capture line until you type', async () => {
-    // Until there is something to tag, the tags and the button have nothing to act on,
-    // so the bar says what it is instead. (The mock's untyped state, exactly.)
+    // Until there is something to tag, the tags and the button have nothing to act on, so
+    // the bar says what it is instead.
     const { parkPosts } = mockApi()
     renderStep()
     expect(await screen.findByText('a note, not a calendar entry')).toBeInTheDocument()
@@ -486,7 +465,6 @@ describe('Horizon scan · the park bar', () => {
 
   it('says so when a park is refused, and keeps what was typed', async () => {
     // `parkItem` caps a note at 500 characters, so this is reachable, not theoretical.
-    // Losing the sentence AND saying nothing would be the worst of both.
     mockApi({ parkFails: { status: 400, message: 'a note is at most 500 characters' } })
     renderStep()
 
@@ -496,18 +474,15 @@ describe('Horizon scan · the park bar', () => {
     expect(await screen.findByText('a note is at most 500 characters')).toBeInTheDocument()
     expect(parkInput()).toHaveValue('Camping — we need to pack')
     expect(screen.queryByTestId('wph-board')).not.toBeInTheDocument()
-    // …and the bar is usable again rather than stuck mid-write.
     expect(parkIt()).toBeEnabled()
   })
 
   it('says out loud that the ＋ and the bar are two different things', async () => {
     mockApi()
     renderStep()
-    // Asserting the DISTINCTION, not the sentence: the first wording ("＋ on a day adds a
-    // real event · the bar above parks a note that isn't an event yet") named two
-    // What has to survive a rewrite is that the screen still tells you one writes a calendar
-    // event and the other does not, and where a parked note comes back — not any particular
-    // wording of it.
+    // Asserting the DISTINCTION, not the sentence: what has to survive a rewrite is that
+    // the screen still says one writes a calendar event and the other does not, and where
+    // a parked note comes back.
     const note = await screen.findByText(/real\s+calendar\s+event/i)
     expect(note).toBeInTheDocument()
     expect(note.textContent).toMatch(/stays off the calendar/i)
@@ -517,8 +492,8 @@ describe('Horizon scan · the park bar', () => {
 
 describe('Horizon scan · looking further out', () => {
   it('steps forward a month and refetches that month’s grid', async () => {
-    // The step's question is "anything FURTHER OUT you should see now?", so it has to be
-    // able to look past the month the planned week happens to fall in.
+    // The step's question is "anything FURTHER OUT you should see now?", so it has to look
+    // past the month the planned week falls in.
     const { eventReads } = mockApi()
     const { container } = renderStep()
 
@@ -547,9 +522,8 @@ describe('Horizon scan · looking further out', () => {
 })
 
 describe('Horizon scan · fixing a note that is already parked', () => {
-  // "parked in this session - I have no way to edit the item or change the category and
-  // A parked note's words and its tag are both fixable in place. Drop is reserved for "it was
-  // never really a thing", so it cannot double as the repair for a typo.
+  // A parked note's words and its tag are both fixable in place. Drop is reserved for "it
+  // was never really a thing", so it cannot double as the repair for a typo.
   const NOTE = {
     id: 'n1',
     note: 'by the poster bored',
@@ -568,13 +542,12 @@ describe('Horizon scan · fixing a note that is already parked', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
     await waitFor(() => expect(patchPosts.length).toBe(1))
-    // Only what moved: the tag was not touched, so it is not in the body — the server
-    // reads both fields for PRESENCE, and sending an unchanged tag would rewrite this
-    // note's route entry for nothing.
+    // Only what moved: the server reads both fields for PRESENCE, and sending an unchanged
+    // tag would rewrite this note's route entry for nothing.
     expect(patchPosts[0]).toMatchObject({ id: 'n1', note: 'buy the poster board' })
     expect(patchPosts[0].stepKey).toBeUndefined()
     // The session id travels with it: a note step 1 ROUTED also has a trail entry quoting
-    // its words, and the server is what moves the two together.
+    // its words, and the server moves the two together.
     expect(patchPosts[0].sessionId).toBe('11111111-1111-4111-8111-111111111111')
 
     expect(await screen.findByText('buy the poster board')).toBeInTheDocument()
@@ -597,8 +570,8 @@ describe('Horizon scan · fixing a note that is already parked', () => {
   })
 
   it('“No tag” is an answer an edit can give, not just a park', async () => {
-    // The absence of a tag is a real state — no step raises the note, it just stays on the
-    // board — so taking a tag OFF has to be reachable. `null`, never an omitted key.
+    // The absence of a tag is a real state, so taking a tag OFF has to be reachable.
+    // `null`, never an omitted key.
     const { patchPosts } = mockApi({ parked: [{ ...NOTE }] })
     renderStep()
 
@@ -627,12 +600,9 @@ describe('Horizon scan · fixing a note that is already parked', () => {
   })
 })
 
-// A READ THAT FAILS HAS TO SAY SO TOO.
-//
-// `horizonApi.get(...).then(...)` had no `.catch`, so a failed read rejected unhandled and
-// left `parked` empty — the "Parked in this session" board simply did not render, and notes
-// the user had just written were invisible and uneditable with nothing on screen explaining
-// why.
+// A READ THAT FAILS HAS TO SAY SO TOO. Without a `.catch`, a failed read left `parked`
+// empty: the "Parked in this session" board simply did not render, and notes the user had
+// just written were invisible and uneditable with nothing explaining why.
 describe('horizon · when its own read fails', () => {
   it('says the board could not be read rather than showing an empty one', async () => {
     mockApi()

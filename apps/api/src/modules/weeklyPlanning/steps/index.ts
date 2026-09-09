@@ -12,10 +12,8 @@ import { registerRecapStepRoutes } from './recap.routes'
 
 type Api = ReturnType<typeof createAPI>
 
-// Every step's routes, pre-registered. This list exists so that building a step never
-// means editing weeklyPlanning.routes.ts — ten steps built in parallel would collide on
-// that one file, and merge-resolving route tables is exactly the kind of conflict worth
-// designing away. Each entry's file is empty until its step is built.
+// Every step's routes, pre-registered, so building a step never means editing
+// weeklyPlanning.routes.ts — ten steps built in parallel would collide on that one file.
 export const STEP_ROUTE_REGISTRARS: ((api: Api) => void)[] = [
   registerLooseEndsStepRoutes,
   registerCalendarStepRoutes,

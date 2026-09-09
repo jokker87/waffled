@@ -16,7 +16,6 @@ function mint(sub: string): string {
   return jwt.sign({}, SECRET, { algorithm: 'HS256', subject: sub, issuer: 'waffled-local', audience: 'waffled-api', expiresIn: '1h' })
 }
 
-// Bearer (session) call.
 function call(method: string, path: string, token?: string, body?: unknown) {
   const headers: Record<string, string> = {}
   if (token) headers.authorization = `Bearer ${token}`
@@ -27,7 +26,6 @@ function call(method: string, path: string, token?: string, body?: unknown) {
   ) as Promise<{ statusCode: number; body: string }>
 }
 
-// API-key call (x-api-key header).
 function keyCall(method: string, path: string, key: string, body?: unknown) {
   const headers: Record<string, string> = { 'x-api-key': key }
   if (body !== undefined) headers['content-type'] = 'application/json'
@@ -125,14 +123,11 @@ describe('api-key authentication + scope gate', () => {
 
   it('allows reads within scope, denies reads outside it', async () => {
     expect((await keyCall('GET', '/api/lists', readKey)).statusCode).toBe(200)
-    // readKey holds no chores scope → 403
     expect((await keyCall('GET', '/api/chores/today', readKey)).statusCode).toBe(403)
   })
 
   it('requires :write for mutations', async () => {
-    // readKey has lists:read only → POST denied
     expect((await keyCall('POST', '/api/lists', readKey, { name: 'Camping' })).statusCode).toBe(403)
-    // writeKey has lists:write → allowed (201)
     expect((await keyCall('POST', '/api/lists', writeKey, { name: 'Camping' })).statusCode).toBe(201)
   })
 
@@ -160,11 +155,9 @@ describe('api-key authentication + scope gate', () => {
   })
 })
 
-// Hyphenated sibling routes (/api/chore-instances, /api/chore-proofs, /api/goal-lists,
-// /api/pantry-staples) belong to a resource that IS in the scope catalog, but
-// `pathMatches` needs a `/` boundary — so until their prefixes were listed explicitly
-// each one 403'd "not available to API keys" no matter which scopes the key held.
-// Assert on the MESSAGE, not just the status: a bare 403 passes both before and after.
+// Hyphenated sibling routes (/api/chore-instances, /api/goal-lists, …) belong to a resource
+// that IS in the catalog, but `pathMatches` needs a `/` boundary, so each 403'd until its
+// prefix was listed. Assert on the MESSAGE: a bare 403 passes either way.
 describe('hyphenated sibling routes are reachable with the right scope', () => {
   const BOGUS = '00000000-0000-4000-8000-000000000000'
   let listsRead = ''
@@ -190,18 +183,15 @@ describe('hyphenated sibling routes are reachable with the right scope', () => {
   it('/api/pantry-staples answers to the lists scope (not pantry)', async () => {
     expect((await keyCall('GET', '/api/pantry-staples', listsRead)).statusCode).toBe(200)
 
-    // A key for another resource is refused for a MISSING SCOPE, not as unexposed.
     const wrong = await keyCall('GET', '/api/pantry-staples', goalsRead)
     expect(wrong.statusCode).toBe(403)
     expect(msg(wrong)).toMatch(/missing the required scope: lists:read/)
 
-    // :read can't write; :write can.
     const denied = await keyCall('POST', '/api/pantry-staples', listsRead, { name: 'Olive oil' })
     expect(denied.statusCode).toBe(403)
     expect(msg(denied)).toMatch(/missing the required scope: lists:write/)
     expect((await keyCall('POST', '/api/pantry-staples', listsWrite, { name: 'Olive oil' })).statusCode).toBe(201)
 
-    // Reaches the handler (the route's own 404), rather than the scope gate's 403.
     expect((await keyCall('DELETE', `/api/pantry-staples/${BOGUS}`, listsWrite)).statusCode).toBe(404)
   })
 
@@ -222,13 +212,11 @@ describe('hyphenated sibling routes are reachable with the right scope', () => {
     expect(denied.statusCode).toBe(403)
     expect(msg(denied)).toMatch(/missing the required scope: chores:write/)
 
-    // Past the gate and into the handler → the route's own 404 for an unknown id.
     expect((await keyCall('POST', `/api/chore-instances/${BOGUS}/complete`, choresWrite)).statusCode).toBe(404)
   })
 
   it('/api/chore-proofs answers to the chores scope (admin-owned key)', async () => {
-    // adminRoute is satisfiable by a key: apiKeyTenant carries the owner person's
-    // is_admin, and the owner here is the household admin.
+    // adminRoute is satisfiable by a key: apiKeyTenant carries the owner person's is_admin.
     expect((await keyCall('GET', '/api/chore-proofs', choresRead)).statusCode).toBe(200)
 
     const denied = await keyCall('DELETE', '/api/chore-proofs', choresRead)
@@ -238,10 +226,9 @@ describe('hyphenated sibling routes are reachable with the right scope', () => {
   })
 })
 
-// Currency conversions are half of the currencies surface (10 ⭐ → 1 💵) and sit in
-// the same file as /api/currencies, but only /api/currencies was ever given to the
-// `rewards` resource — so a key could manage the denominations and not the rates
-// between them. A headless client needs both.
+// Currency conversions are half of the currencies surface and sit in the same file, but only
+// /api/currencies was given to the `rewards` resource — so a key could manage the
+// denominations and not the rates between them.
 describe('currency conversions answer to the rewards scope', () => {
   const BOGUS = '00000000-0000-4000-8000-000000000000'
   let rewardsRead = ''
@@ -256,7 +243,6 @@ describe('currency conversions answer to the rewards scope', () => {
     rewardsRead = await mintKey('rewards-r', ['rewards:read'])
     rewardsWrite = await mintKey('rewards-w', ['rewards:write'])
     otherKey = await mintKey('photos-r', ['photos:read'])
-    // A conversion needs two currencies; the household seeds only the default Stars.
     await call('POST', '/api/currencies', kevin, { label: 'Bucks', symbol: '💵' })
   })
 
@@ -277,31 +263,19 @@ describe('currency conversions answer to the rewards scope', () => {
     expect(created.statusCode).toBe(201)
     expect(JSON.parse(created.body).conversion).toMatchObject({ fromCurrency: 'stars', toCurrency: 'bucks' })
 
-    // Reaches the handler (the route's own 404), rather than the scope gate's 403.
     expect((await keyCall('DELETE', `/api/conversions/${BOGUS}`, rewardsWrite)).statusCode).toBe(404)
   })
 })
 
 // ── the catalog covers every live route, or the route says why not ──────────────
-// The bug above was silent because nothing tied API_SCOPES to the actual route
-// table. This walks lambda-api's own table (app.routes() → [method, path, …]), so
-// it can't drift from what's registered, and fails on any route that is neither
-// scope-matched nor listed below as deliberately unreachable by a key.
+// The bug above was silent because nothing tied API_SCOPES to the route table. This walks
+// lambda-api's own table, so it can't drift, and fails on any route that is neither
+// scope-matched nor listed below.
 //
-// Adding a route family? Either give its prefix to a resource in API_SCOPES, or list it
-// below — in the bucket that tells the truth about which of these two claims it is:
-//
-//   NEVER_KEY_REACHABLE — a decision. A key must never reach this and the reason will
-//     still hold next year: login, key management, kiosk pairing, the key routes.
-//   UNSCOPED_YET — debt. Nothing says a key couldn't reach this eventually; nobody has
-//     designed the scope. `tracked` must name where that work lives, so the size of the
-//     gap is greppable instead of buried in prose.
-//
-// Both gate identically at runtime — a prefix in neither API_SCOPES nor these lists is
-// 403 by absence, so this is fail-closed either way. The split is for the reader: a
-// single list makes a boundary and a backlog item look like the same considered call.
-// The standing fix for the debt is per-route scope declaration — findings, the
-// fail-open trap and the plan are in docs/product/api-key-scopes-plan.md.
+// Adding a route family? Give its prefix to a resource in API_SCOPES, or list it in the
+// bucket that tells the truth: NEVER_KEY_REACHABLE is a decision; UNSCOPED_YET is debt, and
+// its `tracked` must name where that work lives. Both gate identically (absence is 403), so
+// the split is for the reader. See docs/product/api-key-scopes-plan.md.
 type NeverReachable = { why: string; prefixes: string[] }
 type UnscopedYet = NeverReachable & { tracked: string }
 
@@ -320,19 +294,13 @@ const NEVER_KEY_REACHABLE: NeverReachable[] = [
 ]
 
 const UNSCOPED_YET: UnscopedYet[] = [
-  // The same boundary bug as /api/chore-instances: a lists route whose path /api/lists
-  // cannot match. PR #180 already adds the prefix to the `lists` resource, so this is
-  // listed only to keep the guard green without duplicating that change — and the
-  // staleness test below names this entry the moment #180 lands.
+  // The same boundary bug as /api/chore-instances. PR #180 adds the prefix, so this entry
+  // only keeps the guard green until it lands.
   { why: 'a lists route that the /api/lists prefix cannot match', prefixes: ['/api/list-items'], tracked: 'PR #180' },
   { why: 'rhythms wants a whole new scope resource, not another prefix — nobody has designed it', prefixes: ['/api/rhythms'], tracked: 'docs/product/api-key-scopes-plan.md' },
-  // Debt rather than a boundary, and the distinction is the point. A planning session
-  // WRITES THROUGH to other modules: it hands out chores, features goals, adds calendar
-  // events, fills the meal plan. With one scope per prefix, a `weeklyPlanning` scope
-  // would be a skeleton key past `chores:write`, `goals:write` and the rest — so there
-  // is no correct scope to give this prefix today. That bypass is an artifact of the
-  // prefix model, not of planning: declared per route, each of these routes asks for the
-  // downstream scope it actually needs and the problem disappears.
+  // Debt rather than a boundary, and the distinction is the point: a planning session WRITES
+  // THROUGH to other modules, so with one scope per prefix a `weeklyPlanning` scope would be
+  // a skeleton key past `chores:write` and the rest. Per-route, each asks for what it needs.
   { why: 'no correct scope exists under one-scope-per-prefix — a session writes through to chores/goals/events/meals', prefixes: ['/api/weekly-planning'], tracked: 'docs/product/api-key-scopes-plan.md' },
 ]
 
@@ -353,13 +321,9 @@ describe('scope catalog covers the route table', () => {
     expect(orphans).toEqual([])
   })
 
-  // The test above passes a route that has EITHER a scope OR an allowlist entry, so it
-  // cannot notice an entry that has outlived its reason: give an allowlisted path a
-  // real scope and the route drops out via `scopeForRequest` while its entry sits here
-  // forever, still claiming a key is kept out of something a key can now reach. That
-  // rot turns the allowlist from a record of deliberate exclusions into a list of
-  // possibly-false claims, so assert the other direction too — every entry must still
-  // describe something genuinely outside the catalog.
+  // The test above passes a route with EITHER a scope OR an allowlist entry, so it cannot
+  // notice an entry that has outlived its reason — one that gains a real scope drops out
+  // while its entry sits here claiming a key is kept out. So assert the other direction too.
   it('has no stale allowlist entry — every listed prefix is still unscoped', async () => {
     const { scopeForRequest } = await import('../src/modules/api-keys/api-keys')
     const routes = (app.routes() as string[][]).map(([method, path]) => [method, path] as const)
@@ -375,15 +339,12 @@ describe('scope catalog covers the route table', () => {
         )
     )
 
-    // Assert on the joined text, not the array: vitest collapses a long string inside
-    // an array to "expected [ Array(1) ]", which would hide the very instruction this
-    // test exists to give. As a string it prints in full.
+    // Assert on the joined text: vitest collapses a long string inside an array to
+    // "expected [ Array(1) ]", hiding the instruction this test exists to give.
     expect(stale.join('\n')).toBe('')
   })
 
-  // A debt entry that doesn't say where the work lives is indistinguishable from a
-  // decision — which is the failure the two-bucket split exists to prevent, so the
-  // pointer is required and has to be one a reader can actually follow.
+  // A debt entry that doesn't say where the work lives is indistinguishable from a decision.
   it('every unscoped-yet entry names where its work is tracked', () => {
     const followable = /#\d+|docs\/[\w./-]+/
     const untracked = UNSCOPED_YET.filter((e) => !followable.test(e.tracked)).map(

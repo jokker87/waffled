@@ -1,43 +1,25 @@
 import SwiftUI
 
-/// Weekly Planning · step 7 "Meals" — "What's planned, and what's still open?"
+/// Weekly Planning · step 7 "Meals", ported from `MealsStep.tsx`. Seven nights, each with
+/// ITS EVENTS ABOVE ITS DISH — the events are the reason a night is easy or hard; the web's
+/// seven columns become seven stacked cards on a phone.
 ///
-/// Ported from `apps/web/src/kiosk/planning/steps/MealsStep.tsx`.
-///
-/// SEVEN NIGHTS, EACH WITH ITS EVENTS ABOVE ITS DISH — because on this screen the events
-/// are the reason a night is easy or hard, and nothing else about the day matters here.
-/// The web draws them as seven columns "so it reads as the same week as Calendar"; a phone
-/// has no room for that, so they are seven stacked cards in the same order, which is the
-/// same reading. (The iPad shares this body — see `apps/ios/CLAUDE.md`'s note that Today
-/// is two view trees; Planning is one, and the shell is what differs.)
-///
-/// THE STEP OWNS NO DATA. The plan already in the app is shown as-is; overwriting a set
-/// night is a tap on that night, and that tap goes through the same `/api/meals/plan` the
-/// Meals screen uses. The only thing the session records is a crumb — which nights the app
-/// picked — and the recap reads the plan itself, so a copy of the dishes would only ever
-/// disagree with it.
-///
-/// THE FILL LIVES IN THE FOOTER (`MealsStepFooterExtra`), which is why this step's state
-/// sits in `PlanningMealsStepStore` rather than in `@State`: the footer's fill is what puts
-/// the ✨ on these nights and what the "…nights were left alone" note below reports.
+/// THE STEP OWNS NO DATA: overwriting a set night is a tap on it, through the same
+/// `/api/meals/plan` the Meals screen uses, and the session records only a crumb. The fill
+/// lives in the FOOTER, which is why the state sits in `PlanningMealsStepStore`.
 struct MealsStepView: View {
     let props: PlanningStepProps
 
     @Environment(SyncManager.self) private var sync
 
-    /// Which night's picker is open.
     @State private var editing: String?
     @State private var shopping = false
 
-    /// The library the planner's manual-pick sheet browses. Owned here (the planner takes
-    /// one rather than making its own) and loaded only when the planner actually opens —
-    /// the seven nights don't need it.
+    /// The library the planner's manual-pick sheet browses, loaded only when it opens.
     @State private var plannerRecipes = RecipesModel()
 
-    /// Resolved from the shared store on every body pass rather than held in `@State`:
-    /// `@State` would capture the first model forever, and stepping to another week must
-    /// land on that week's model. The model is `@Observable`, so reading its properties
-    /// here still registers the dependency.
+    /// Resolved from the shared store on every body pass: `@State` would capture the first
+    /// model forever, and stepping to another week must land on that week's model.
     private var model: PlanningMealsModel {
         PlanningMealsStepStore.shared.model(sessionId: props.sessionId, weekStart: props.weekStart)
     }
@@ -46,12 +28,10 @@ struct MealsStepView: View {
         PlanningMealsStepStore.key(sessionId: props.sessionId, weekStart: props.weekStart)
     }
 
-    /// Any write in flight — the shell's or this step's.
     private var frozen: Bool { props.busy || model.busy }
 
     var body: some View {
-        // NO OUTER ScrollView: the shell owns the chrome and the scrolling around a step,
-        // and a second one nested inside would fight it.
+        // NO OUTER ScrollView: the shell owns the chrome and the scrolling around a step.
         VStack(alignment: .leading, spacing: 12) {
             if let message = model.errorMessage {
                 DismissibleErrorBanner(message: message) { model.dismissError() }
@@ -74,36 +54,26 @@ struct MealsStepView: View {
                 }
             }
         }
-        // Keyed on session + week: a different week is a different model in the store, and
-        // this step must re-read rather than sit on the previous one's nights. Coming back
-        // to the same key re-reads too (`enter`), so the columns show what the week IS.
+        // Keyed on session + week: a different week is a different model, and coming back to
+        // the same key re-reads too (`enter`).
         .task(id: storeKey) {
             await model.enter(weekStart: props.weekStart, seed: PlanningMealsCrumb.dates(props.step.data))
         }
-        // ONE push, after every applied read and every landed write. The shell REPLACES
-        // the step's stored data when the affirmative is pressed, so a body that only set
-        // the crumb in a tap handler would erase its own record after a remount.
-        //
-        // `nil` is passed straight through here — unlike Goals, where nil is a wipe. For
-        // this step nil is the real answer "the app picked nothing", exactly as the web
-        // sends `dates.length ? {…} : null`.
+        // ONE push, after every applied read and every landed write: the shell REPLACES the
+        // step's data when the affirmative is pressed. `nil` passes straight through — unlike
+        // Goals, here it is the real answer "the app picked nothing".
         .onChange(of: model.rev) { props.setDecisionData(model.crumb) }
         // The week changed under us — close a modal that names a night in the old one.
         .onChange(of: storeKey) {
             editing = nil
             shopping = false
         }
-        // THIS STEP LENDS THE BANNER NOTHING. Its own affordances are recipe-shaped — a
-        // parked note reading "ask Grandma for the lasagne recipe" is not a dinner — and a
-        // button that merely ticked the note off would promise an action it does not
-        // perform. Withdrawn explicitly, because the verb is the SHELL's state and would
-        // otherwise still be the previous step's.
+        // THIS STEP LENDS THE BANNER NOTHING: a button that merely ticked a parked note off
+        // would promise an action it doesn't perform. Withdrawn explicitly.
         .onAppear {
             props.lendVerb(nil)
-            // AND RE-HAND THE CRUMB. The store outlives this view, so coming back to the
-            // step (the shell clears the crumb on every step change) would otherwise land
-            // with ✨ nights on screen and nothing recorded — until the next read happened
-            // to bump `rev`, and never at all if that read failed.
+            // AND RE-HAND THE CRUMB: the store outlives this view, so coming back would land
+            // with ✨ nights on screen and nothing recorded.
             props.setDecisionData(model.crumb)
         }
         .fullScreenCover(item: editingBinding) { target in
@@ -139,29 +109,20 @@ struct MealsStepView: View {
                     }
                 })
         }
-        // THE PLANNER IS PRESENTED HERE, from the BODY, even though the button that opens
-        // it is in the footer. That is the whole reason `plannerOpen` sits on the shared
-        // model: the shell builds the body and the footer as two sibling trees, and the
-        // footer's own body renders NOTHING until the week is read and swaps to "Undo the
-        // three" the moment a fill lands — a `.sheet` attached there would be hung off a
-        // control that legitimately disappears. `MealsStep.tsx` renders its planner from
-        // `Body` for the same reason.
+        // THE PLANNER IS PRESENTED FROM THE BODY though its button is in the footer — hence
+        // `plannerOpen` on the shared model. The footer renders nothing until the week is read
+        // and swaps once a fill lands, so a `.sheet` there would hang off a vanishing control.
         .sheet(isPresented: plannerBinding) { plannerSheet }
     }
 
-    /// The app's OWN "Plan my week" planner, narrowed to this step's promise in the two
-    /// ways the web narrows it: the only day chips are the EMPTY nights, and applying
-    /// hands the approved cards to the step's fill endpoint — which is what keeps them
-    /// marked, undoable, and unable to overwrite a night somebody already decided.
-    ///
-    /// A second, step-shaped planner would be a worse copy of a screen that already has
-    /// the guardrails, the preferences box, reshuffle, swap, lock and a manual pick.
+    /// The app's OWN "Plan my week" planner, narrowed as the web narrows it: day chips are
+    /// the EMPTY nights only, and applying goes to the step's fill endpoint, which keeps them
+    /// marked, undoable, and unable to overwrite a decided night.
     private var plannerSheet: some View {
         PlanWeekSheet(
             start: props.weekStart,
             weekLabel: PlanningFormat.weekLabel(props.weekStart),
-            // Noon in the HOUSEHOLD's zone — see `PlanningMealsPlan.plannerDays` for why
-            // the hour and the zone are both load-bearing.
+            // Noon in the HOUSEHOLD's zone — see `PlanningMealsPlan.plannerDays`.
             weekDays: PlanningMealsPlan.plannerDays(model.emptyDates, tz: sync.householdTz),
             familySize: max(1, sync.members.count),
             recipes: plannerRecipes,
@@ -174,26 +135,21 @@ struct MealsStepView: View {
                 return landed
             },
             onApplied: {})
-            // Loaded when the planner opens, not with the seven nights: the library is
-            // only needed by the planner's manual-pick sheet.
+            // Loaded when the planner opens: only its manual-pick sheet needs the library.
             .task { await plannerRecipes.load() }
     }
 
-    /// Two-way, so the planner's own Cancel (and a swipe-down) close it: `dismiss()`
-    /// inside a sheet writes `false` back through this binding.
+    /// Two-way, so the planner's Cancel and a swipe-down close it via this binding.
     private var plannerBinding: Binding<Bool> {
         Binding(get: { model.plannerOpen }, set: { model.setPlanner($0) })
     }
 
-    /// Every write goes through here, so `props.refresh()` is called on LANDED writes only
-    /// — a refetch of the shell's session view after a failure would be asking it to
-    /// re-read something that cannot have changed.
+    /// Every write goes through here, so `props.refresh()` runs on LANDED writes only.
     private func write(_ work: @escaping () async -> Bool) {
         Task { if await work() { props.refresh() } }
     }
 
-    /// The picker is presented on the ROW, not on a bare date, so switching nights starts
-    /// on a fresh search rather than carrying the last night's half-typed query across.
+    /// Presented on the ROW, not a bare date, so switching nights starts on a fresh search.
     private var editingBinding: Binding<PlanningMealsNightRow?> {
         Binding(
             get: { model.rows.first { $0.date == editing } },
@@ -237,15 +193,13 @@ struct MealsStepView: View {
         }
     }
 
-    /// The dish tile has four states and each has to be legible at a glance: planned,
-    /// empty, auto-filled, and eating out.
+    /// Four states, each legible at a glance: planned, empty, auto-filled, eating out.
     private func dish(_ row: PlanningMealsNightRow) -> some View {
         Button { editing = row.date } label: {
             HStack(spacing: 11) {
                 if let dinner = row.dinner {
                     // NEVER `AsyncImage` in a list — `CachedImage` serves a decoded hit
-                    // synchronously, which is what keeps seven of these from re-decoding
-                    // on every scroll tick.
+                    // synchronously, which keeps seven of these from re-decoding per tick.
                     CachedImage(dinner.imageUrl, contentMode: .fill) {
                         WaffledEmojiTile(emoji: dinner.emoji ?? row.fallbackEmoji, size: 22, frame: 44)
                     }
@@ -284,8 +238,7 @@ struct MealsStepView: View {
 
     // MARK: - Groceries
 
-    /// ONE LINE, not a panel: the board already builds itself from this plan, and a panel
-    /// here would re-litigate a screen that already exists.
+    /// ONE LINE, not a panel: the board already builds itself from this plan.
     @ViewBuilder private var groceryLine: some View {
         if let groceries = model.view?.groceries {
             WaffledCard(padding: 13) {
@@ -304,9 +257,7 @@ struct MealsStepView: View {
                     Pill(text: PlanningMealsText.groceryPill(groceries))
 
                     // The shopper pill is only here because the trip is REAL — a one-off
-                    // chore that shows on the Tasks board. With the chores module off
-                    // there is nowhere for it to live, so the control GOES AWAY rather
-                    // than sitting there dead.
+                    // chore on the Tasks board. With chores off the control GOES AWAY.
                     if model.view?.choresOn == true {
                         Button { shopping = true } label: {
                             Text(PlanningMealsText.tripLabel(model.view?.shopping))

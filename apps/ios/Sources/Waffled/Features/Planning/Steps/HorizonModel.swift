@@ -1,20 +1,15 @@
 import Foundation
 import Observation
 
-// Weekly Planning · step 3 "Horizon scan" — the state behind the park bar.
-//
-// Ported from `apps/web/src/kiosk/planning/steps/HorizonStep.tsx`. The month itself has no
-// state here on purpose: it is the calendar the family already has, read through the
-// PowerSync mirror, and adding a day's event is the app's own `EventEditSheet`. What this
-// object owns is the ONE THING THE SESSION ADDS — a parked note, its tag, and the board of
-// what this session has parked so far.
+// Weekly Planning · step 3 "Horizon scan" — the state behind the park bar. Ported from
+// `apps/web/src/kiosk/planning/steps/HorizonStep.tsx`. The month has no state here: it is
+// the calendar the family already has, read through the PowerSync mirror. What this object
+// owns is the ONE THING THE SESSION ADDS — a parked note and its tag.
 
-/// Which step a note is for. THREE states, not two.
-///
-/// `unset` is "nobody has chosen", which resolves to the server's primary tag; `noTag` is
-/// the deliberate answer "No tag". Collapsing them into `String?` would make the default
-/// unrepresentable — and the default is a real thing, since a household with no Tasks step
-/// gets no primary at all and the bar must then open on "No tag".
+/// Which step a note is for. THREE states, not two: `unset` is "nobody has chosen", which
+/// resolves to the server's primary tag; `noTag` is the deliberate answer "No tag". A
+/// `String?` would make the default unrepresentable — and it is a real thing, since a
+/// household with no Tasks step gets no primary and the bar must open on "No tag".
 enum PlanningTagChoice: Equatable, Sendable {
     case unset
     case noTag
@@ -26,31 +21,30 @@ enum PlanningTagChoice: Equatable, Sendable {
 final class PlanningHorizonModel {
     typealias FetchHorizon = (_ sessionId: String) async throws -> WaffledAPI.HorizonView
     /// Step 1's writer, on purpose: `planning_parked_items` and `parkItem()` were both
-    /// written general so this bar needs no second parked-item path.
+    /// written general, so this bar needs no second parked-item path.
     typealias ParkNote = (
         _ note: String, _ stepKey: String?, _ sessionId: String
     ) async throws -> WaffledAPI.PlanningParkedItem
     /// Correcting a note already on the board. `stepKey` is DOUBLY optional: absent leaves
-    /// the tag alone, `.some(nil)` is the real answer "No tag" — see
-    /// `updatePlanningParkedNote`.
+    /// the tag alone, `.some(nil)` is the real answer "No tag".
     typealias UpdateNote = (
         _ id: String, _ note: String?, _ stepKey: String??, _ sessionId: String
     ) async throws -> WaffledAPI.PlanningParkedItem
 
     /// Only the steps still AHEAD of this one — the server filters; we render what it
-    /// sends. (A tag naming a step the session has walked past addresses the note to
-    /// nobody until a LATER session.)
+    /// sends. A tag naming a step the session has walked past addresses the note to nobody
+    /// until a LATER session.
     private(set) var tags: [WaffledAPI.HorizonTag] = []
     /// Every open note parked during this session, whichever bar wrote it.
     private(set) var parked: [WaffledAPI.HorizonNote] = []
     /// A failed fetch keeps what we had and still counts as loaded — the shared REST
-    /// loading contract.
+    /// contract.
     private(set) var loaded = false
     private(set) var parking = false
     private(set) var errorMessage: String?
     /// Real calendar events added from this step. Only ever a COUNT: the recap reads
-    /// through to the calendar itself, so copying an event's title onto the session record
-    /// would give the two something to disagree about.
+    /// through to the calendar, so copying a title onto the session record would give the
+    /// two a disagreement.
     private(set) var added = 0
     private(set) var revision = 0
 
@@ -75,8 +69,8 @@ final class PlanningHorizonModel {
         return tags.first { $0.stepKey == key }?.label
     }
 
-    /// The crumb: two counts, and only counts. Nothing here has to survive a second visit —
-    /// the board is read back from `planning_parked_items`, which is the table that owns it.
+    /// The crumb: two counts, and only counts. The board is read back from
+    /// `planning_parked_items`, which is the table that owns it.
     var decisionData: [String: JSONValue] {
         ["added": .int(added), "parked": .int(parked.count)]
     }
@@ -111,11 +105,10 @@ final class PlanningHorizonModel {
         revision &+= 1
     }
 
-    /// Park a note, tagged for the step that will look at it — or for nobody.
-    ///
-    /// Returns false when the write was refused, and leaves the board exactly as it was.
-    /// The server caps a note at 500 characters, so a refusal is reachable rather than
-    /// theoretical, and its sentence is the useful half of the failure — keep it.
+    /// Park a note, tagged for the step that will look at it — or for nobody. Returns
+    /// false when the write was refused, leaving the board as it was. The server caps a
+    /// note at 500 characters, so a refusal is reachable, and its sentence is the useful
+    /// half — keep it.
     @discardableResult
     func park(_ note: String, sessionId: String) async -> Bool {
         let text = note.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -130,9 +123,8 @@ final class PlanningHorizonModel {
         }
         do {
             let item = try await parkNote(text, stepKey, sessionId)
-            // The row the server actually wrote — id, note and `createdAt` all come back
-            // (six fields, not the two the web client types), so the board shows what was
-            // stored rather than a local guess at it.
+            // The row the server actually wrote — id, note and `createdAt` all come back,
+            // so the board shows what was stored rather than a local guess.
             parked.append(
                 WaffledAPI.HorizonNote(
                     id: item.id, note: item.note, stepKey: item.stepKey,
@@ -145,17 +137,13 @@ final class PlanningHorizonModel {
         }
     }
 
-    /// FIX A NOTE ALREADY ON THE BOARD — its words, its tag, or both.
+    /// FIX A NOTE ALREADY ON THE BOARD — its words, its tag, or both. Send only what
+    /// moved: both arguments are "nil means leave it alone", and `stepKey: .some(nil)` is
+    /// the answer "No tag".
     ///
-    /// "Parked in this session — I have no way to edit the item or change the category and
-    /// I should." Send only what moved: both arguments are "nil means leave it alone", and
-    /// `stepKey: .some(nil)` is the real answer "No tag".
-    ///
-    /// The row that comes back is the row the SERVER wrote, so the board shows what was
-    /// stored rather than a local guess — and `stepLabel` is re-joined from the catalog
-    /// here, never stored, which is the same rule the server's own read follows.
-    ///
-    /// Returns false when the write was refused, and leaves the board exactly as it was.
+    /// The row that comes back is the row the SERVER wrote, and `stepLabel` is re-joined
+    /// from the catalog here, never stored — the same rule the server's own read follows.
+    /// Returns false when the write was refused, leaving the board as it was.
     @discardableResult
     func update(
         id: String, note: String?, stepKey: String??, sessionId: String

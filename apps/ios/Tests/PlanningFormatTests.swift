@@ -2,19 +2,14 @@ import Foundation
 import Testing
 @testable import Waffled
 
-// Weekly Planning's pure functions.
-//
-// These are a port of `apps/web/src/lib/api/weeklyPlanning.ts`, and the point of testing
-// them here rather than trusting the port is that two platforms disagreeing about "which
-// step is on screen" means a session resumed on the iPad lands somewhere else than the
-// same session on the phone.
+// Weekly Planning's pure functions, ported from `apps/web/src/lib/api/weeklyPlanning.ts`. Two
+// platforms disagreeing about "which step is on screen" means a session resumed on the iPad
+// lands somewhere else than the same session on the phone.
 
 @Suite struct PlanningFormatTests {
 
-    // Fixtures go through the REAL decoder, from bytes, rather than being built by hand.
-    // That way they also prove the DTO decodes the shape the server actually sends —
-    // including `requiresModule` being ABSENT rather than null on five of the ten steps,
-    // which a hand-built struct would never exercise.
+    // Fixtures go through the REAL decoder, from bytes, so they also prove the DTO decodes the
+    // shape the server sends — including `requiresModule` being ABSENT rather than null.
     private func stepJSON(
         _ key: String, _ number: Int, act: String = "Frame the week",
         available: Bool = true, status: String = "pending"
@@ -74,8 +69,8 @@ import Testing
     }
 
     @Test func twoSeparatedRunsOfOneActStaySeparate() {
-        // Consecutive runs only — collapsing them would reorder the agenda sheet away
-        // from the catalog's own order.
+        // Consecutive runs only — collapsing them would reorder the agenda sheet away from the
+        // catalog's own order.
         let steps = [step("a", 1, act: "X"), step("b", 2, act: "Y"), step("c", 3, act: "X")]
         #expect(PlanningFormat.stepsByAct(steps).map(\.act) == ["X", "Y", "X"])
     }
@@ -99,15 +94,13 @@ import Testing
     }
 
     @Test func withNothingAskedForItResumesWhereTheSessionWasLeft() {
-        // This is what lets another device pick a session up mid-way.
         let v = view(steps: [stepJSON("looseEnds", 1), stepJSON("goals", 2)], currentStep: "goals")
         #expect(PlanningFormat.resolveCurrent(v)?.key == "goals")
     }
 
     @Test func anUnavailableStepNeverStrandsTheSessionOnABlankScreen() {
-        // The module behind the pointer was switched off mid-week, or somebody deep-linked
-        // a step this household doesn't run. Falling through to the first runnable step is
-        // the whole reason the chain has three links.
+        // Falling through to the first runnable step (module switched off mid-week, or a
+        // deep-link to a step this household doesn't run) is why the chain has three links.
         let v = view(steps: [stepJSON("looseEnds", 1), stepJSON("meals", 2, available: false)], currentStep: "meals")
         #expect(PlanningFormat.resolveCurrent(v, asked: "meals")?.key == "looseEnds")
     }
@@ -145,12 +138,11 @@ import Testing
     }
 
     @Test func weeksDoNotDriftAcrossADaylightSavingBoundary() {
-        // THE REASON THIS IS UTC. US DST ends 2026-11-01. Parsing a week start in the
-        // device's zone and adding 7×86400 seconds lands on the Saturday or the Monday,
-        // and a week start that is off by a day silently addresses the wrong session.
+        // THE REASON THIS IS UTC: US DST ends 2026-11-01, so parsing a week start in the
+        // device's zone and adding 7×86400 lands on the Saturday or the Monday — and a week
+        // start off by a day silently addresses the wrong session.
         #expect(PlanningFormat.addWeeks("2026-10-25", 1) == "2026-11-01")
         #expect(PlanningFormat.addWeeks("2026-11-01", 1) == "2026-11-08")
-        // …and spring forward, 2026-03-08.
         #expect(PlanningFormat.addWeeks("2026-03-01", 1) == "2026-03-08")
         #expect(PlanningFormat.addWeeks("2026-03-08", 1) == "2026-03-15")
     }
@@ -175,10 +167,9 @@ import Testing
     // MARK: - position (the "2 of 9" counter)
 
     @Test func theCounterIsDerivedFromTheRUNNABLEListNotFromStepNumber() {
-        // THE BUG THIS PREVENTS. `step.number` is a CATALOG index — `i + 1` over all ten
-        // steps, unavailable ones included. Trusting it renders "4 of 9" with no step 3
-        // anywhere for a household with meals off: the number skips the dead step while
-        // the total counts only live ones. Both clients derive position instead.
+        // THE BUG THIS PREVENTS: `step.number` is a CATALOG index over all ten steps, so
+        // trusting it renders "4 of 9" with no step 3 anywhere when meals is off. Both clients
+        // derive position instead.
         let steps = [
             step("looseEnds", 1),
             step("calendar", 2),
@@ -187,7 +178,6 @@ import Testing
         ]
         let (pos, total) = PlanningFormat.position(steps, currentKey: "tasks")
         #expect(total == 3)
-        // 3 of 3, NOT "4 of 3" — which is what `step.number` would have produced.
         #expect(pos == 3)
     }
 
@@ -199,18 +189,16 @@ import Testing
     // MARK: - the progress hair
 
     @Test func theHairIsPositionalToMatchTheWeb() {
-        // `WeeklyPlanning.tsx` draws `pos / runnable.length`. Settled-over-available reads
-        // better in isolation but the two only agree at the ends of a session — and a bar
-        // that fills differently on the phone than on the kiosk for the SAME session is
-        // worse than either definition.
+        // `WeeklyPlanning.tsx` draws `pos / runnable.length`. The two definitions only agree at
+        // the ends of a session, and a bar that fills differently per client is worse than either.
         let steps = [step("a", 1), step("b", 2), step("c", 3), step("d", 4)]
         #expect(PlanningFormat.hairFraction(steps, currentKey: "b") == 0.5)
         #expect(PlanningFormat.hairFraction(steps, currentKey: "d") == 1)
     }
 
     @Test func theHairIgnoresWhetherStepsWereAnswered() {
-        // Standing on step 1 with everything else already done is still 1 of 4 — this is
-        // the divergence from `settledFraction`, made explicit so nobody "fixes" it.
+        // Standing on step 1 with everything else done is still 1 of 4 — the divergence from
+        // `settledFraction`, made explicit so nobody "fixes" it.
         let steps = [
             step("a", 1, status: "pending"),
             step("b", 2, status: "done"),

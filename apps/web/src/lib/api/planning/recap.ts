@@ -1,15 +1,9 @@
 // Weekly Planning · step 10 "Recap" — this step's API client and its types.
 //
-// ONE READ, AND NO WRITE AT ALL. Saving the week is the shell's
-// `POST /session/:id/complete`; every line the recap shows is already live in the module
-// that owns it. A write here would be the last step making a second copy of somebody
-// else's decision, which is the one thing the design forbids: "every line is a pointer
-// rather than a copy."
-//
-// So the client is deliberately thin. All of the joining — six modules, nine steps'
-// decisions, the parking lot — happens on the server, for the same reason the step
-// catalog and every step's sentences are server-owned: web and iOS must not each invent
-// their own reading of what the week decided.
+// ONE READ, AND NO WRITE AT ALL: saving the week is the shell's
+// `POST /session/:id/complete`, and every line the recap shows is already live in the
+// module that owns it — every line is a pointer, never a copy. All the joining happens
+// server-side so web and iOS cannot each invent their own reading of the week.
 import { apiGet } from '../client'
 
 export interface PlanningRecapDay {
@@ -17,11 +11,8 @@ export interface PlanningRecapDay {
   /** The dinner planned for that night. Null with the meals module off, too. */
   meal: string | null
   cook: string | null
-  /**
-   * The colour INPUTS, not a colour: the strip tints each event through the app's own
-   * `useEventColor()`, the same resolver the month and week views use, so the week read
-   * back looks like the calendar it describes rather than like a second palette.
-   */
+  /** The colour INPUTS, not a colour: the strip tints each event through the app's own
+   *  `useEventColor()`, so the week read back matches the calendar it describes. */
   events: {
     id: string
     title: string
@@ -36,16 +27,11 @@ export interface PlanningRecapDay {
 }
 
 export interface PlanningRecapGroup {
-  /** The module the decisions live in — and the ordering of the card. */
   key: string
   label: string
-  /** The tally: what the week says now, and what this session changed. */
   headline: string
-  /** The decisions themselves, named, ' · ' separated. Composed server-side. */
   detail: string
-  /** How many decisions this group holds. The header's number is the sum of these. */
   count: number
-  /** Where you go to change it — the row links to that step. */
   stepKey: string | null
 }
 
@@ -67,7 +53,6 @@ export interface PlanningRecapLeftAlone {
 
 export interface PlanningRecapView {
   weekStart: string
-  /** The session's finish time, or null while the week is still being decided. */
   savedAt: string | null
   days: PlanningRecapDay[]
   groups: PlanningRecapGroup[]
@@ -84,9 +69,7 @@ export const planningRecapApi = {
 
 // The crumb the step hands the session record when the week is saved.
 //
-// INTEGERS ONLY — the pointer rule applied to storage. The receipt may freeze how MANY
-// decisions were made tonight (a statement about the session, and so true forever); it
-// must never freeze WHAT they were, because the things themselves live in the modules
-// and a title copied here starts going stale the moment somebody edits it.
+// INTEGERS ONLY — the pointer rule applied to storage: how MANY decisions were made is a
+// fact about the session, but WHAT they were lives in the modules and would go stale.
 export const planningRecapDecision = (view: PlanningRecapView | null) =>
   view ? { counts: view.counts } : null

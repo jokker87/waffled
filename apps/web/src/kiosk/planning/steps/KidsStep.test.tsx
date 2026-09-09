@@ -4,18 +4,11 @@ import type { StepBodyProps } from '../registry'
 
 // Step 9 · Kids — "What's your week about?"
 //
-// THE ONE STEP THE KIDS THEMSELVES READ, so the assertions below are about what a
-// nine-year-old and a six-year-old can actually see and do:
-//
-//   · both cards are on one screen (no per-kid navigation for a family of two), and the
-//     kid's own NAME is the heading — the step catalog's title is the word "Kids";
-//   · every option is drawn from something that already exists, and "＋ Something else"
-//     is the escape hatch rather than the first thing offered;
-//   · once both questions are answered on every card, the step flips to the READ-BACK —
-//     the same card, settled, in large type. That is the part they remember.
-//
-// The fetch double is stateful so what's asserted is the step's reaction to the server's
-// fresh answer, not to an optimistic guess.
+// THE ONE STEP THE KIDS THEMSELVES READ, so what is asserted is what a nine-year-old can
+// see and do: both cards on one screen with the kid's own NAME as the heading; every
+// option drawn from something that already exists, with "＋ Something else" last; and
+// once both questions are answered, the step flips to the READ-BACK. The fetch double is
+// stateful, so what's asserted is the reaction to the server's answer, not to a guess.
 
 const goal = (over: Record<string, unknown> = {}) => ({
   id: 'g-read',
@@ -37,8 +30,8 @@ const goal = (over: Record<string, unknown> = {}) => ({
   isSpotlight: false,
   hasRewards: false,
   target: null,
-  // A habit is shown on THIS period's count. The lifetime 99 must never be what the card
-  // says — which is exactly what the shared display helper is for.
+  // A habit is shown on THIS period's count — the lifetime 99 must never be what the card
+  // says, which is exactly what the shared display helper is for.
   totalProgress: 99,
   milestoneTotal: 0,
   milestoneReached: 0,
@@ -111,9 +104,8 @@ const VIEW = () => ({
 type View = ReturnType<typeof VIEW>
 const calls: { url: string; method: string; body: Record<string, unknown> | null }[] = []
 
-// The double behaves like the server: an answer is resolved against the card's own
-// options, stored, and echoed back — including `settled`, which is what flips the step
-// to its read-back frame.
+// The double behaves like the server: an answer is resolved against the card's own options,
+// stored, and echoed back — including `settled`, which flips the step to its read-back.
 function mockApi(view: View = VIEW()) {
   calls.length = 0
   const state = JSON.parse(JSON.stringify(view)) as View
@@ -161,14 +153,13 @@ const step = {
   key: 'kids', number: 9, title: 'Kids', ask: 'What’s your week about?',
   primary: 'Done', act: 'Run the household',
   available: true, status: 'pending' as const, data: {}, decidedAt: null,
-  // The shell renders the parked-note handoff, not the step — see Handoff in
-  // WeeklyPlanning.tsx. A step test mounts `Body` alone, so there is never one here.
+  // The shell renders the parked-note handoff, not the step, and a step test mounts `Body`
+  // alone — see TasksStep.test.tsx.
   parked: [],
 }
 
-// A fresh session id per render: the step keeps its state in a module-scoped store
-// (Body and FooterExtra are sibling trees), so a shared key would carry one test's
-// answers into the next.
+// A fresh session id per render: the step keeps its state in a module-scoped store (Body
+// and FooterExtra are sibling trees), so a shared key would carry answers across tests.
 let seq = 0
 function renderStep(over: Partial<StepBodyProps> = {}) {
   const setDecisionData = vi.fn()
@@ -191,8 +182,6 @@ beforeEach(() => { mockApi() })
 describe('KidsStep · both kids on one screen', () => {
   it('gives each kid a card headed with their own name, not the step title', async () => {
     renderStep()
-    // The step catalog says "Kids"; the mock's title is the kids' names. The catalog is
-    // server-owned, so the names live in the body's own heading.
     expect(await screen.findByRole('heading', { name: /Wally and Lottie/ })).toBeTruthy()
     expect((await card('Wally')).getByText('Wally')).toBeTruthy()
     expect((await card('Lottie')).getByText('Lottie')).toBeTruthy()
@@ -204,7 +193,6 @@ describe('KidsStep · both kids on one screen', () => {
     const wk = within(w.getByRole('list', { name: /Wally.s week/ }))
     expect(wk.getByText('Soccer game')).toBeTruthy()
     expect(wk.getByText('Homework before screens')).toBeTruthy()
-    // …and the chore that's still open from before the week is on it too.
     expect(wk.getByText('Get the garage done')).toBeTruthy()
     expect(w.getByText(/24/)).toBeTruthy()
 
@@ -229,16 +217,14 @@ describe('KidsStep · both kids on one screen', () => {
     renderStep()
     const w = await card('Wally')
     const options = within(w.getByRole('radiogroup', { name: /one thing/i })).getAllByRole('radio')
-    // The promotion is the SERVER's (it sorts routed items to the top — see the API
-    // test); the card renders the order it was given rather than re-deciding it, so a
-    // second, drifting sort can't grow here.
+    // The promotion is the SERVER's; the card renders the order it was given rather than
+    // re-deciding it, so a second, drifting sort can't grow here.
     expect(options.map((o) => o.textContent)).toEqual([
       expect.stringContaining('Read 20 minutes a day'),
       expect.stringContaining('Get the garage done'),
       expect.stringContaining('Homework before screens'),
       expect.stringContaining('Something else'),
     ])
-    // What it DOES add is the caption, so nobody has to remember why it's on this card.
     expect(w.getByRole('radio', { name: /Get the garage done/ }).textContent).toMatch(/step 1/i)
   })
 
@@ -246,7 +232,6 @@ describe('KidsStep · both kids on one screen', () => {
     renderStep()
     const w = await card('Wally')
     const options = within(w.getByRole('radiogroup', { name: /one thing/i })).getAllByRole('radio')
-    // Every real option comes before it, and it is not itself the default answer.
     expect(options[options.length - 1].textContent).toContain('Something else')
     expect(options.filter((o) => o.getAttribute('aria-checked') === 'true')).toHaveLength(0)
   })
@@ -277,9 +262,6 @@ describe('KidsStep · answering', () => {
     expect(calls.filter((c) => c.method === 'PUT')[0].body).toMatchObject({ focus: { text: 'Be kind to Lottie' } })
   })
 
-  // "I added 'Extra Thing' and yet it didnt become anything? and I couldnt click on it?"
-  // Two separate defects behind one sentence, and neither is the save: the answer landed
-  // both times. It did not LOOK like it had, and going back to it threw it away.
   it('shows a chosen custom answer as CHOSEN, not as the escape hatch', async () => {
     renderStep()
     const w = await card('Wally')
@@ -292,8 +274,7 @@ describe('KidsStep · answering', () => {
     expect(chosen.getAttribute('aria-checked')).toBe('true')
     expect(chosen.className).toContain('on')
     // `.wpk-opt.more` is declared AFTER `.wpk-opt.on` at equal specificity, so as long as
-    // the answered chip still carries `more` the cascade paints it dashed and grey — the
-    // quietest thing on the card, which is the opposite of what it now is.
+    // the answered chip still carries `more` the cascade paints it dashed and grey.
     expect(chosen.className).not.toContain('more')
   })
 
@@ -306,36 +287,26 @@ describe('KidsStep · answering', () => {
     fireEvent.submit(first.closest('form')!)
     await waitFor(() => expect(w.getByRole('radio', { name: /Extra Thing/ })).toBeTruthy())
 
-    // Going back to their own answer is an EDIT. An empty box discards what a nine year
-    // old just dictated and makes the chip look inert.
     fireEvent.click(w.getByRole('radio', { name: /Extra Thing/ }))
     const again = await screen.findByLabelText(/something else/i)
     expect((again as HTMLInputElement).value).toBe('Extra Thing')
   })
 
   it('keeps an unsaved draft when they change their mind and pick an existing option', async () => {
-    // "I added a custom 'something else' and then clicked an existing one and the one I
-    // wrote disappeared, is that expected?"
-    //
-    // Changing your answer SHOULD change your answer — the existing option is now the
-    // chosen one, and only one of them can be. What should not happen is the typing
-    // being thrown away: it was never saved anywhere, so going back for it is the only
-    // way to get it, and an empty box says it is gone for good.
+    // Changing your answer SHOULD change your answer, but the typing must not be thrown
+    // away: it is saved nowhere else, so going back for it is the only way to get it.
     renderStep()
     const w = await card('Wally')
     fireEvent.click(w.getByRole('radio', { name: /Something else/ }))
     const typed = await screen.findByLabelText(/something else/i)
     fireEvent.change(typed, { target: { value: 'Build the treehouse' } })
 
-    // Change of mind, without saving: an option that already existed.
     const existing = w.getAllByRole('radio')[0]
     fireEvent.click(existing)
     await waitFor(() => expect(existing).toHaveAttribute('aria-checked', 'true'))
 
-    // The escape hatch is NOT also chosen — one answer at a time.
     expect(w.getByRole('radio', { name: /Something else/ })).toHaveAttribute('aria-checked', 'false')
 
-    // …but the words are still there when they go back for them.
     fireEvent.click(w.getByRole('radio', { name: /Something else/ }))
     const reopened = await screen.findByLabelText(/something else/i)
     expect((reopened as HTMLInputElement).value).toBe('Build the treehouse')
@@ -359,9 +330,8 @@ describe('KidsStep · answering', () => {
 })
 
 describe('KidsStep · the read-back', () => {
-  // The design calls the second frame "the part they'll actually remember", so it gets
-  // real weight: the same card, settled, with both answers in large type — not a status
-  // line under a picker that's still open.
+  // The design calls the second frame "the part they'll actually remember", so it gets real
+  // weight: the same card, settled, in large type — not a status line under a live picker.
   const answered = () => {
     const v = VIEW()
     for (const k of v.kids) {
@@ -383,7 +353,6 @@ describe('KidsStep · the read-back', () => {
     expect(said.getByText(/this week.s one thing/i)).toBeTruthy()
     expect(said.getByText('Soccer game')).toBeTruthy()
     expect(said.getByText(/look forward to/i)).toBeTruthy()
-    // The picker is put away — this frame is for reading, not choosing.
     expect(w.queryAllByRole('radio')).toHaveLength(0)
   })
 

@@ -1,44 +1,21 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import { looseEndsApi, planningRecapApi, planningRecapDecision, type PlanningRecapView } from '../../../lib/api'
-// The app's own event-colour resolver. The week strip has to agree with the calendar it
-// is describing, so it uses the same one the month and week views do rather than a rule
-// of its own.
+// The app's own event-colour resolver: the week strip has to agree with the calendar it
+// is describing, so it uses the same one the month and week views do.
 import { evVars, useEventColor } from '../../../lib/event-color'
 import type { PlanningStepModule, StepBodyProps } from '../registry'
 import '../../../styles/planning-recap.css'
 
 // Step 10 · Recap — read the week back, then it's over.
 //
-// THE BODY COMPUTES NOTHING. Every headline, every sentence, every tally arrives
-// resolved from `GET /api/weekly-planning/recap`, which reads the modules that own the
-// decisions. That is the design's governing line — "every line is a pointer rather than
-// a copy" — kept honest at the seam: a client that re-added the counts, or reformatted a
-// decision into its own words, would be a second reading of the week that could drift
-// from the server's (and from iOS's). The one thing this file decides is layout.
+// THE BODY COMPUTES NOTHING. Every headline, sentence and tally arrives resolved from
+// `GET /api/weekly-planning/recap`. A client that re-added the counts, or reworded a
+// decision, would be a second reading of the week that could drift from the server's.
 //
-// WHAT IT DELIBERATELY DOES NOT BUILD:
-//
-//  · A SAVED FRAME. `WeeklyPlanning.tsx` owns the finished record — the timestamp, the
-//    per-step read-back, "Reopen the session" and "Start this week over" — and drops the
-//    step from the URL the moment the session completes, so a saved frame here would be
-//    unreachable as well as duplicated. The v4 mock's second board is the shell's, not
-//    this step's. What the shell's version LACKED — the week strip, the module grouping
-//    and the receipt's three numbers — was recorded here as "a shell change, raised
-//    rather than made", and it was then reported: "the web recap page shows just the
-//    checklist." So the shell now renders THIS panel above its tick-list, through
-//    `RecapPanel` below. The frame stays the shell's; the reading is shared.
-//  · A "CHANGE SOMETHING" FOOTER BUTTON. The mock puts one beside the primary, but the
-//    shell's step chip already opens the agenda sheet, which jumps AND moves the
-//    session's own pointer. A second control that had to guess which step you meant
-//    would be strictly worse than the rows themselves being links — so each group row
-//    links at the step that owns it, which is the same gesture aimed at the right place.
-//  · A SECOND WAY TO ANSWER A NOTE. Dropping one is step 1's
-//    `POST /loose-ends/resolve`, the writer that owns `planning_parked_items`.
-//
-// The week is SEVEN COLUMNS and it must stay one screen beside two cards, so a busy day
-// reports its remainder rather than growing — see planning-recap.css, where the grid
-// tracks are `minmax(0, 1fr)` for exactly the reason the Horizon month grid wasn't.
+// The week is SEVEN COLUMNS and must stay one screen beside two cards — see
+// planning-recap.css, where the grid tracks are `minmax(0, 1fr)` for exactly the reason
+// the Horizon month grid wasn't.
 
 const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
@@ -48,7 +25,6 @@ function dayParts(iso: string): { name: string; num: number } {
   return { name: WD[d.getDay()], num: d.getDate() }
 }
 
-/** The dinner line: "Lentil soup · Lottie" when somebody is cooking it. */
 export function mealLine(meal: string | null, cook: string | null): string | null {
   if (!meal) return null
   return cook ? `${meal} · ${cook}` : meal
@@ -69,49 +45,32 @@ function useRecap(sessionId: string) {
   return { view, loading, setView }
 }
 
-// The recap is rendered on TWO surfaces, and the difference between them is two props.
-//
-// Step 10 renders it inside a running session: rows point back at the step that owns
-// them, and the copy is written for a week about to be saved. The finished-week record
-// (`WeeklyPlanning.tsx`) renders the same read-back on the same payload — that was the
-// report, "the web recap page shows just the checklist … on the iPhone we showed the
-// actual week decisions" — and neither of those two things holds there: the shell strips
-// the step from the path the moment a session completes, so a `/planning/<step>` link
-// would bounce straight back, and "what tonight changed" is the wrong tense for a week
-// saved on Sunday and read on Thursday.
-//
-// The routing prop is OPTIONAL and absent means step 10's behaviour, so the live session
-// and this file's own tests are untouched by the record's existence. THE TENSE IS NOT A
-// PROP: it is `savedAt` on the payload, the field the server ships for exactly this
-// ("here so any surface reading the record can date it"), so the two clients cannot drift
-// into describing the same week in different tenses.
+// The recap renders on TWO surfaces, and the difference is two props. The finished-week
+// record (`WeeklyPlanning.tsx`) renders the same read-back on the same payload, where
+// neither of step 10's behaviours holds: the shell strips the step from the path once a
+// session completes, so a `/planning/<step>` link would bounce straight back. The routing
+// prop is OPTIONAL. THE TENSE IS NOT A PROP — it is `savedAt` on the payload, so the two
+// clients cannot describe the same week in different tenses.
 export interface RecapPanelProps extends StepBodyProps {
-  // Where a row naming a step should point, or null for a plain row. Absent ⇒ the step
-  // inside the session.
+  // Where a row naming a step should point, or null for a plain row. Absent ⇒ in-session.
   hrefForStep?: (stepKey: string) => string | null
 }
 
 export function RecapPanel({ sessionId, setDecisionData, busy, hrefForStep }: RecapPanelProps) {
   const { view, loading } = useRecap(sessionId)
   const [search] = useSearchParams()
-  // Family colour when an event covers the household, the owner's colour otherwise, grey
-  // when nobody owns it — resolved here rather than server-side so the strip cannot drift
-  // from the calendar.
+  // Resolved here rather than server-side so the strip cannot drift from the calendar.
   const colorOf = useEventColor()
-  // Notes the family walked past on purpose. Local on purpose too: "keep it parked" is
-  // the answer that writes NOTHING — the note stays open and turns up in next Sunday's
-  // step 1, which is the whole point of a last call rather than an inbox.
+  // Local on purpose: "keep it parked" is the answer that writes NOTHING — the note stays
+  // open and turns up in next Sunday's step 1.
   const [kept, setKept] = useState<string[]>([])
   const [dropped, setDropped] = useState<string[]>([])
   const [working, setWorking] = useState<string | null>(null)
 
-  // The receipt's integers, and only those. See planningRecapDecision.
   useEffect(() => { setDecisionData(planningRecapDecision(view)) }, [view, setDecisionData])
 
-  // A link back to the step that owns a line, carrying whatever week the URL is already
-  // about. The shell leaves a URL naming a runnable step alone ("a pasted link outranks
-  // the pointer"), so this moves THIS browser without touching the session's own
-  // `current_step` — which stays where the family is.
+  // The shell leaves a URL naming a runnable step alone ("a pasted link outranks the
+  // pointer"), so this moves THIS browser without touching the session's `current_step`.
   const q = search.toString()
   const hrefFor = (stepKey: string): string | null =>
     hrefForStep ? hrefForStep(stepKey) : `/planning/${stepKey}${q ? `?${q}` : ''}`
@@ -135,8 +94,6 @@ export function RecapPanel({ sessionId, setDecisionData, busy, hrefForStep }: Re
 
   const lastCall = view.lastCall.filter((n) => !kept.includes(n.id) && !dropped.includes(n.id))
   const nothing = !view.groups.length && !view.leftAlone.length
-  // The week is already saved, so the closing copy cannot be written for a week about to
-  // be. "What tonight changed" is wrong on a Thursday reading of Sunday's session.
   const saved = !!view.savedAt
 
   return (
@@ -190,8 +147,8 @@ export function RecapPanel({ sessionId, setDecisionData, busy, hrefForStep }: Re
                 <span className="wpr-n">{g.count}</span>
               </>
             )
-            // The row IS the way back to the decision — which is the grouping's whole
-            // argument: a line names the module, and the module is where you change it.
+            // The row IS the way back: a line names the module, and the module is where
+            // you change it.
             const href = g.stepKey ? hrefFor(g.stepKey) : null
             return href ? (
               <Link key={g.key} to={href} className="wpr-row" data-testid={`wpr-group-${g.key}`}>
@@ -252,7 +209,7 @@ export function RecapPanel({ sessionId, setDecisionData, busy, hrefForStep }: Re
           )}
 
           {/* HONESTY 2 — a step that was skipped is a decision, and "nothing this week"
-              is an answer. These are outcomes, so they are rendered as rows, not as
+              is an answer, so they are rendered as rows rather than as
               gaps in the card above. */}
           {view.leftAlone.length > 0 && (
             <div className="wpr-card">

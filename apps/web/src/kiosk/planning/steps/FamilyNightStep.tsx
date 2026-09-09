@@ -12,32 +12,13 @@ import {
 } from '../../../lib/api'
 import '../../../styles/planning-familyNight.css'
 
-// Step 4 · Family night — "Accept the rotation, or change it?"
+// Step 4 · Family night. The affirmative is an acknowledgement: it writes nothing.
 //
-// THREE ROWS AND A THEME LINE, and the fast path is reading them and moving on. The
-// rotation has already worked out whose turn each part is, and most weeks it is right,
-// so the affirmative is an acknowledgement: pressing it writes nothing at all.
-//
-// Everything that IS a decision goes through the familyNight module's own occurrence
-// endpoint, because that is where a gathering lives:
-//   · tap a face  → an assignment on the OCCURRENCE. Pinned for this week only; next
-//     week comes back on rotation. It also materializes the occurrence, and the
-//     occurrence count is what the rotation counts — which is how a pin "shifts next
-//     week's turn" without anybody editing the household's standing agenda.
-//   · the theme   → free text on the same occurrence.
-//   · Skip this week → status 'skipped' on the same occurrence. It calls off the
-//     GATHERING, not the recurring calendar event behind it, which is left alone.
-//
-// A SKIPPED WEEK STILL TAKES ITS TURN, and that is the intended rule — settled as a
-// product call after it was raised as a bug. The module's rotation is a COUNT of
-// occurrences and does not exclude skipped ones, so calling a week off moves everybody
-// on a place: nobody did the part, but the turn passed. The alternative — a skipped week
-// costing nothing — means the same person is up again next week and again the week after
-// for as long as the family keeps skipping, which is the worse of the two behaviours.
-//
-// So do NOT "fix" `rotationIndex()` to exclude skipped occurrences. The skip bar below
-// says out loud that the turn moved on, because a rotation that shifts silently is the
-// part that would actually confuse somebody.
+// Every decision goes through the familyNight module's occurrence endpoint: a tapped face
+// assigns on the OCCURRENCE (this week only; materializing it shifts next week's turn) and
+// "Skip this week" is status 'skipped', calling off the GATHERING, not the recurring event.
+// A SKIPPED WEEK STILL TAKES ITS TURN — the rotation COUNTS occurrences, so do NOT "fix"
+// `rotationIndex()` to exclude them.
 
 interface StepState {
   key: string
@@ -49,9 +30,7 @@ interface StepState {
 
 const EMPTY: StepState = { key: '', board: null, loading: true, error: null, busy: false }
 
-// Body and FooterExtra are SIBLING trees under the shell — "Skip this week" lives in the
-// footer and what it does is drawn in the body — so the state has to outlive both. Same
-// module-scoped store the Meals step uses, and for the same reason.
+// Body and FooterExtra are SIBLING trees under the shell, so the state must outlive both.
 let state: StepState = EMPTY
 const listeners = new Set<() => void>()
 const subscribe = (l: () => void) => { listeners.add(l); return () => { listeners.delete(l) } }
@@ -82,9 +61,8 @@ async function reread(weekStart: string) {
   if (state.key === key && !state.busy) set({ board })
 }
 
-// Every write is followed by a re-read rather than a local patch: the server owns which
-// parts are on rotation, so guessing here is how this screen and the Today card start
-// naming different people for the same night.
+// Every write is followed by a re-read, not a local patch: the server owns which parts are
+// on rotation, and guessing is how this screen and the Today card disagree.
 async function write(p: StepBodyProps, run: (date: string) => Promise<unknown>) {
   const board = state.board
   const key = state.key
@@ -101,10 +79,8 @@ async function write(p: StepBodyProps, run: (date: string) => Promise<unknown>) 
   p.refresh()
 }
 
-// Both components read the same store; `primary` (only Body passes it) says which one
-// owns the fetching, so a remount doesn't fire two reads. The store outlives the
-// components, so coming back to the step re-reads rather than showing what it was when
-// you left — the Today card writes to the same night.
+// `primary` (only Body passes it) says which component owns the fetching, so a remount
+// doesn't fire two reads.
 function useFamilyNightStep(p: StepBodyProps, primary = false): StepState {
   const key = `${p.sessionId}|${p.weekStart}`
   useEffect(() => {
@@ -113,8 +89,7 @@ function useFamilyNightStep(p: StepBodyProps, primary = false): StepState {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key])
   const s = useSyncExternalStore(subscribe, snapshot)
-  // The crumb: what this sitting decided, kept in step with every read and write so the
-  // affirmative writes back what is already true instead of erasing it.
+  // The crumb, kept in step with every read and write so the affirmative writes back.
   useEffect(() => {
     if (primary && s.board) p.setDecisionData(planningFamilyNightDecision(s.board))
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -124,13 +99,11 @@ function useFamilyNightStep(p: StepBodyProps, primary = false): StepState {
 
 // ── Bits ─────────────────────────────────────────────────────────────────────────
 
-// "Wednesday, Sep 9". Built off the plain date with a fixed noon, so no timezone can
-// shift the gathering onto the day before.
+// "Wednesday, Sep 9" — a fixed noon, so no timezone shifts the gathering onto the day before.
 function longDate(date: string): string {
   return new Date(`${date}T12:00:00`).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })
 }
 
-// "5:00 PM" from the config's 'HH:MM'.
 function clockTime(time: string): string {
   const [h, m] = time.split(':').map(Number)
   if (!Number.isFinite(h) || !Number.isFinite(m)) return time
@@ -164,12 +137,10 @@ function PartRow({ part, board, p, disabled }: {
             type="button"
             className={`wpfn-face${m.id === part.personId ? ' on' : ''}`}
             style={{ background: avTint(m.colorHex) }}
-            // A face with no accessible name is unaddressable, and "🦄" is not a name.
-            // The label is always the ACTION, because tapping the suggested person is a
-            // real one: it turns the rotation's guess into a decision.
+            // The label is always the ACTION: tapping the suggested person turns the guess
+            // into a decision.
             aria-label={`Pin ${part.label} to ${m.name}`}
-            // Only a PIN is a pressed state. The rotation's suggestion is drawn as
-            // current (.on) but nobody chose it, and the row's own line says so.
+            // Only a PIN is a pressed state — the rotation's suggestion is merely current.
             aria-pressed={part.pinned && m.id === part.personId}
             title={`${m.name} takes ${part.label.toLowerCase()}`}
             disabled={disabled}
@@ -197,9 +168,7 @@ function PartRow({ part, board, p, disabled }: {
   )
 }
 
-// Placeholders for the three parts every household starts with. Keyed by the DEFAULT
-// slugs only — a household that renames or adds parts falls through to the generic
-// question, which is built from its own label.
+// Keyed by the DEFAULT slugs only: a renamed or added part falls through to the generic one.
 const DETAIL_HINTS: Record<string, string> = {
   activity: 'optional — "charades, kids vs parents"',
   treat: 'optional — "the good ice cream"',
@@ -207,17 +176,14 @@ const DETAIL_HINTS: Record<string, string> = {
 }
 
 /**
- * A free-text line saved on blur (and on Enter) rather than per keystroke — it is a
- * sentence somebody types, not a toggle. Shared by the theme and by every part's detail,
- * which behave identically: same clearing rule ('' clears, a null would mean "leave it"),
- * same re-sync, same design-system `.field`.
+ * A free-text line saved on blur (and on Enter), not per keystroke. Shared by the theme and
+ * every part's detail: same clearing rule ('' clears, null means "leave it").
  */
 function CommitLine({ label, srLabel, value, placeholder, maxLength, disabled, onCommit, className }: {
   label: string
   /**
-   * The accessible name, when the visible label is too terse to stand alone. Three rows
-   * each showing "What" need three distinct names, and the visible word cannot repeat
-   * the part's own label — "Activity … Activity" reads as a mistake on screen.
+   * The accessible name, when the visible label is too terse: three rows showing "What"
+   * need distinct names, and the visible word cannot repeat the part's own label.
    */
   srLabel?: string
   value: string
@@ -228,9 +194,7 @@ function CommitLine({ label, srLabel, value, placeholder, maxLength, disabled, o
   className: string
 }) {
   const [draft, setDraft] = useState(value)
-  // Re-sync when the board comes back with a different value (another device, or the week
-  // changed under us). A draft in progress is never clobbered by its own re-read, because
-  // the re-read carries the value that was just saved.
+  // Re-sync when the board comes back changed; a draft survives its own re-read.
   useEffect(() => { setDraft(value) }, [value])
 
   const commit = () => {
@@ -238,9 +202,8 @@ function CommitLine({ label, srLabel, value, placeholder, maxLength, disabled, o
     onCommit(draft.trim())
   }
 
-  // The app's own labelled-field shape (.field > span + input), laid on its side by the
-  // stylesheet — so it inherits the design system's input rather than growing a
-  // hand-rolled one, and the label is the input's accessible name for free.
+  // The app's own labelled-field shape, so it inherits the design system's input and the
+  // label is the accessible name for free.
   return (
     <label className={`field ${className}`}>
       <span>{label}</span>
@@ -259,8 +222,7 @@ function CommitLine({ label, srLabel, value, placeholder, maxLength, disabled, o
   )
 }
 
-// The theme is a free-text line on the night, saved on blur (and on Enter) rather than
-// per keystroke — it is a sentence somebody types, not a toggle.
+// A free-text line on the night, saved on blur (and on Enter) — see `DetailField`.
 function ThemeLine({ board, p, disabled }: { board: PlanningFamilyNightBoard; p: StepBodyProps; disabled: boolean }) {
   return (
     <CommitLine
@@ -277,20 +239,17 @@ function ThemeLine({ board, p, disabled }: { board: PlanningFamilyNightBoard; p:
 }
 
 /**
- * The week's events, to point one at. Its own component so the FETCH only happens when
- * somebody opens the picker — a hook can't be called conditionally, so the way to not
- * pay for a list nobody asked for is to not mount the thing that reads it.
+ * The week's events, to point one at. Its own component so the FETCH only happens once
+ * somebody opens the picker: a hook cannot be called conditionally.
  */
 function EventPicker({ weekStart, disabled, onPick }: {
   weekStart: string
   disabled: boolean
   onPick: (eventId: string) => void
 }) {
-  // The last day of the week the SERVER handed us — whole days stepped off that
-  // boundary, never a week computed here.
+  // The last day of the week the SERVER handed us — never a week computed here.
   const { events } = useEventsRange(weekStart, ymd(addDays(new Date(`${weekStart}T00:00:00`), 6)))
-  // A meal-plan mirror is not something anybody would call family night, and offering one
-  // would put a dinner where an evening should be.
+  // A meal-plan mirror is not family night; offering one puts a dinner where an evening goes.
   const linkable = events.filter((e) => e.origin !== 'meal_plan' && e.origin !== 'meal_prep')
 
   return (
@@ -313,21 +272,11 @@ function EventPicker({ weekStart, disabled, onPick }: {
 }
 
 /**
- * This week's gathering on the calendar.
- *
- * TWO different things live here, and the step has to keep them apart:
- *
- *  · `onCalendar` is the STANDING recurring series (settings.familyNight.eventId), set
- *    once in Settings by an admin. Every week inherits it.
- *  · `eventId` is the event THIS gathering points at — the one a planning session can
- *    decide, which is the same reason a pinned person lives on the occurrence.
- *
- * Neither button opens an event form. "Add to calendar" is one server call that creates
- * the event for this date and links it atomically — a create-then-adopt round trip from
- * here could not be made safe, because the web app writes events LOCALLY first and the
- * id would not exist server-side yet. "Link an event" adopts something the week already
- * has, which is the half a recurring series could never express: "this week it's the
- * movie night that's already on Friday".
+ * This week's gathering on the calendar. TWO things live here: `onCalendar` is the STANDING
+ * recurring series, set once in Settings, while `eventId` is the event THIS gathering points
+ * at — the one a session can decide. "Add to calendar" is one server call that creates and
+ * links atomically, because the web writes events LOCALLY first and a client id would not
+ * exist server-side yet.
  */
 function CalendarLine({ board, p, disabled }: {
   board: PlanningFamilyNightBoard
@@ -348,8 +297,7 @@ function CalendarLine({ board, p, disabled }: {
           type="button"
           className="btn btn-ghost wpfn-cal-act"
           disabled={disabled}
-          // Unlinks ONLY. Deleting the event is the calendar's job, and "this isn't
-          // family night after all" must never delete Friday.
+           // Unlinks ONLY: "this isn't family night after all" must never delete Friday.
           onClick={() => void write(p, (date) => planningFamilyNightApi.linkEvent(date, null))}
         >
           Unlink
@@ -454,10 +402,8 @@ function Body(p: StepBodyProps) {
           </button>
         </div>
       ) : (
-        // Deliberately NOT the mock's "worked out from who did what last time": the
-        // module's rotation is a COUNT of gatherings taken against the family's order,
-        // and it never reads who was actually assigned. Promising more than that would
-        // be a sentence the software can't keep.
+        // NOT "who did what last time": the rotation COUNTS gatherings against the family's
+        // order and never reads who was assigned.
         <div className="wpfn-note">
           These are <b>rotation suggestions</b> — each part taken in turn, in your family's order.
           Leave them and they stand; tap a face and it's pinned for this week only, which is what
@@ -471,11 +417,8 @@ function Body(p: StepBodyProps) {
 }
 
 // ── FooterExtra ──────────────────────────────────────────────────────────────────
-// "Skip this week" — beside the shell's own "Skip this step", and deliberately a
-// different thing: skipping the STEP decides nothing, skipping the WEEK calls the
-// gathering off. Once the week is off, the way back is Undo on the skip bar, where the
-// consequence is written down — so this slot empties rather than becoming a second undo
-// at the far end of the screen from the thing it undoes.
+// "Skip this week" — not the shell's "Skip this step", which decides nothing. Once the week
+// is off this slot empties: the way back is Undo on the skip bar.
 
 function FooterExtra(p: StepBodyProps) {
   const s = useFamilyNightStep(p)

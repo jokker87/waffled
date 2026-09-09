@@ -1,43 +1,13 @@
 /* Weekly Planning · step 1 "Loose ends" (LooseEndsStep.tsx).
 
-   Built from the same vocabulary as planning.css — its tokens ARE the repo tokens, so
-   every colour here is a var and dark mode comes for free. Never hardcode a hex.
+   Same vocabulary as planning.css — every colour is a repo token. Never hardcode a hex.
 
-   THE POINT OF THE LAYOUT: a DECK is the content. The switch above it carries the two
-   counts (so you always know what is left in the group you are not looking at) plus
-   the one line that explains the two kinds; the card carries the item and its
-   destinations; a running count sits above it and a trail of what you just routed
-   below, with an undo. Nothing else — this is a step body inside a shell that already
-   owns the title, the question, the progress hair and the primary button, and a second
-   chrome would be a fifth of the display spent twice.
-
-   THE DECK IS TWO PSEUDO-ELEMENTS. `.wp-le-stack::before/::after` are the offset cards
-   behind the top one, so the stack costs no DOM and no state — it is a picture of how
-   many are left, and the honest count is the number above it.
-
-   VOCABULARY
-     Frame    — .wp-le .wp-le-bar .wp-le-note .wp-le-err .wp-le-empty
-     Switch   — .wp-le-switch .wp-le-tab .wp-le-n .wp-le-seeall .wp-le-all-t
-                (the switch renders in CARD mode only — see-all groups by heading)
-     Lists    — .wp-le-lists-open + .wp-le-lists .wp-le-lists-t/-s/-row/-n/-done
-                (which lists this step asks about, chosen in the step)
-     Deck     — .wp-le-deck .wp-le-pos .wp-le-stack .wp-le-card
-                .wp-le-kind .wp-le-t .wp-le-d
-     Choices  — .wp-le-choices .wp-le-choice (.primary .route .settle .quiet)
-                .wp-le-quiet .wp-le-quiet-b
-     Trail    — .wp-le-trail .wp-le-trail-i .wp-le-undo
-     Capture  — .wp-le-capture .wp-le-capture-p .wp-le-capture-in .wp-le-capture-go
-                (both modes: card-mode footer, and inside see-all's Parked section)
-     Cleared  — .wp-le-clear .wp-le-check .wp-le-clear-t .wp-le-clear-s
-     See all  — .wp-le-list .wp-le-disclaimer .wp-le-sec .wp-le-sec-h .wp-le-sec-cap
-                .wp-le-rows .wp-le-row
-                .wp-le-pill
-*/
+   A DECK is the content, and the shell already owns the title, the question, the progress hair
+   and the primary button, so this body adds no second chrome. `.wp-le-stack::before/::after` are
+   the offset cards behind the top one, so the stack costs no DOM and no state. */
 
 .wp-le { display: flex; flex-direction: column; gap: 12px; min-height: 0; flex: 1; }
 
-/* Everything in the column shares one measure, so the switch, the card, the trail and
-   the capture bar line up down the left edge. */
 .wp-le-bar, .wp-le-note, .wp-le-err, .wp-le-trail, .wp-le-capture, .wp-le-list, .wp-le-deck {
   max-width: 620px; width: 100%; margin-left: auto; margin-right: auto;
 }
@@ -56,9 +26,6 @@
 }
 .wp-le-tab:hover { color: var(--ink); }
 .wp-le-tab.on { background: var(--card); color: var(--ink); box-shadow: var(--sh-2); }
-/* The count travels WITH the label — that's the whole reason it's in the switch. A
-   cleared group shows a check instead of a zero, which reads as finished rather than
-   empty. */
 .wp-le-n {
   min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px;
   display: inline-grid; place-items: center;
@@ -66,9 +33,7 @@
 }
 .wp-le-tab.on .wp-le-n { background: var(--primary); color: var(--on-accent); }
 
-/* See-all has no switch — the section headings do the grouping — so the bar needs
-   something on the left saying what you are looking at. Sized to sit level with the
-   switch it replaces, so the bar doesn't jump between the two modes. */
+/* See-all has no switch, so the bar needs a left-hand label, sized to sit level with it. */
 .wp-le-all-t {
   display: inline-flex; align-items: center; flex: none; padding: 7px 2px;
   font-size: 13px; font-weight: 700; letter-spacing: -0.01em; color: var(--ink);
@@ -80,13 +45,8 @@
 }
 .wp-le-seeall:hover { color: var(--ink); }
 
-/* WHICH LISTS THIS STEP ASKS ABOUT — the opener sits beside "See all" and reads like it
-   (same quiet weight), because both are step-level escape hatches rather than answers to
-   the card in front of you. No `margin-left: auto`: "See all" already claims that, and a
-   second one would push this off the row's end. */
-/* WHO ALREADY HAS IT — one chip, both modes. Inline so it sits at the end of the meta
-   line rather than claiming a column of its own; `.chore-ava` is the Tasks board's own
-   avatar wash, reused so a face reads the same in both places. */
+/* No `margin-left: auto`: "See all" already claims that, and a second would push this off. */
+/* `.chore-ava` is the Tasks board's own avatar wash, reused so a face reads the same here. */
 .wp-le-owner {
   display: inline-flex; align-items: center; gap: 5px; margin-left: 8px;
   font-size: 12px; font-weight: 700; color: var(--ink-2); white-space: nowrap;
@@ -94,8 +54,7 @@
 
 .wp-le-owner .chore-ava { width: 18px; height: 18px; font-size: 11px; }
 
-/* The see-all meta line: where it came from, its own detail, and whoever has it. `<s>` is
-   this file's existing sub-line element (never a strikethrough — see .wp-le-row-main s). */
+/* The see-all meta line. `<s>` is this file's sub-line element, never a strikethrough. */
 .wp-le-row-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
 
 .wp-le-row-kind {
@@ -103,7 +62,6 @@
   color: var(--ink-3);
 }
 
-/* On the card the kind label is its own line, so the chip sits beside it. */
 .wp-le-kind { display: flex; align-items: center; }
 
 .wp-le-lists-open {
@@ -113,10 +71,7 @@
 
 .wp-le-lists-open:hover { color: var(--ink); }
 
-/* The sheet. `.modal-overlay` + `.modal-card` are the shared vocabulary — the pair used
-   in 62 other places — and only what is specific to a row of lists lives here. (Written
-   against a `.modal` class that does not exist the first time, which rendered a sheet with
-   no surface at all: the design-system rule earns its keep.) */
+/* `.modal-overlay` + `.modal-card` are the shared vocabulary (there is no `.modal` class). */
 .wp-le-lists { max-width: 460px; padding: 22px 22px 18px; }
 
 .wp-le-lists-t { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
@@ -139,7 +94,6 @@
 
 .wp-le-lists-done { width: 100%; justify-content: center; margin-top: 16px; }
 
-/* The switch IS the explanation of the two kinds, so the note sits right under it. */
 .wp-le-note { flex: none; font-size: 12.5px; font-weight: 600; color: var(--ink-3); line-height: 1.5; }
 
 /* ── The deck ───────────────────────────────────────────────────────────────── */
@@ -149,13 +103,10 @@
   font-size: 12px; font-weight: 750; letter-spacing: 0.02em; color: var(--ink-3);
 }
 
-/* The stack: the real card, plus two layers peeking out BELOW it.
-   Both edges shift down together — `top: 10px; bottom: -10px` — so each layer emerges
-   past the card's bottom edge. (Pinning `bottom: 0` instead lands their lower edge
-   exactly on the card's, which hides them entirely and leaves two faint rectangles
-   behind the top corners: a card with artefacts, not a deck.) The wrapper's
-   `padding-bottom` is what reserves room for the overhang, so the layers never
-   overlap the trail underneath. */
+/* The stack: the real card, plus two layers peeking out BELOW it. Both edges shift down
+   together (`top: 10px; bottom: -10px`) so each layer emerges past the card's bottom edge —
+   pinning `bottom: 0` hides them and leaves two faint rectangles behind the top corners.
+   The wrapper's `padding-bottom` reserves the overhang so they never reach the trail. */
 .wp-le-stack { position: relative; padding-bottom: 22px; }
 .wp-le-stack::before,
 .wp-le-stack::after {
@@ -180,14 +131,10 @@
   display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap;
 }
 .wp-le-emoji { font-size: 1em; line-height: 1; flex: none; }
-/* Who wrote it, how long ago, and how many sessions have walked past it — the line
-   that earns the "Drop it" underneath. */
 .wp-le-d { margin-top: 6px; font-size: 13px; font-weight: 650; color: var(--ink-2); }
 
 /* ── The choices ────────────────────────────────────────────────────────────── */
-/* Destinations are the content of the card, so they are tiles with the reason under
-   the name — "Tasks / Give it an owner and a day" is the whole decision. Two columns
-   because four tiles in a row become unreadable slivers on a 10" kiosk. */
+/* Tiles with the reason under the name. Two columns, because four in a row become slivers. */
 .wp-le-choices {
   margin-top: 18px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px;
 }
@@ -201,19 +148,14 @@
 .wp-le-choice b { display: block; font-size: 14.5px; font-weight: 750; }
 /* <s> for the reason, matching .wp-record-main — struck-through is never wanted. */
 .wp-le-choice s { display: block; margin-top: 2px; font-size: 12px; font-weight: 600; color: var(--ink-2); text-decoration: none; line-height: 1.35; }
-/* One emphasised choice per card, and it is the one the design nominates. */
 .wp-le-choice.primary {
   background: var(--primary); border-color: var(--primary); color: var(--on-accent);
 }
 .wp-le-choice.primary s { color: var(--on-accent); opacity: 0.8; }
 .wp-le-choice.primary:hover:not(:disabled) { border-color: var(--primary); filter: brightness(1.05); }
-/* Settling a note here ("talk about it now") is as ordinary an answer as sending it
-   on, but it is not a destination — so it reads as a sibling, not a rival. */
 .wp-le-choice.settle { background: var(--panel); border-color: transparent; }
 .wp-le-choice.quiet { background: transparent; border-style: dashed; }
 
-/* Answers that write, and the one that writes nothing, tucked under the destinations
-   where they can't compete with them. */
 .wp-le-quiet { margin-top: 12px; display: flex; justify-content: center; gap: 4px; flex-wrap: wrap; }
 .wp-le-quiet-b {
   background: none; border: 0; padding: 6px 10px; cursor: pointer;
@@ -223,15 +165,11 @@
 .wp-le-quiet-b:disabled { opacity: 0.5; cursor: default; }
 
 /* ── The trail ──────────────────────────────────────────────────────────────── */
-/* What you just routed, named, with a way back out of the last one. Routing is fast
-   and unlabelled otherwise — a deck that swallows a card with no receipt is how people
-   stop trusting the fast path. */
+/* A deck that swallows a card with no receipt is how people stop trusting the fast path. */
 .wp-le-trail {
   flex: none; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
   padding-top: 4px; font-size: 12.5px; font-weight: 600; color: var(--ink-3);
 }
-/* The one sentence that makes the arrows readable. Takes the whole row so the items
-   line up under it rather than beside it, and reads as a caption, not as an item. */
 .wp-le-trail-h {
   flex-basis: 100%; font-size: 11px; font-weight: 800; letter-spacing: 0.06em;
   text-transform: uppercase; color: var(--ink-3); opacity: 0.85;
@@ -247,8 +185,6 @@
 .wp-le-undo:disabled { opacity: 0.5; cursor: default; text-decoration: none; }
 
 /* ── The capture bar (group B only) ─────────────────────────────────────────── */
-/* So step 1 DOES create parked items: the board is where "one more thing" goes when it
-   belongs to no module yet. */
 .wp-le-capture {
   flex: none; display: flex; align-items: center; gap: 8px;
   background: var(--card); border: 1px solid var(--hair); border-radius: 999px;
@@ -262,10 +198,7 @@
 .wp-le-capture-in::placeholder { color: var(--ink-3); font-weight: 600; }
 .wp-le-capture-go { flex: none; padding: 9px 18px; font-size: 13.5px; }
 .wp-le-capture-go:disabled { opacity: 0.5; cursor: default; }
-/* In see-all the same bar sits INSIDE the Parked section instead of at the foot of the
-   screen, so what it adds to is never in question. It rides the section's measure (the
-   frame rule's own max-width would be redundant here) and takes the row list's gap
-   above it so it reads as the last thing in that section, not as a stray control. */
+/* In see-all the same bar sits INSIDE the Parked section, so what it adds to is never in question. */
 .wp-le-sec .wp-le-capture { max-width: none; margin-top: 12px; }
 
 /* ── The cleared state ──────────────────────────────────────────────────────── */
@@ -279,17 +212,13 @@
   font-size: 28px; font-weight: 800; line-height: 1;
 }
 .wp-le-clear-t { font-size: 25px; font-weight: 600; letter-spacing: -0.02em; color: var(--ink); }
-/* Naming what was checked is the difference between a claim and a report. */
 .wp-le-clear-s { margin-top: 7px; font-size: 13.5px; font-weight: 600; color: var(--ink-2); line-height: 1.55; }
 .wp-le-clear-go { margin-top: 18px; justify-content: center; }
 
 /* ── See all ────────────────────────────────────────────────────────────────── */
-/* Both groups, labelled, in one scroll — the escape hatch for the week someone dropped
-   twenty things. The card's centred layout would read as a stack of headlines here, so
-   rows go left-aligned with their destinations on the end. */
+/* Rows are left-aligned with their destinations on the end, because the card's centred layout
+   would read as a stack of headlines here. */
 .wp-le-list { min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 18px; }
-/* The one claim the user has to believe for this step to feel safe, so it is stated
-   plainly at the top of the only screen that shows everything at once. */
 .wp-le-disclaimer {
   border-radius: var(--r-lg); padding: 10px 14px; background: var(--card-2);
   font-size: 12.5px; font-weight: 650; color: var(--ink-2); line-height: 1.45;
@@ -299,8 +228,6 @@
   font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.07em;
   color: var(--gold-d);
 }
-/* The switch's note in four words. Lower-contrast than the label so the heading still
-   scans as a heading, and it drops on a narrow board rather than wrapping the name. */
 .wp-le-sec-cap {
   font-weight: 700; letter-spacing: 0.04em; color: var(--ink-3);
   text-transform: none; font-size: 11px;
@@ -338,14 +265,10 @@
 }
 
 /* ── Narrow (phone) ─────────────────────────────────────────────────────────── */
-/* The switch and the card carry over unchanged — same counts, same destinations. Only
-   the type scale and the padding come down, and the choice tiles go to one column so a
-   four-destination card never crowds them into unreadable slivers. */
+/* Only the type scale and padding come down, and the choice tiles go to one column. */
 @media (max-width: 720px) {
   .wp-le-bar { gap: 8px; }
   .wp-le-tab { padding: 7px 11px; font-size: 12.5px; }
-  /* The caption is the nicety, not the name — on a phone the heading keeps the label
-     and the count and drops it rather than wrapping onto a second line. */
   .wp-le-sec-cap { display: none; }
   .wp-le-card { padding: 20px 16px 16px; border-radius: var(--r-lg); }
   .wp-le-stack::before, .wp-le-stack::after { border-radius: var(--r-lg); }

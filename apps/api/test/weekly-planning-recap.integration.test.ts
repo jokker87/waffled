@@ -1,15 +1,9 @@
 // Weekly Planning · step 10 · Recap — against a real Postgres (Testcontainers).
 //
 // Mostly a NEGATIVE: the recap must not become a second, stale copy of the household's
-// data (see recap.ts and the plan doc). Three rules asserted throughout:
-//   1. EVERY LINE RESOLVES AT READ TIME — undo a decision elsewhere and the line
-//      changes or disappears rather than keeping the old answer.
-//   2. A SUGGESTION IS NOT A DECISION — the family-night rotation's host and a
-//      pre-selected featured goal are not things the family said.
-//   3. A DELIBERATE NON-ANSWER IS AN OUTCOME, while an unreached step is not.
-//
-// Every other line the step shows is somebody else's read, tested in its own file, so
-// this one asserts the JOIN rather than re-testing the sources.
+// data. Three rules: every line RESOLVES AT READ TIME; a SUGGESTION IS NOT A DECISION
+// (the rotation's host, a pre-selected featured goal); a deliberate non-answer is an
+// outcome while an unreached step is not. Asserts the JOIN, not the sources.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from './helpers/pg'
 import jwt from 'jsonwebtoken'
@@ -52,8 +46,7 @@ const kevin = mint('dev|kevin')
 const json = (r: { body: string }) => JSON.parse(r.body)
 const setModules = (mods: Record<string, boolean>) => call('PATCH', '/api/household/modules', kevin, mods)
 
-// Pure date arithmetic on a YYYY-MM-DD — UTC on purpose, because nothing here is
-// rendered; it only ever adds days.
+// Pure date arithmetic on a YYYY-MM-DD — UTC on purpose; nothing here is rendered.
 const addDays = (iso: string, n: number): string =>
   new Date(new Date(`${iso}T00:00:00Z`).getTime() + n * 86400000).toISOString().slice(0, 10)
 
@@ -63,7 +56,7 @@ const at = (day: string, time: string) => `${day}T${time}:00-05:00`
 
 interface Group { key: string; label: string; headline: string; detail: string; count: number; stepKey: string | null }
 // The event carries the COLOUR INPUTS, never a resolved colour: `eventColor` is the
-// client's decision and lives next to the calendar the strip has to match.
+// client's decision, next to the calendar the strip must match.
 interface DayEvent {
   id: string; title: string; when: string
   personId: string | null; personName: string | null; personColor: string | null
@@ -137,11 +130,9 @@ describe('planning · recap · gating', () => {
     expect((await call('GET', '/api/weekly-planning/recap', kevin)).statusCode).toBe(200)
   })
 
-  // The catalog gives `recap` no `requiresModule` — it reads across every module, and
-  // gating it on any one of them would delete the close of the session for a household
-  // that runs the others. So it must answer, and render, with every optional module off.
-  // (What it says with real decisions behind it is the last describe in this file — this
-  // one only proves the route survives a household that runs almost nothing.)
+  // `recap` has no `requiresModule` — gating it on any one module would delete the close
+  // of the session for a household that runs the others — so it must answer with every
+  // optional module off.
   it('answers at all with every optional module off, and before any session exists', async () => {
     await setModules({ chores: false, meals: false, goals: false, familyNight: false, lists: false })
     const r = await recap('')
@@ -152,24 +143,19 @@ describe('planning · recap · gating', () => {
 })
 
 describe('planning · recap · the week, read back', () => {
-  // EVERYTHING HERE IS SEEDED BEFORE THE SESSION STARTS. The week the recap reads back
-  // is mostly not the session's doing — it is the household's calendar and meal plan —
-  // and keeping the fixtures on that side of `started_at` is what lets the group tests
-  // below assert on what THIS session changed without the scenery counting as a
-  // decision.
+  // EVERYTHING HERE IS SEEDED BEFORE THE SESSION STARTS, so the group tests below can
+  // assert what THIS session changed without the scenery counting as a decision.
   beforeAll(async () => {
     await setModules({ chores: true, meals: true, goals: true, familyNight: true, lists: true })
     weekStart = json(await call('GET', '/api/weekly-planning', kevin)).defaultWeekStart
     days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i))
     await call('POST', '/api/events', kevin, { title: 'Dance', startsAt: at(days[2], '16:00'), personId: lottieId })
-    // A genuinely busy Friday — six things on one day.
     for (let i = 0; i < 6; i++) {
       await call('POST', '/api/events', kevin, { title: `Thing ${i}`, startsAt: at(days[5], `0${i + 3}:00`), personId: ownerId })
     }
     await call('POST', '/api/recipes', kevin, { title: 'Crockpot chili', servings: 4, ingredients: [{ name: 'beans', amount: 1, unit: 'lb' }] })
     await call('POST', '/api/meals/plan', kevin, { date: days[1], mealType: 'dinner', title: 'Crockpot chili' })
-    // The wave-2 defect that unit tests could not see: planning a dinner MIRRORS it onto
-    // the calendar as a real event, so a week strip that reads events naively says
+    // Planning a dinner MIRRORS it onto the calendar, so a naive week strip says
     // "Dinner · chili" beside the chili it already shows.
     const { query } = await import('../src/platform/db')
     await query(
@@ -192,27 +178,18 @@ describe('planning · recap · the week, read back', () => {
     expect(titles(await recap(), 1)).toEqual([])
   })
 
-  // Retrofitted alongside the web change that needed it (the web test came first): a
-  // contract guard, because iOS parity will paint the same strip from this payload.
-  //
-  // The colour INPUTS travel, never a resolved colour. Whether an event paints in the
-  // household's family colour or its owner's is the client's `eventColor` decision, and
-  // it lives next to the calendar it has to match — resolving it here would give the
-  // recap strip and the month view two rules free to drift apart.
+  // A contract guard: the colour INPUTS travel, never a resolved colour. Resolving here
+  // would give the recap strip and the month view two rules free to drift apart.
   it('carries what a client needs to colour an event the way the calendar does', async () => {
     const r = await recap()
     const dance = r.days[2].events.find((e) => e.title === 'Dance')!
     expect(dance.personId).toBe(lottieId)
     expect(Array.isArray(dance.participantIds)).toBe(true)
-    // Present, and null when the person has no colour of their own — which is a real
-    // answer the client turns into the unassigned grey, not a missing field.
     expect(dance).toHaveProperty('personColor')
-    // No resolved colour on the wire — that is the whole point.
     expect(dance).not.toHaveProperty('colorHex')
   })
 
-  // A genuinely busy day must not push the column past its neighbours — the strip caps
-  // and reports the remainder rather than growing.
+  // The strip caps and reports the remainder rather than growing.
   it('caps a busy day and says how many it is holding back', async () => {
     const r = await recap()
     expect(r.days[5].events.length).toBeLessThanOrEqual(4)
@@ -232,8 +209,7 @@ describe('planning · recap · grouped by the module the decision lives in', () 
     expect(cal.detail).toMatch(/Date night/)
     expect(cal.stepKey).toBe('calendar')
 
-    // THE POINTER RULE. Undone elsewhere, the line stops claiming it — a stored count
-    // would still say 1.
+    // THE POINTER RULE: undone elsewhere, the line stops claiming it.
     await call('DELETE', `/api/events/${added.event.id}`, kevin)
     expect(group(await recap(), 'calendar')).toBeUndefined()
   })
@@ -249,11 +225,9 @@ describe('planning · recap · grouped by the module the decision lives in', () 
 
   it('counts only chores that have BOTH an owner and a day in the week', async () => {
     await call('POST', '/api/chores', kevin, { title: 'Furnace filter', personId: wallyId, rrule: 'FREQ=DAILY' })
-    // Nobody has taken this one: it is not a decision yet.
     await call('POST', '/api/chores', kevin, { title: 'Gate latch', personId: null, rrule: 'FREQ=DAILY' })
     const g = group(await recap(), 'tasks')!
-    // The rhythms module is off in this household, so the label does not claim it —
-    // the same rule as the module-off test above. With rhythms on it reads
+    // Rhythms is off here, so the label does not claim it; with rhythms on it reads
     // "Chores + Rhythms".
     expect(g.label).toBe('Chores')
     expect(g.count).toBe(1)
@@ -271,7 +245,6 @@ describe('planning · recap · grouped by the module the decision lives in', () 
       title: 'Air filter', satisfiedBy: 'completion', every: '3 months', nextDueAt: '2027-01-01T00:00:00Z',
     })
     expect(made.statusCode).toBe(201)
-    // Creating one is not settling it: the group still says nothing about rhythms.
     expect(group(await recap(), 'tasks')!.headline).not.toMatch(/rhythm/)
 
     expect((await call('POST', `/api/rhythms/${json(made).rhythm.id}/complete`, kevin)).statusCode).toBe(200)
@@ -293,9 +266,8 @@ describe('planning · recap · grouped by the module the decision lives in', () 
     expect(goalRes.statusCode).toBeLessThan(300)
     const goalId = json(goalRes).goal.id
 
-    // A PIN THE SESSION MERELY FOUND is not a decision — the goals step pre-selects it
-    // so the family doesn't have to re-pick it, and the recap must not read that
-    // pre-selection back as an answer.
+    // A PIN THE SESSION MERELY FOUND is not a decision: the goals step pre-selects it,
+    // and the recap must not read that back as an answer.
     expect(group(await recap(), 'goals')).toBeUndefined()
 
     expect((await call('PUT', '/api/weekly-planning/goals/focus', kevin, { sessionId, listId, goalId })).statusCode).toBe(200)
@@ -305,11 +277,8 @@ describe('planning · recap · grouped by the module the decision lives in', () 
   })
 
   it('reports only PINNED family-night parts, never the rotation’s suggestion', async () => {
-    // Nobody has touched the week: every part is a suggestion, so there is no decision
-    // to report and the group is absent.
     expect(group(await recap(), 'familyNight')).toBeUndefined()
 
-    // Pinning is the familyNight module's own write, exactly as the step does it.
     const board = json(await call('GET', `/api/weekly-planning/familyNight?weekStart=${weekStart}`, kevin))
     await call('POST', '/api/family-night/occurrence', kevin, {
       date: board.date, assignments: [{ partId: board.parts[0].partId, personId: lottieId }],
@@ -317,8 +286,6 @@ describe('planning · recap · grouped by the module the decision lives in', () 
     const g = group(await recap(), 'familyNight')!
     expect(g.count).toBe(1)
     expect(g.detail).toMatch(/Lottie/)
-    // The other parts are still the rotation's guess, so the line says so rather than
-    // naming whoever the rotation happens to point at.
     expect(g.detail).toMatch(/rotation/)
   })
 
@@ -326,7 +293,6 @@ describe('planning · recap · grouped by the module the decision lives in', () 
     expect((await call('PUT', '/api/weekly-planning/kids/answer', kevin, {
       sessionId, personId: wallyId, focus: { text: 'Reading' },
     })).statusCode).toBe(200)
-    // Half an answer is not a read-back.
     expect(group(await recap(), 'kids')).toBeUndefined()
 
     expect((await call('PUT', '/api/weekly-planning/kids/answer', kevin, {
@@ -350,7 +316,6 @@ describe('planning · recap · left alone on purpose', () => {
     await decide('connection', 'skipped')
     const r = await recap()
     expect(alone(r, 'Connection')!.badge).toBe('skipped')
-    // Nobody has reached the horizon scan: not a decision, so not on the record.
     expect(alone(r, 'Horizon scan')).toBeUndefined()
   })
 
@@ -390,9 +355,8 @@ describe('planning · recap · a last call on what nobody tagged', () => {
 
   it('says how long a note has waited, and how many sessions walked past it', async () => {
     const { query } = await import('../src/platform/db')
-    // Written a fortnight ago, and one session has FINISHED since. "Passed over" is
-    // derived from completed sessions, never counted into a column — so it can only say
-    // this once a session has actually finished.
+    // "Passed over" is derived from COMPLETED sessions, never counted into a column, so
+    // it can only say this once a session has finished.
     const older = json(await park({ note: 'Fix the fence' })).item.id
     await query(`update planning_parked_items set created_at = now() - interval '14 days' where id = $1`, [older])
     const before = (await recap()).lastCall.find((l) => l.note === 'Fix the fence')!
@@ -421,10 +385,9 @@ describe('planning · recap · the saved record', () => {
     expect((await recap()).savedAt).not.toBeNull()
   })
 
-  // THE CASE ONLY THIS STEP CAN REACH. `recap` has no `requiresModule`, so a household
-  // that turns everything off still arrives here — and the record must then be honest by
-  // subtraction: the gated groups go, the ungated ones stay, and nothing left on screen
-  // names a module that wasn't read.
+  // `recap` has no `requiresModule`, so a household with everything off still arrives
+  // here: the gated groups go, the ungated ones stay, and nothing names a module that
+  // wasn't read.
   it('drops exactly the groups whose module went off, and keeps the rest', async () => {
     const before = await recap()
     expect(before.groups.map((g) => g.key)).toEqual(expect.arrayContaining(['meals', 'tasks', 'goals', 'kids']))
@@ -432,8 +395,6 @@ describe('planning · recap · the saved record', () => {
     await setModules({ chores: false, meals: false, goals: false, familyNight: false, lists: false })
     const off = await recap()
     expect(off.groups.map((g) => g.key)).not.toEqual(expect.arrayContaining(['meals', 'tasks', 'goals', 'familyNight']))
-    // Kids and the calendar are never gated, so they survive — and the week strip is
-    // still the week, just without the dinners.
     expect(off.groups.map((g) => g.key)).toContain('kids')
     expect(off.days).toHaveLength(7)
     expect(off.days.every((d) => d.meal === null)).toBe(true)

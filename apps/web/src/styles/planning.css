@@ -1,37 +1,19 @@
-/* Weekly Planning — the session shell (WeeklyPlanning.tsx).
-   Built from the shared vocabulary (.btn, .modal-overlay/.modal-card, .wf-serif) plus
-   this module's own chrome. Measurements are the v4 design's (wp4.css `.s4*`), whose
-   tokens are already these tokens — so every colour here is a var and dark mode comes
-   for free. Never hardcode a hex in this file.
+/* Weekly Planning — the session shell (WeeklyPlanning.tsx). Built from the shared
+   vocabulary (.btn, .modal-overlay/.modal-card, .wf-serif) plus this module's own chrome.
+   Every colour is a var, so dark mode comes for free — never hardcode a hex here.
 
-   THE POINT OF THE LAYOUT: the step body is the content, and the chrome around it is
-   four things — a step counter, a title, the one question, a progress hair. If a new
-   zone shows up here, it is probably something v4 deliberately removed (the agenda
-   rail, the side column, the capacity read).
-
-   VOCABULARY
-     Lobby      — .wp-lobby*
-     Session    — .wp-head .wp-stepchip .wp-title .wp-ask .wp-week .wp-prog
-                  .wp-body .wp-foot .wp-skip .wp-primary .wp-next
-     Agenda     — .wp-sheet*
-     Record     — .wp-record*
-     Shared     — .wp-screen .wp-empty .wp-placeholder*
-*/
+   THE POINT OF THE LAYOUT: the step body is the content, and the chrome around it is four
+   things — a step counter, a title, the one question, a progress hair. */
 
 .wp-screen { padding: 24px 30px 40px; }
 .wp-empty { color: var(--ink-3); font-weight: 600; padding: 24px 2px; max-width: 62ch; line-height: 1.5; }
 
-/* ── In session ─────────────────────────────────────────────────────────────── */
-/* The session fills the frame and never scrolls the page: a header row, the body, and
-   a footer pinned to the bottom, so the primary button is in the same place on every
-   step.
-
-   It sizes to `.kiosk-main` (a flex column of definite height) — NOT to 100dvh. The
-   kiosk shell already owns the viewport and puts a topbar above this, so a viewport-
-   height child overflows by exactly the topbar and pushes the footer off screen. Note
-   `ScreenBoundary` renders its children directly, so this really is a flex child of
-   `.kiosk-main`; `min-height: 0` is what lets the middle row scroll instead of
-   stretching the grid. */
+/* ── In session ───────────────────────────────────────────────────────────────
+   The session fills the frame and never scrolls the page, so the primary button is in the
+   same place on every step. It sizes to `.kiosk-main` (a flex column of definite height)
+   — NOT to 100dvh: the kiosk shell owns the viewport and puts a topbar above this, so a
+   viewport-height child overflows by exactly the topbar and pushes the footer off screen.
+   `min-height: 0` is what lets the middle row scroll instead of stretching the grid. */
 .wp-in {
   padding: 0;
   display: grid;
@@ -57,38 +39,27 @@
 
 .wp-title { font-size: 31px; font-weight: 600; letter-spacing: -0.028em; line-height: 1.1; }
 .wp-ask { font-size: 15px; font-weight: 550; color: var(--ink-2); min-width: 0; }
-/* Where the mock put presence faces. The session is single-driver, so this names the
-   week being planned instead of inventing a room. */
 .wp-week { margin-left: auto; flex: none; font-size: 12.5px; font-weight: 650; color: var(--ink-2); }
-/* THE DOOR. Quiet on purpose — it is not competing with the step's primary, and a loud
-   exit on a decision surface invites you to take it. But visible without opening
-   anything, which is the whole point: the sheet already had one and it might as well not
-   have. */
+/* THE DOOR. Quiet on purpose, but visible without opening anything. */
 .wp-exit {
   flex: none; font: inherit; font-size: 12.5px; font-weight: 700;
   color: var(--ink-3); background: none; border: 0; padding: 6px 2px; cursor: pointer;
 }
 .wp-exit:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
 
-/* The 2px hair — the only progress indicator the design keeps. */
 .wp-prog {
   position: absolute; left: 0; right: 0; bottom: -10px;
   height: 2px; background: var(--hair);
 }
 .wp-prog > div { height: 100%; background: var(--primary); transition: width 0.25s ease; }
 
-/* A column so a step body can stretch; the placeholder centres itself in it via
-   `margin: auto` rather than the container forcing centring on real step content. */
+/* A column so a step body can stretch; the placeholder centres itself via `margin: auto`. */
 .wp-body { padding: 26px 28px 8px; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
 
 /* ── The parked-note handoff ──────────────────────────────────────────────────── */
-/* "You parked this for right here." Rendered by the SHELL above whichever step body is
-   up, because the banner is identical on all ten and each step's own controls are what
-   act on the note (see Handoff in WeeklyPlanning.tsx).
-
-   `flex: none` — every sibling in `.wp-body` that is not the step body has to be, or it
-   competes with the body for height. Tinted rather than carded: it is a nudge sitting on
-   top of the step, and a second card would read as a second thing to do. */
+/* Rendered by the SHELL above whichever step body is up (the banner is identical on all ten
+   steps). `flex: none` — every sibling in `.wp-body` that is not the step body has to be,
+   or it competes with the body for height. */
 .wp-handoff {
   flex: none;
   margin-bottom: 18px;
@@ -109,28 +80,20 @@
   background: var(--card); border: 1px solid var(--hair-2); border-radius: var(--r-md);
 }
 .wp-handoff-note { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 650; color: var(--ink); line-height: 1.4; }
-/* Who parked it and how long ago — the thing that makes an old note answerable ("I wrote
-   that three weeks ago and it still isn't done"). Quiet, on its own line. */
 .wp-handoff-note em { display: block; margin-top: 2px; font-size: 11.5px; font-weight: 600; font-style: normal; color: var(--ink-3); }
 .wp-handoff-acts { flex: none; display: flex; gap: 7px; }
 .wp-handoff-act { padding: 7px 13px; font-size: 12.5px; }
 .wp-handoff-act.is-drop { color: var(--ink-3); }
 
 @media (max-width: 700px) {
-  /* The two answers go full width under the note rather than crushing it into a
-     column the width of a word. */
   .wp-handoff-acts { width: 100%; }
   .wp-handoff-act { flex: 1; }
 }
 
 /* ── Editing a parked note (ParkedNoteEditor) ────────────────────────────────────
-   One editor, used by the shell's gold box and by the Horizon board, so a correction
-   looks and behaves the same wherever the note is on screen. It replaces the row it is
-   editing rather than opening a modal: the note is one line, and a dialog for one line
-   loses the list you were reading it in.
-
-   Lives in planning.css rather than planning-horizon.css because the SHELL loads this
-   file on every step, and the gold box is the shell's. */
+   One editor, used by the shell's gold box and by the Horizon board. It replaces the row
+   rather than opening a modal: a dialog for one line loses the list you were reading it in.
+   Lives here, not planning-horizon.css, because the SHELL loads this file on every step. */
 .wp-pne { display: flex; flex-direction: column; gap: 8px; width: 100%; min-width: 0; }
 .wp-pne-in {
   width: 100%; padding: 9px 11px;
@@ -140,8 +103,6 @@
 .wp-pne-in:focus { outline: none; border-color: var(--primary); }
 .wp-pne-in:disabled { opacity: 0.6; }
 .wp-pne-tags { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
-/* The park bar's chip, in the shell's stylesheet. Same shape as `.wph-tag` on purpose —
-   re-tagging a note and tagging it in the first place are the same choice. */
 .wp-pne-tag {
   padding: 5px 10px;
   font-size: 12px; font-weight: 700; color: var(--ink-2);
@@ -160,8 +121,6 @@
   padding: 14px 28px; background: var(--card); border-top: 1px solid var(--hair);
 }
 .wp-foot-sp { flex: 1; }
-/* "Skip this step" is a real answer, so it's a control — but a quiet one, because it
-   should never compete with the affirmative next to it. */
 .wp-skip {
   background: none; border: 0; padding: 13px 4px; cursor: pointer;
   font: inherit; font-size: 15px; font-weight: 700; color: var(--ink-2); white-space: nowrap;
@@ -171,7 +130,6 @@
 .wp-primary { font-size: 16px; padding: 14px 28px; }
 .wp-next { opacity: 0.72; font-weight: 600; margin-left: 6px; }
 
-/* ── Step body placeholder (removed as each step lands) ─────────────────────── */
 .wp-placeholder {
   max-width: 620px; margin: auto; text-align: center; flex: none;
   border: 1.5px dashed var(--hair); border-radius: var(--r-lg);
@@ -197,15 +155,11 @@
 .wp-lobby-go { width: 100%; justify-content: center; }
 
 /* ── Agenda sheet ───────────────────────────────────────────────────────────── */
-/* Progressive disclosure, not permanent furniture: the ten steps live behind the step
-   counter, so they cost nothing until someone asks where they are. */
 /* `width: min(520px, …)` against the VIEWPORT, not `max-width: 100%`.
-   `.modal-overlay` is `display: grid; place-items: center` with no explicit columns,
-   so its implicit column sizes to the item's max-content: a bare `width: 520px` makes
-   the column 520px wide, `100%` then resolves to 520px too, and the card sails past a
-   390px phone with its text clipped (the card's own `overflow-y: auto` makes overflow-x
-   `auto`, so it silently cropped rather than reflowing). Other modals dodge this by
-   never setting `width` — they inherit `.modal-card`'s `width: 100%; max-width: 480px`.
+   `.modal-overlay` is `display: grid; place-items: center` with no explicit columns, so
+   its implicit column sizes to the item's max-content: a bare `width: 520px` makes the
+   column 520px wide, `100%` then resolves to 520px too, and the card sails past a 390px
+   phone with its text clipped. Other modals dodge this by never setting `width`.
    The 48px is the overlay's own 24px padding, both sides. */
 .wp-sheet { width: min(520px, calc(100vw - 48px)); max-width: none; padding: 24px 26px 20px; }
 .wp-sheet-t { font-size: 24px; font-weight: 600; letter-spacing: -0.02em; margin-bottom: 4px; }
@@ -221,8 +175,8 @@
   color: var(--ink-2); text-align: left; cursor: pointer;
 }
 .wp-sheet-step:hover { color: var(--ink); }
-/* The name takes the slack so a long title ellipsises instead of shoving the
-   "you're here" marker off the card's edge. */
+/* The name takes the slack so a long title ellipsises instead of shoving the "you're here"
+   marker off the card's edge. */
 .wp-sheet-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wp-sheet-n {
   width: 22px; height: 22px; border-radius: 999px; background: var(--panel);
@@ -237,8 +191,6 @@
 .wp-sheet-f { display: flex; gap: 10px; margin-top: 16px; }
 .wp-sheet-f .btn { flex: 1; justify-content: center; }
 
-/* Starting over is destructive and permanent, so it is quiet until asked for and then
-   confirms in place — never a same-weight button next to "Close". */
 .wp-sheet-danger { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--hair-2); text-align: center; }
 .wp-sheet-danger-open,
 .wp-sheet-danger-no {
@@ -256,10 +208,8 @@
 .wp-sheet-danger-yes:disabled { opacity: 0.5; cursor: default; }
 
 /* ── The week stepper ──────────────────────────────────────────────────────────
-   The default is the week ahead, but a family getting in front of a trip can plan
-   further out. Deliberately NOT in the session header: once a session is running the
-   week it plans is settled, so switching lives on the entry surfaces (the lobby, the
-   agenda sheet, the record) where changing your mind is free. */
+   Deliberately NOT in the session header: once a session is running the week it plans is
+   settled, so switching lives on the entry surfaces where changing your mind is free. */
 .wp-weeknav { display: inline-flex; align-items: center; gap: 4px; }
 .wp-weeknav-l { font-size: 13px; font-weight: 750; color: var(--ink); min-width: 96px; text-align: center; }
 .wp-weekarrow {
@@ -278,15 +228,11 @@
   background: var(--card); border-radius: var(--r-xl); box-shadow: var(--sh-2);
   padding: 28px 32px 24px;
 }
-/* Leading with the week's read-back needs the width the read-back was designed for: a
-   seven-column strip beside two cards. A record with no panel (the recap step turned
-   off, or its chunk failing to load) keeps the 640px receipt it has always been. */
+/* A record with no panel (the recap step off) keeps the 640px receipt it has always been. */
 .wp-record.is-read { max-width: 1180px; }
 
 .wp-record-read { margin-top: 20px; }
 
-/* The per-step list is the SECOND reading of the week now, so it says what it is. Without
-   the panel above it there is nothing to distinguish it from, and this label is absent. */
 .wp-record-steps {
   margin-top: 26px; padding-top: 16px; border-top: 1px solid var(--hair-2);
   font-size: 11.5px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase;
@@ -295,8 +241,6 @@
 
 .wp-record.is-read .wp-record-list { margin-top: 6px; }
 
-/* A failed write or read, said plainly. Mirrors the loose-ends step own .wp-le-err so an
-   error reads the same wherever the session shows one. */
 .wp-err {
   max-width: 620px; width: 100%; margin: 0 auto 4px;
   border-radius: var(--r-lg); padding: 10px 14px;
@@ -327,9 +271,8 @@
 }
 
 /* ── Narrow (phone) ────────────────────────────────────────────────────────────
-   The design's phone frame is the same screen, not a lesser one: same counter, same
-   question, same single primary. Only the type scale and the padding come down, and
-   the week label drops out of the header (the body says which week it is). */
+   The design's phone frame is the same screen, not a lesser one: only the type scale and
+   the padding come down, and the week label drops out of the header. */
 @media (max-width: 720px) {
   .wp-screen { padding: 16px 16px 28px; }
   .wp-head { padding: 12px 18px 0; gap: 10px; }
@@ -338,10 +281,9 @@
   .wp-week { display: none; }
   .wp-body { padding: 18px 18px 6px; }
   .wp-foot { padding: 12px 18px; gap: 8px; }
-  /* nowrap: the affirmative is short but not one word ("Save the week"), and letting
-     it wrap turns the primary into a two-line block that dwarfs the footer. */
+  /* nowrap: the affirmative is short but not one word ("Save the week"), and letting it
+     wrap turns the primary into a two-line block that dwarfs the footer. */
   .wp-primary { flex: 1; justify-content: center; font-size: 15px; padding: 13px 18px; white-space: nowrap; }
-  /* The next-step hint is the first thing to go when the button gets tight. */
   .wp-next { display: none; }
   .wp-skip { font-size: 14px; padding: 12px 2px; }
   .wp-placeholder { padding: 32px 20px; }

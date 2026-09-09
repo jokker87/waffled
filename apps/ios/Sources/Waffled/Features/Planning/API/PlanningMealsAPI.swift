@@ -1,46 +1,29 @@
 import Foundation
 
-// Weekly Planning · step 7 "Meals" — this step's wire types, its ONE read and its three
-// writes. Ported from `apps/web/src/lib/api/planning/meals.ts`.
+// Weekly Planning · step 7 "Meals" — this step's wire types, its ONE read and its three writes.
+// Ported from `apps/web/src/lib/api/planning/meals.ts`.
 //
-// THE STEP OWNS NO DATA. Everything it shows is the existing meal plan and the existing
-// grocery board; deciding a night by hand goes through the meal-plan endpoints the Meals
-// screen already uses (`planMeal` / `clearMeal` / `scheduleMeal`). The only routes that
-// are this step's own are the three that cannot be composed from those: the seven-column
-// read, the fill, and the fill's undo — because only the fill can refuse a night somebody
-// already decided AND hand back the receipt the undo checks.
-//
-// Property names are camelCase and 1:1 with the server (`WaffledAPI.decoder` has no key
-// strategy), and every date/time is a `String`: `weekStart`, a night's `date` and a
-// trip's `dueOn` are household-local calendar labels that must never round-trip through a
-// device `Date`.
+// THE STEP OWNS NO DATA. Its three own routes are the ones that cannot be composed from the Meals
+// screen's endpoints, because only the fill can refuse a night somebody already decided AND hand
+// back a receipt. Every date/time is a `String`: they are household-local calendar labels that
+// must never round-trip through a device `Date`.
 extension WaffledAPI {
 
-    /// One calendar event on a night — the CONTEXT above the dish, which on this screen is
-    /// the only thing about the day that matters.
-    ///
-    /// `personId`/`participantIds` are on the wire (the server sends the colour INPUTS,
-    /// never a colour) and are decoded so nothing is silently dropped, but this step paints
-    /// its dot from `personColor` exactly as the web step does. The family-aware
-    /// `EventPalette` rule is deliberately NOT applied here: the web's Meals step uses the
-    /// owner's raw colour, and a dot that resolved differently on the phone than in the
-    /// browser would be the two platforms disagreeing about the same night.
+    /// One calendar event on a night — the CONTEXT above the dish. The dot is painted from
+    /// `personColor` exactly as the web step does; the family-aware `EventPalette` rule is
+    /// deliberately NOT applied, or the two platforms would disagree about the same night.
     struct PlanningNightEvent: Decodable, Identifiable, Sendable, Equatable {
         let id: String
         let title: String
-        /// An ISO instant (`2026-09-09T22:30:00.000Z`), not a day.
         let startsAt: String
         let allDay: Bool
         let personId: String?
         let personName: String?
-        /// A real `persons.color_hex` — data, so `Color(hexString:)`, never a `WF` token.
         let personColor: String?
         let participantIds: [String]
 
-        /// `?? []` / `?? false` on purpose: a payload missing one field must cost that
-        /// field, never the whole week. Swift is stricter than the web here — a missing
-        /// non-optional array THROWS, which would fail the entire `PlanningMealsView`
-        /// decode and blank a step that had seven perfectly good nights.
+        /// `?? []` / `?? false` on purpose: a payload missing one field must cost that field, not
+        /// the whole week — Swift throws on a missing non-optional array where the web shrugs.
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             id = try c.decode(String.self, forKey: .id)
@@ -58,29 +41,21 @@ extension WaffledAPI {
         }
     }
 
-    /// The dish on a night, already resolved for display: a recipe-backed slot reads its
-    /// recipe's title, a plate-backed one its plate's name, and a placeholder
-    /// ("Leftovers", "Eating out") its own text.
     struct PlanningNightDinner: Decodable, Sendable, Equatable {
         let entryId: String
         let title: String?
         let emoji: String?
         let recipeId: String?
-        /// A Meal Builder plate in the slot. `recipeId == nil && mealId != nil` is the
-        /// PLATE branch, and checking it first is what stops a plate called "Takeout
-        /// Tuesday" wearing the takeout tile and claiming "no cooking".
+        /// `recipeId == nil && mealId != nil` is the PLATE branch, checked first so a plate called
+        /// "Takeout Tuesday" can't claim "no cooking".
         let mealId: String?
         let imageUrl: String?
-        /// Who's cooking (`meal_plan_entries.cook_person_id`) — real data, so it is the
-        /// tile's attribution line whenever it is there.
         let cookName: String?
         let cookAvatar: String?
         let cookColor: String?
-        /// The recipe's total time, when it knows it. The tile's fallback sub-line.
         let minutes: Int?
     }
 
-    /// One of the seven columns: that night's events, then its dinner.
     struct PlanningMealsNight: Decodable, Identifiable, Sendable, Equatable {
         let date: String
         let events: [PlanningNightEvent]
@@ -98,16 +73,14 @@ extension WaffledAPI {
         private enum CodingKeys: String, CodingKey { case date, events, dinner }
     }
 
-    /// The grocery line — ONE line, not a panel: the board already builds itself from this
-    /// plan. `nil` on the view ⇒ the lists module is off and there is no line at all.
+    /// The grocery line — ONE line, not a panel. `nil` ⇒ the lists module is off.
     struct PlanningMealsGroceries: Decodable, Sendable, Equatable {
         let items: Int
         let checked: Int
     }
 
-    /// This week's shopping trip, read back off a real one-off chore — so it also shows on
-    /// the Tasks board as a genuine assignment. `nil` ⇒ no trip; `personId == nil` ⇒
-    /// planned but up for grabs, which is a real answer and not a blank.
+        /// Read back off a real one-off chore, so it also shows on the Tasks board. `personId ==
+        /// nil` ⇒ planned but up for grabs, a real answer.
     struct PlanningShoppingTrip: Decodable, Sendable, Equatable {
         let choreId: String
         let personId: String?
@@ -120,16 +93,12 @@ extension WaffledAPI {
     }
 
     struct PlanningMealsView: Decodable, Sendable, Equatable {
-        /// The week the SERVER named — snapped and floored. ECHO IT; never recompute a
-        /// week on the device (that is the bug this whole module was written after).
+        /// The week the SERVER named — snapped and floored. ECHO IT; never recompute one here.
         let weekStart: String
         let nights: [PlanningMealsNight]
-        /// The nights with no dinner, in order. What the fill is allowed to touch, and
-        /// nothing else.
         let emptyDates: [String]
         let groceries: PlanningMealsGroceries?
-        /// False ⇒ the chores module is off, so there is nowhere for a shopping trip to
-        /// live: show the plain line and NO control rather than a dead affordance.
+        /// False ⇒ the chores module is off: show the plain line and NO control, not a dead affordance.
         let choresOn: Bool
         let shopping: PlanningShoppingTrip?
 
@@ -148,13 +117,9 @@ extension WaffledAPI {
         }
     }
 
-    /// What a fill wrote — and everything the undo needs to prove a night is still that.
-    ///
-    /// `mealId` IS PART OF THE PROOF, not decoration. A slot holds a recipe, a saved plate
-    /// or a bare title, and a plate is recipe-less with THE PLATE'S NAME as its title — so
-    /// a night filled with the title "BBQ Sunday" and a night since hand-changed to the
-    /// PLATE "BBQ Sunday" agree on `entryId`, `recipeId` and `title` (upsert keeps the row
-    /// id). Round-trip every field untouched; `json` below is why it can be.
+    /// What a fill wrote — and everything the undo needs to prove a night is still that. `mealId`
+    /// IS PART OF THE PROOF: a plate is recipe-less with THE PLATE'S NAME as its title, so a filled
+    /// title and a hand-picked plate of that name agree on `entryId`, `recipeId` and `title`.
     struct PlanningFilledNight: Decodable, Identifiable, Sendable, Equatable {
         let date: String
         let entryId: String
@@ -164,11 +129,8 @@ extension WaffledAPI {
 
         var id: String { date }
 
-        /// The claim, back on the wire. EXPLICIT `.null` for every absent field: the
-        /// server normalizes both sides to null before comparing, and a body that simply
-        /// omitted `mealId` would still compare equal — but building it by hand with
-        /// `if let` is how the field quietly stops travelling at all, which is the one
-        /// dimension that tells a filled title from a hand-picked plate of that name.
+        /// EXPLICIT `.null` for every absent field: building it with `if let` is how `mealId`
+        /// quietly stops travelling, and it is the one dimension that tells a title from a plate.
         var json: JSONValue {
             .object([
                 "date": .string(date),
@@ -197,10 +159,8 @@ extension WaffledAPI {
 
     struct PlanningMealsUndo: Decodable, Sendable, Equatable {
         let weekStart: String
-        /// Nights actually cleared.
         let cleared: [String]
-        /// Nights left alone because somebody decided them since the fill. An undo has no
-        /// business overwriting a decision, so these are reported rather than taken back.
+        /// Nights left alone because somebody decided them since the fill — reported, not undone.
         let kept: [String]
         let view: PlanningMealsView
 
@@ -232,18 +192,14 @@ extension WaffledAPI {
 
     // MARK: - The read and the three writes
 
-    /// The seven columns for the week the shell handed us. `choreId` is the shopping chore
-    /// the client last saw — a HINT that keeps a chore renamed on the Tasks board
-    /// recognised as this week's trip instead of spawning a second one.
+    /// `choreId` is a HINT that keeps a renamed chore recognised instead of spawning a second.
     func planningMeals(weekStart: String, choreId: String? = nil) async throws -> PlanningMealsView {
         var path = "/api/weekly-planning/meals?weekStart=\(PlanningQuery.esc(weekStart))"
         if let choreId, !choreId.isEmpty { path += "&choreId=\(PlanningQuery.esc(choreId))" }
         return try await getJSON(path, as: PlanningMealsView.self)
     }
 
-    /// "Plan the rest for me" — fills ONLY the nights with no dinner and hands back the
-    /// receipt the undo checks. See `PlanningMealsWire.fillBody` for why `cards` is
-    /// three-way and why iOS sends it absent.
+    /// Fills ONLY the nights with no dinner. See `PlanningMealsWire.fillBody` for the `cards` rule.
     func planningMealsFill(
         weekStart: String, cards: [PlanningMealsCard]? = nil
     ) async throws -> PlanningMealsFill {
@@ -253,7 +209,6 @@ extension WaffledAPI {
             as: PlanningMealsFill.self)
     }
 
-    /// Take back what the fill wrote — and nothing else.
     func planningMealsUndo(
         weekStart: String, filled: [PlanningFilledNight]
     ) async throws -> PlanningMealsUndo {
@@ -263,13 +218,8 @@ extension WaffledAPI {
             as: PlanningMealsUndo.self)
     }
 
-    /// Assign the shopping trip, or clear it with `dueOn: nil`. ONE chore per week, so
-    /// this is an upsert however many times the family changes its mind.
-    ///
-    /// The server refuses a `dueOn` outside the week (400) and requires `chore.manage` to
-    /// put the trip on anybody other than yourself (403) — see
-    /// `PlanningMealsShopper.mayAssign`, which is the same rule stated client-side so the
-    /// picker doesn't offer a tap that is going to bounce.
+    /// Assign the shopping trip, or clear it with `dueOn: nil` — an upsert, ONE chore per week. The
+    /// server refuses a `dueOn` outside the week (400) and needs `chore.manage` for anybody else (403).
     func planningMealsSetShopper(
         weekStart: String, dueOn: String?, personId: String?, dueTime: String?, choreId: String?
     ) async throws -> PlanningMealsShopperResult {
@@ -281,16 +231,10 @@ extension WaffledAPI {
             as: PlanningMealsShopperResult.self)
     }
 
-    /// One night of a week the family approved in the shared "Plan my week" planner.
-    ///
-    /// Only the four fields the fill actually writes: the rest of a plan card is display,
-    /// and trusting a client's `servings` or `note` would be storing a claim nobody checks
-    /// (the server's `parsePlanCards` reads exactly these and drops the rest).
+    /// Only the four fields the fill writes: a client's `servings` or `note` is a claim nobody checks.
     struct PlanningMealsCard: Sendable, Equatable {
         let date: String
-        /// The step plans DINNERS. A card naming another meal is DROPPED server-side
-        /// rather than quietly rewritten — silently moving somebody's lunch to 6pm is
-        /// worse than not planning it.
+        /// The step plans DINNERS. A card naming another meal is DROPPED server-side.
         var mealType: String = "dinner"
         var title: String = ""
         var recipeId: String?
@@ -306,27 +250,14 @@ extension WaffledAPI {
     }
 }
 
-/// The three bodies as PURE FUNCTIONS, so the one that is easy to get catastrophically
-/// wrong can be asserted without a network.
+/// The three bodies as PURE FUNCTIONS, so the one easy to get catastrophically wrong is testable.
 enum PlanningMealsWire {
 
-    /// `cards` IS THREE-WAY, and the three cases are genuinely different writes:
-    ///
-    ///   · **absent** (`nil` here ⇒ the key is not in the body at all) — the server drafts
-    ///     the empty nights itself. This is the "headless fill" `meals.ts` names as what
-    ///     iOS parity needs, and it is what this app sends.
-    ///   · **a real array** — apply the week the family approved, and only onto the empty
-    ///     nights.
-    ///   · **present but not a usable list** (a `null`, a string, an empty array) — the
-    ///     server writes NOTHING. `body.cards === undefined ? null : (parsePlanCards(...)
-    ///     ?? [])`, and an empty `chosen` skips the drafting branch entirely, so the fill
-    ///     loop has nothing to iterate.
-    ///
-    /// Which is why this must never be written as `body["cards"] = cards.map(...) ?? .null`
-    /// : sending an explicit null to mean "you choose" writes nothing at all, and the
-    /// footer would report a week it never planned. An EMPTY array is passed through as a
-    /// present empty array rather than collapsed to absent, for the same reason — a caller
-    /// that genuinely approved nothing must not silently get a server-drafted week.
+    /// `cards` IS THREE-WAY: **absent** (`nil` here ⇒ the key is not in the body) means the server
+    /// drafts the empty nights, which is what iOS sends; **a real array** applies the approved week;
+    /// **present but not a usable list** writes NOTHING. So never write
+    /// `body["cards"] = cards.map(...) ?? .null` — the footer would report a week never planned.
+    /// An EMPTY array is passed through rather than collapsed to absent, for the same reason.
     static func fillBody(
         weekStart: String, cards: [WaffledAPI.PlanningMealsCard]?
     ) -> [String: JSONValue] {
@@ -342,10 +273,9 @@ enum PlanningMealsWire {
         ["weekStart": .string(weekStart), "filled": .array(filled.map(\.json))]
     }
 
-    /// EXPLICIT NULLS, all three of them. `dueOn: null` is "there is no trip this week"
-    /// (the chore is removed rather than orphaned on somebody's board), `personId: null` is
-    /// "up for grabs", and `dueTime: null` is "no set time" — none of them is "leave it as
-    /// it was", so an `if let` body would turn every clear into a silent no-op.
+    /// EXPLICIT NULLS, all three. `dueOn: null` is "no trip this week" (the chore is removed),
+    /// `personId: null` is "up for grabs", `dueTime: null` is "no set time" — none of them means
+    /// "leave it as it was", so an `if let` body would turn every clear into a silent no-op.
     static func shopperBody(
         weekStart: String, dueOn: String?, personId: String?, dueTime: String?, choreId: String?
     ) -> [String: JSONValue] {
@@ -359,17 +289,11 @@ enum PlanningMealsWire {
     }
 }
 
-/// Who may be handed the shopping trip, stated client-side so the picker never offers a
-/// tap the server is going to refuse.
-///
-/// The rule is the CHORES module's own, not one this step invented: putting the trip on
-/// yourself, or leaving it up for grabs, is anybody's; putting it on somebody ELSE (or
-/// taking it off them) is `chore.manage`. `meals.routes.ts` enforces exactly this, and
-/// `TasksStep` gates its face row the same way.
+/// Who may be handed the shopping trip, stated client-side so the picker never offers a tap the
+/// server will refuse. The rule is the CHORES module's: somebody ELSE is `chore.manage`.
 enum PlanningMealsShopper {
     static func mayAssign(personId: String?, myPersonId: String?, canManage: Bool) -> Bool {
         if canManage { return true }
-        // Up for grabs is a real answer and needs no capability.
         guard let personId else { return true }
         // A device with no person of its own (a kiosk identity) cannot claim "that's me".
         guard let myPersonId else { return false }

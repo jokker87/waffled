@@ -1,5 +1,4 @@
-// Static family avatars from the design. Becomes real persons (avatar_emoji +
-// color) once the kiosk reads /api/persons.
+// Static family avatars from the design; real persons come from /api/persons.
 export const AVATARS: Record<string, string> = {
   kevin: '🐻',
   kelly: '🦊',
@@ -13,8 +12,7 @@ export function Avatar({ person, size = 'md' }: { person: string; size?: 'sm' | 
 
 type AvSize = 'sm' | 'md' | 'lg'
 
-/// Whatever a synced person looks like wherever they turn up: goal members, log
-/// participants, a planning row's owner. Only the four fields a face needs.
+/// Whatever a synced person looks like wherever they turn up — only the four fields a face needs.
 export interface AvPerson {
   personId?: string | null
   name?: string | null
@@ -25,10 +23,8 @@ export interface AvPerson {
 /// The neutral tint for a person with no colour of their own.
 const NO_COLOR = '#A6A29B'
 
-/// A person's colour as a soft background wash. `22` is the alpha suffix every face in
-/// the app uses, and this exists because the surfaces with their OWN face element — a
-/// tappable hand-over button, the planning owner chip — can share the colour rule even
-/// though they can't share the markup.
+/// A person's colour as a soft background wash. `22` is the alpha suffix every face in the
+/// app uses; surfaces with their OWN face element share the colour rule, not the markup.
 export const avTint = (colorHex?: string | null): string => `${colorHex ?? NO_COLOR}22`
 
 /// One real person's face — `Avatar` above is the static design one, keyed by name.

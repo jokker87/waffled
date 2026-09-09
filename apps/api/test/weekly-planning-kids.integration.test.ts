@@ -1,14 +1,12 @@
-// Weekly Planning · step 9 — Kids. "What's your week about?"
+// Weekly Planning · step 9 — Kids.
 //
-// Both answers are picked from things that already exist, so these tests are mostly
-// about PROVENANCE: focus options come out of that child's own goals, their own overdue
-// chores and the standing chores they carry — never a catalog; look-forward-to options
-// are events already on THEIR week; and one kid's goal, chore or event never appears on
-// the other kid's card. An off module contributes nothing rather than 403ing the step.
+// Mostly about PROVENANCE: focus options come out of that child's own goals and chores
+// (never a catalog), look-forward-to options are events already on THEIR week, and one
+// kid's row never appears on the other's card. An off module contributes nothing rather
+// than 403ing the step.
 //
-// The two answers have no module to land in, so they live on
-// `planning_session_steps.data` and must survive a re-read — the read-back frame is the
-// part the kids remember, and `setDecisionData` only reaches the server when answered.
+// The answers have no module to land in, so they live on `planning_session_steps.data`
+// and must survive a re-read — `setDecisionData` only reaches the server when answered.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from './helpers/pg'
 import jwt from 'jsonwebtoken'
@@ -26,8 +24,7 @@ function mint(sub: string): string {
 }
 
 // lambda-api reads the query off `queryStringParameters`, NOT off the path — a `?x=y`
-// left in `path` is silently invisible to the handler. Split it here, as the shell's
-// weekly-planning.integration.test.ts does.
+// left in `path` is silently invisible to the handler.
 function call(method: string, path: string, token?: string, body?: unknown) {
   const headers: Record<string, string> = {}
   if (token) headers.authorization = `Bearer ${token}`
@@ -107,14 +104,12 @@ const titles = (o: { title: string }[]) => o.map((x) => x.title)
 const answer = (personId: string, body: Record<string, unknown>) =>
   call('PUT', '/api/weekly-planning/kids/answer', kevin, { sessionId, personId, ...body })
 
-// weekStart + n days, as a plain date. UTC math on a date string — the same rule the
-// rest of the module follows, so no timezone can shift which day a fixture lands on.
+// UTC math on a date string, so no timezone can shift which day a fixture lands on.
 const day = (n: number) => {
   const d = new Date(`${weekStart}T00:00:00Z`)
   d.setUTCDate(d.getUTCDate() + n)
   return d.toISOString().slice(0, 10)
 }
-// Midday UTC: safely the same calendar day in America/Chicago whatever the offset.
 const at = (n: number) => `${day(n)}T18:00:00.000Z`
 const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const weekdayOf = (n: number) => WD[new Date(`${day(n)}T00:00:00Z`).getUTCDay()]
@@ -175,15 +170,14 @@ beforeAll(async () => {
     title: "Mum's birthday surprise", goalListId: privateList, goalType: 'count', unit: 'steps',
     targetValue: 5, trackingMode: 'each_tracks', participantIds: [wallyId],
   })
-  // A goal that belongs to the grown-ups: never a kid's focus option.
   await goal({
     title: 'Run a 10k', goalListId: kidsList, goalType: 'count', unit: 'km',
     targetValue: 10, trackingMode: 'each_tracks', participantIds: [kevinId],
   })
 
-  // Two distinct days logged in the CURRENT household week, plus a big pile of lifetime
-  // amount from long ago. The card must say "2 of 5 this week" — the habit axis — and
-  // never the lifetime 99. Anchored to date_trunc so it lands right on any weekday.
+  // Two days logged in the CURRENT household week plus a lifetime pile from long ago: the
+  // card must say "2 of 5 this week", never the lifetime 99. Anchored to date_trunc so it
+  // lands right on any weekday.
   const logAt = (goalId: string, amount: number, atSql: string) =>
     query(
       `insert into goal_logs (household_id, goal_id, person_id, amount, logged_at)
@@ -212,7 +206,6 @@ beforeAll(async () => {
   cVacuum = json(await call('POST', '/api/chores', kevin, {
     title: 'Vacuum upstairs', emoji: '🧺', personId: lottieId, rrule: 'FREQ=WEEKLY;BYDAY=SA',
   })).chore.id
-  // Somebody else's chore: never on a kid's card.
   await call('POST', '/api/chores', kevin, { title: 'Pay the bills', personId: kevinId, rrule: 'FREQ=WEEKLY;BYDAY=SU' })
 
   // ── Their week ───────────────────────────────────────────────────────────
@@ -220,7 +213,6 @@ beforeAll(async () => {
   eSoccer = await event({ title: 'Soccer game', startsAt: at(2), participantIds: [wallyId] })
   await event({ title: 'Scouts', startsAt: at(3), participantIds: [wallyId] })
   ePartyId = await event({ title: 'Birthday party', startsAt: at(6), participantIds: [lottieId], isCountdown: true })
-  // The grown-ups', and one in a later week: neither belongs on a kid's card.
   await event({ title: 'Date night', startsAt: at(5), participantIds: [kevinId, kellyId] })
   eDentist = await event({ title: 'Dentist', startsAt: at(9), participantIds: [wallyId] })
 
@@ -246,16 +238,14 @@ describe('planning · kids · gating', () => {
     await call('PATCH', '/api/household/modules', kevin, { weeklyPlanning: true })
   })
 
-  // The catalog gives this step no `requiresModule` — it reads TWO separately
-  // toggleable modules, so gating on either would delete the step for a household that
-  // only runs the other. A module that is off contributes nothing instead.
+  // No `requiresModule`: this reads TWO separately toggleable modules, so gating on
+  // either would delete the step for a household that runs the other.
   it('still answers with goals off, and simply offers no goal-shaped options', async () => {
     await call('PATCH', '/api/household/modules', kevin, { goals: false })
     const v = await view()
     expect(v.sources.goals).toBe(false)
     const w = v.kids.find((k) => k.name === 'Wally')!
     expect(w.focusOptions.some((o) => o.source === 'goal')).toBe(false)
-    // …and the chore-shaped ones are still there, because chores is still on.
     expect(w.focusOptions.some((o) => o.source === 'chore')).toBe(true)
     await call('PATCH', '/api/household/modules', kevin, { goals: true })
   })
@@ -267,29 +257,24 @@ describe('planning · kids · gating', () => {
     const w = v.kids.find((k) => k.name === 'Wally')!
     expect(w.chores).toEqual([])
     expect(w.focusOptions.some((o) => o.source === 'chore' || o.source === 'routine')).toBe(false)
-    // Their week is the calendar, which is never gated — it survives.
     expect(titles(w.week)).toContain('Soccer game')
-    // Stars are funded by chores; with chores off there is no economy to show.
     expect(w.stars).toBeNull()
     await call('PATCH', '/api/household/modules', kevin, { chores: true })
   })
 })
 
 describe('planning · kids · which week', () => {
-  // A family getting in front of a trip can start a session for a week further out (the
-  // plan doc says so outright). The week therefore comes off the SESSION, never off the
-  // request: a client that forgets to echo `weekStart` must not be answered with the
-  // default week's events and then told its perfectly real pick isn't an option.
+  // A session may plan a week further out, so the week comes off the SESSION, never the
+  // request — a client that forgets to echo `weekStart` must not be answered with the
+  // default week's options.
   it('reads the week the session is about, without being told which it is', async () => {
     const later = json(await call('POST', '/api/weekly-planning/session', kevin, { weekStart: day(7) })).session
     expect(later.weekStart).toBe(day(7))
     const v: KidsView = json(await call('GET', `/api/weekly-planning/kids?sessionId=${later.id}`, kevin))
     expect(v.weekStart).toBe(day(7))
     const w = v.kids.find((k) => k.name === 'Wally')!
-    // That week's event, not this week's.
     expect(labels(w.forwardOptions)).toEqual(['Dentist'])
 
-    // …and the answer is validated against THAT week's options, again unprompted.
     const key = w.forwardOptions[0].key
     const r = await call('PUT', '/api/weekly-planning/kids/answer', kevin, {
       sessionId: later.id, personId: wallyId, forward: { key },
@@ -318,10 +303,8 @@ describe('planning · kids · whose card is it', () => {
     const l = await kid('Lottie')
     expect(titles(w.week)).toEqual(['Soccer game', 'Scouts'])
     expect(titles(l.week)).toEqual(['Birthday party'])
-    // The grown-ups' evening, and an event in a later week, are on neither card.
     expect([...titles(w.week), ...titles(l.week)]).not.toContain('Date night')
     expect([...titles(w.week), ...titles(l.week)]).not.toContain('Dentist')
-    // Chips read the way the week runs: the weekday, from the household's own zone.
     expect(w.week.find((e) => e.title === 'Soccer game')!.when).toContain(weekdayOf(2))
 
     expect(titles(w.chores)).toEqual(expect.arrayContaining(['Homework before screens', 'Get the garage done']))
@@ -341,8 +324,7 @@ describe('planning · kids · the focus options come from what already exists', 
     // A habit is THIS PERIOD's count. The lifetime 97+2 must never be what it says.
     expect(opt.detail).toBe('2 of 5 this week')
     expect(opt.detail).not.toContain('99')
-    // The whole goal rides along so the client renders the number through the shared
-    // display helper rather than inlining `totalProgress`.
+    // The whole goal rides along so the client uses the shared display helper.
     expect(opt.goal).toMatchObject({ id: gRead, goalType: 'habit', periodDone: 2, totalProgress: 99, habitTargetPerPeriod: 5 })
   })
 
@@ -359,13 +341,11 @@ describe('planning · kids · the focus options come from what already exists', 
     const opt = (await kid('Wally')).focusOptions.find((o) => o.id === cHomework)!
     expect(opt).toBeTruthy()
     expect(opt.source).toBe('routine')
-    // No detail: nothing is WRONG with it. That is the mock's third option exactly.
     expect(opt.detail).toBeNull()
   })
 
   it('never leaks a private goal list to a driver who is not in it', async () => {
     expect((await kid('Wally')).focusOptions.some((o) => o.id === gSecret)).toBe(false)
-    // …and it is genuinely there for someone who IS a member.
     expect((await kid('Wally', kelly)).focusOptions.some((o) => o.id === gSecret)).toBe(true)
   })
 
@@ -404,27 +384,21 @@ describe('planning · kids · the look-forward-to options come from their week',
 
     const l = await kid('Lottie')
     expect(labels(l.forwardOptions)).toEqual(['Birthday party'])
-    // A countdown event is one the family is ALREADY looking forward to.
     expect(l.forwardOptions[0].emoji).toBe('🎉')
   })
 
-  // Planning a dinner MIRRORS it onto the calendar as a real event with everyone on
-  // it (origin 'meal_plan'), so every kid's week filled up with "Dinner · chicken"
-  // and the look-forward-to options became the meal plan. Nobody is looking forward
-  // to Wednesday's spaghetti, and the Meals step already owns the week's dinners.
-  // The same exclusion `goal-calendar.ts` makes when it picks events for a goal.
+  // Meal-plan mirror events are excluded from a kid's week — see MIRROR_ORIGINS in
+  // steps/kids.ts.
   it('leaves the meal plan off a kid’s week and out of what they look forward to', async () => {
     const dinnerId = json(await call('POST', '/api/events', kevin, {
       title: 'Dinner · chicken', startsAt: at(2), participantIds: [wallyId],
     })).event.id
-    // Stamp it the way syncMealEventForEntry stamps its mirror.
     const db = (await import('../src/platform/db')).query
     await db("update events set origin = 'meal_plan' where id = $1", [dinnerId])
 
     const w = await kid('Wally')
     expect(w.week.map((e) => e.title)).not.toContain('Dinner · chicken')
     expect(labels(w.forwardOptions)).not.toContain('Dinner · chicken')
-    // The real ones still stand, so this is an exclusion and not an empty read.
     expect(labels(w.forwardOptions).length).toBeGreaterThan(0)
 
     // Soft delete, the way the app does — a hard delete trips event_participants' FK.
@@ -439,7 +413,6 @@ describe('planning · kids · answering, and reading it back', () => {
     const forwardKey = before.forwardOptions.find((o) => o.eventId === eSoccer)!.key
 
     expect((await answer(wallyId, { focus: { key: focusKey } })).statusCode).toBe(200)
-    // Half-answered is NOT settled: the read-back frame needs both.
     expect((await kid('Wally')).settled).toBe(false)
 
     expect((await answer(wallyId, { forward: { key: forwardKey } })).statusCode).toBe(200)
@@ -447,7 +420,6 @@ describe('planning · kids · answering, and reading it back', () => {
     expect(w.settled).toBe(true)
     expect(w.focus).toMatchObject({ source: 'goal', id: gRead, label: 'Read 20 minutes a day' })
     expect(w.forward).toMatchObject({ eventId: eSoccer, label: 'Soccer game' })
-    // Lottie is untouched — one card's answer never lands on the other.
     expect((await kid('Lottie')).settled).toBe(false)
   })
 
@@ -480,8 +452,6 @@ describe('planning · kids · answering, and reading it back', () => {
   it('writes to the session, not to the goals or chores modules', async () => {
     const { query } = await import('../src/platform/db')
     const { rows } = await query<{ is_featured: boolean }>(`select is_featured from goals where id = $1`, [gRead])
-    // Step 6 owns `is_featured`. A kid naming their one thing is not the family pinning
-    // a goal, and this step must not quietly do it for them.
     expect(rows[0].is_featured).toBe(false)
     const step = await query<{ data: { kids?: Record<string, unknown> } }>(
       `select data from planning_session_steps where session_id = $1 and step_key = 'kids'`, [sessionId]
@@ -493,9 +463,8 @@ describe('planning · kids · answering, and reading it back', () => {
 describe('planning · kids · same as last week', () => {
   it('copies the previous session’s answers, dropping anything that no longer stands', async () => {
     const { query } = await import('../src/platform/db')
-    // A finished session for the week BEFORE this one, holding two answers for Wally:
-    // one that still resolves (his reading goal) and one that no longer does (a goal
-    // that has since been deleted). Only the first may come back.
+    // Last week's finished session holds one answer that still resolves and one that
+    // doesn't (a deleted goal). Only the first may come back.
     const gone = '11111111-1111-1111-1111-111111111111'
     const prior = await query<{ id: string }>(
       `insert into planning_sessions (household_id, week_start, status, completed_at)
@@ -520,17 +489,13 @@ describe('planning · kids · same as last week', () => {
     )
     expect((await view()).canRepeat).toBe(true)
 
-    // Wipe this session's answers so the copy is unambiguous.
     await answer(wallyId, { focus: null, forward: null })
     await answer(lottieId, { focus: null, forward: null })
 
     expect((await call('POST', '/api/weekly-planning/kids/repeat', kevin, { sessionId })).statusCode).toBe(200)
     const w = await kid('Wally')
-    // The vanished goal is dropped rather than proudly read back…
     expect(w.focus).toBeNull()
-    // …while free text, which refers to nothing, copies verbatim.
     expect(w.forward).toMatchObject({ eventId: null, label: 'Cousins visiting' })
-    // And a referent that still stands comes straight over.
     expect((await kid('Lottie')).focus).toMatchObject({ id: gRecital })
   })
 })
