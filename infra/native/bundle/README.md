@@ -79,13 +79,23 @@ infra/native/bundle/build.sh clean [--all]         # rm ./out (and the cache wit
   re-runs. `build` always starts from an empty outdir and always rebuilds api + web from the
   checked-out source (so the bundle's `waffledVersion` is whatever the tree says).
 
-**How CI will do it** (Phase 3 packaging job, macOS arm64 runner): `build.sh fetch && build.sh
-build "$RUNNER_TEMP/runtime" && build.sh verify "$RUNNER_TEMP/runtime"`, with
-`WAFFLED_BUNDLE_CACHE` under `actions/cache` keyed on the pins. Then codesign every Mach-O in
-the tree with the Developer ID (Postgres dylibs and Caddy included — EDB's signature does not
-survive our notarization and Caddy ships ad-hoc signed), embed under
-`Resources/runtime/`, and notarize. Signing changes the bytes, so **the manifest must be
-written after signing** — CI should re-run `node manifest.mjs write` (or `build.sh` grows a
+**How CI does it today** (`.github/workflows/native-runtime.yml`, `runtime-macos` job on
+`macos-15`, arm64): exactly the three commands below — `build.sh fetch && build.sh build
+"$RUNNER_TEMP/runtime" && build.sh verify "$RUNNER_TEMP/runtime"` — with
+`WAFFLED_BUNDLE_CACHE` (`~/Library/Caches/WaffledBundle`) restored/saved by `actions/cache`,
+keyed on a hash of just the pin lines at the top of `build.sh` (`NODE_VERSION`,
+`PG_NPM_VERSION`, `PG_VERSION`, `PG_CLIENT_VERSION`, `CADDY_VERSION`, `POWERSYNC_VERSION`,
+`PNPM_SPEC`) rather than the whole file, so an unrelated script edit doesn't force a ~600 MB
+re-download — only bumping a pin does. `WAFFLED_BUNDLE_NPM_CI=1` is set so `build` always runs
+`npm ci` for api/web. No `actions/setup-node`/pnpm step is needed or used: `fetch` downloads
+the pinned Node first and every subsequent step (including `npx pnpm@11.0.9`) runs through
+*that* Node with its `bin/` prepended to `PATH`, never the runner's own.
+
+**Phase 3 will extend the same job** (packaging): codesign every Mach-O in the tree with the
+Developer ID (Postgres dylibs and Caddy included — EDB's signature does not survive our
+notarization and Caddy ships ad-hoc signed), embed under `Resources/runtime/`, and notarize.
+Signing changes the bytes, so **the manifest must be written after signing** — CI should
+re-run `node manifest.mjs write` (or `build.sh` grows a
 `sign` step) after codesign and `verify` once more.
 
 ## Components, sources, sizes (measured build, 2026-09-04, `a506c352`)

@@ -622,6 +622,20 @@ default fell forward (public 8082, sync 8083, api 3001, powersync 8084, postgres
 
 The plan's Phase 2 exit criterion is under 60s; the test fails if a cold start exceeds it.
 
+## CI
+
+`.github/workflows/native-runtime.yml` runs on every PR/push touching `apps/runtime/**` or
+`infra/native/bundle/**`:
+
+- `runtime-go` (ubuntu-latest): `gofmt -l`, `go vet ./...`, `go test ./...` — the unit suite
+  above, no bundle. Fast, fails fast.
+- `runtime-macos` (macos-15, Apple silicon): `infra/native/bundle/build.sh fetch|build|verify`
+  assembles the real bundle (`WAFFLED_BUNDLE_CACHE` cached across runs, keyed on the pins in
+  `build.sh`), then `go build ./cmd/waffled-runtime` and
+  `WAFFLED_BUNDLE=<outdir> go test -tags integration -p 1 ./...` — the same integration suite
+  above, boot-testing the stack from an empty data dir on free ports. This is the Phase 2 exit
+  criterion's automated check (`docs/product/native-mac-plan.md` §7).
+
 ## Not this task
 
 The updater is deliberately absent, with a seam left for it.
