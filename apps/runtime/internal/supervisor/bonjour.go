@@ -256,10 +256,13 @@ func (s *Supervisor) bonjourPoll(ctx context.Context, stop <-chan struct{}, cur 
 func (s *Supervisor) advertise(ctx context.Context, census bonjour.Census) advertisement {
 	a := plannedAdvertisement(census)
 	inst := bonjour.Instance{
-		Name:    a.name,
-		Port:    s.plan.Ports.Public,
-		URL:     s.advertisedURL(),
-		Version: s.waffledVersion(),
+		Name: a.name,
+		Port: s.plan.Ports.Public,
+		URL:  s.advertisedURL(),
+		// The same accessor the downgrade guard, the snapshot names and `status` use: a
+		// second copy of "what version is this" would let the TXT record and the status
+		// output disagree the first time either grew a fallback.
+		Version: s.bundleVersion(),
 		Setup:   a.setup,
 	}
 	st := bonjourState{Name: inst.Name, Port: inst.Port, Setup: inst.Setup}
@@ -434,13 +437,6 @@ func (s *Supervisor) advertisedURL() string {
 		return "http://" + h + ":" + strconv.Itoa(s.plan.Ports.Public)
 	}
 	return ""
-}
-
-func (s *Supervisor) waffledVersion() string {
-	if s.manifest == nil {
-		return ""
-	}
-	return s.manifest.WaffledVersion
 }
 
 // householdCensus asks the database how many households this install has. A failure is
