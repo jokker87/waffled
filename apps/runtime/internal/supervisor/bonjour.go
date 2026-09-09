@@ -139,10 +139,17 @@ type advertisement struct {
 	settled bool
 }
 
-// computerName goes through a package var so a test can count how often this Mac is asked
-// its name — it costs a scutil fork with a three-second timeout, which a settled install
-// must never pay. Always the real function in production.
-var computerName = bonjour.ComputerName
+// computerName is asked at most ONCE per process, and only if something needs it. Asking
+// costs a /usr/sbin/scutil fork with a three-second timeout, and the answer cannot change
+// in a way this process should act on — a Mac renamed in Sharing preferences is picked up
+// on the next start, like a renamed household is.
+//
+// The memo matters because the re-check poll asks what the census would advertise on
+// every tick: without it, an install whose census never settles would fork scutil once a
+// minute forever, which is the cost this indirection exists to avoid.
+//
+// It is a var so a test can count the asking. Always the real function in production.
+var computerName = sync.OnceValue(bonjour.ComputerName)
 
 // plannedAdvertisement is what a census asks for, before anything is registered.
 func plannedAdvertisement(c bonjour.Census) advertisement {
