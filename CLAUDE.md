@@ -7,7 +7,9 @@ more than once; keep it terse.
 **Folder-scoped conventions load lazily** — app-specific gotchas live next to the
 code and load only when you work under that folder: `apps/api/CLAUDE.md` (database
 migrations), `apps/ios/CLAUDE.md` (SwiftUI reuse, perf traps, XcodeGen, capability
-gates), `apps/web/CLAUDE.md` (design-system reuse). The rules below are repo-wide.
+gates), `apps/mac/CLAUDE.md` (the menu-bar app: XcodeGen, the macOS destination, and the
+rules for talking to `waffled-runtime`), `apps/web/CLAUDE.md` (design-system reuse). The
+rules below are repo-wide.
 
 ## How we start any new work — isolate first (repo-wide)
 
