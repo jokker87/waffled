@@ -324,6 +324,15 @@ func (s *Supervisor) Start(ctx context.Context) error {
 		return s.fail(err)
 	}
 
+	// Before anything is changed: may this build open this data at all? A bundle OLDER
+	// than the schema is the one direction nothing can undo, and re-installing the
+	// previous version is the first thing anyone does when an update goes wrong. Here,
+	// with Postgres up and migrate not yet run, is the only moment the question can be
+	// asked while the answer still costs nothing (see checkNotDowngraded).
+	if err := s.checkNotDowngraded(ctx); err != nil {
+		return s.fail(err)
+	}
+
 	// Plan §5: "Rollback means restore, not reverse migrations." Migrations only run
 	// forward, so the way back from a schema change that breaks the api is a dump taken
 	// immediately before it. Nothing happens here unless migrations are genuinely

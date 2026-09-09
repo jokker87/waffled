@@ -371,11 +371,7 @@ func (s *Supervisor) appliedMigrations(ctx context.Context, db string) ([]string
 
 // bundleMigrations lists what this build ships.
 func (s *Supervisor) bundleMigrations() ([]string, error) {
-	from := ""
-	if s.manifest != nil {
-		from = s.manifest.Components.API.Migrations
-	}
-	return backup.MigrationNamesInDir(backup.MigrationsDir(s.plan.Bundle, from))
+	return backup.MigrationNamesInDir(backup.MigrationsDir(s.plan.Bundle, s.migrationsFromManifest()))
 }
 
 // dumpMigrationLevel reads a dump's schema level: from the sidecar when there is one,
@@ -422,6 +418,71 @@ func (s *Supervisor) dumpMigrationLevel(ctx context.Context, file string) (strin
 	default:
 		return "", fmt.Errorf("%s is not a dump this can read", file)
 	}
+}
+
+// ── the downgrade guard ─────────────────────────────────────────────────────────────
+
+// checkNotDowngraded refuses to serve data that a NEWER build has already migrated.
+//
+// It is the other half of the rollback story. `start` protects the data going forward —
+// snapshot, migrate, health gate, restore on failure — but the person recovering
+// availability re-installs the previous DMG, and that older bundle then meets a database
+// it cannot serve: either because the update succeeded and they changed their mind, or
+// because it failed somewhere the automatic restore could not reach. Migrations only run
+// forward, so there is no way down; the api would come up against tables and columns its
+// code does not know about, and the damage from that is silent.
+//
+// It deliberately does NOT restore anything. The newest snapshot is named in the message
+// and left alone: everything the newer version wrote since then is still on disk, and
+// restoring is the one action here that would throw it away. That choice belongs to the
+// person, not to a guard running at startup on a Mac nobody is sitting at.
+//
+// Called after Postgres is up and before migrate, which is the only window where the
+// question can be asked and the answer still costs nothing.
+func (s *Supervisor) checkNotDowngraded(ctx context.Context) error {
+	db := s.plan.Env.PostgresDB()
+	applied, err := s.appliedMigrations(ctx, db)
+	if err != nil {
+		return fmt.Errorf("check which migrations this database has applied: %w", err)
+	}
+	if len(applied) == 0 {
+		return nil // a database with no migrations cannot be ahead of anything
+	}
+	bundled, err := s.bundleMigrations()
+	if err != nil {
+		return err
+	}
+	if len(bundled) == 0 {
+		// Not a downgrade — a broken bundle. Reporting it as "the data is newer" would
+		// send someone chasing a version that was never installed.
+		return fmt.Errorf("this build ships no migrations in %s, so it cannot be checked against "+
+			"the database — the bundle is incomplete",
+			backup.MigrationsDir(s.plan.Bundle, s.migrationsFromManifest()))
+	}
+	unshipped := backup.Unshipped(bundled, applied)
+	if len(unshipped) == 0 {
+		return nil
+	}
+
+	d := &backup.Downgrade{
+		LastVersion: s.startedVersion,
+		ThisVersion: s.bundleVersion(),
+		Unshipped:   unshipped,
+		BundleLevel: backup.Level(bundled),
+		BackupsDir:  s.plan.Layout.Backups,
+	}
+	if path, side, ok := backup.NewestRestorable(s.plan.Layout.Backups, d.BundleLevel); ok {
+		d.Snapshot, d.SnapshotAt = path, side.TakenAt
+	}
+	return d
+}
+
+// migrationsFromManifest is the manifest's migrations path, or "" for the default.
+func (s *Supervisor) migrationsFromManifest() string {
+	if s.manifest == nil {
+		return ""
+	}
+	return s.manifest.Components.API.Migrations
 }
 
 // ── pre-migration snapshot and rollback ─────────────────────────────────────────────
