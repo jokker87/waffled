@@ -14,10 +14,10 @@ struct WaffledApp: App {
         MenuBarExtra {
             MenuContent(model: model)
         } label: {
-            // A menu-bar image is a monochrome template: macOS recolours it for light,
-            // dark and the menu's own highlight, so state is carried by shape (fill,
-            // slash) and never by colour.
-            Image(systemName: model.currentSymbol)
+            // The Waffled mark, drawn in CoreGraphics as a template image: macOS
+            // recolours it for light, dark and the menu's own highlight, so the state is
+            // carried by shape (outline, cooking holes, solid, slash) and never by colour.
+            Image(nsImage: model.currentImage)
                 .accessibilityLabel(model.icon.accessibilityLabel)
         }
         // .menu, not .window: the §2 mock-up is a menu, and .menu is what draws like every

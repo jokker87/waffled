@@ -2,30 +2,41 @@ import Foundation
 
 /// What the menu-bar icon draws for a given state.
 ///
-/// One SF Symbol family, varied by fill and slash, because a menu-bar icon is an 18 pt
-/// monochrome template: it has shape and nothing else. `house` is the family — Waffled is
-/// a household's server, and the shape reads at that size where a wordmark would not.
+/// The mark is the closed waffle iron from the Waffled logo, drawn in `WaffleIronIcon`.
+/// A menu-bar image is an 18 pt monochrome template — it has shape and nothing else — so
+/// the state is the shape: outlined while nothing is running, cooking hole by hole while
+/// it starts, solid when it is up, slashed when it needs a person.
 struct IconAppearance: Equatable {
-    /// More than one frame means "cycle these on a timer" — the only animation here.
-    var symbolNames: [String]
+    /// More than one frame means "cycle these on the animation timer" — the only motion
+    /// in the icon.
+    var frameCount: Int
     var accessibilityLabel: String
 
-    var isAnimated: Bool { symbolNames.count > 1 }
+    var isAnimated: Bool { frameCount > 1 }
+
+    /// How many of the iron's six holes have cooked in this frame. Zero for every state
+    /// that does not animate: an iron that is not heating has no half-made waffle in it.
+    func fillCount(frame: Int) -> Int {
+        guard isAnimated else { return 0 }
+        // 1…6 rather than 0…5: an empty pan is the *stopped* drawing, and showing it in
+        // the middle of a start would read as the server having given up.
+        return frame % frameCount + 1
+    }
 
     static func forState(_ state: RuntimeState) -> IconAppearance {
         switch state {
         case .stopped:
-            return IconAppearance(symbolNames: ["house"],
+            return IconAppearance(frameCount: 1,
                                   accessibilityLabel: "Waffled is stopped")
         case .starting:
-            // The pulse between outline and fill: the server is on its way to being full.
-            return IconAppearance(symbolNames: ["house", "house.fill"],
+            // The waffle cooks: one more hole filled on every tick, then round again.
+            return IconAppearance(frameCount: WaffleIronIcon.holeCount,
                                   accessibilityLabel: "Waffled is starting")
         case .running:
-            return IconAppearance(symbolNames: ["house.fill"],
+            return IconAppearance(frameCount: 1,
                                   accessibilityLabel: "Waffled is running")
         case .unhealthy:
-            return IconAppearance(symbolNames: ["house.slash"],
+            return IconAppearance(frameCount: 1,
                                   accessibilityLabel: "Waffled needs attention")
         }
     }

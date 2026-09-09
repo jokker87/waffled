@@ -2,7 +2,7 @@ import Foundation
 
 /// The words `state` can hold — the four documented in
 /// `apps/runtime/internal/status` and reported by `waffled-runtime status --json`.
-enum RuntimeState: String, Equatable {
+enum RuntimeState: String, Hashable {
     case stopped, starting, running, unhealthy
 
     /// The contract promises added *fields*, not a closed vocabulary here, so a word this

@@ -66,11 +66,12 @@ final class ServerModel {
 
     var icon: IconAppearance { IconAppearance.forState(iconState) }
 
-    /// The frame to draw right now — the same symbol every time unless this state
-    /// animates, in which case the frames cycle on the animation timer.
-    var currentSymbol: String {
-        let names = icon.symbolNames
-        return names[animationFrame % names.count]
+    /// The frame to draw right now — the same drawing every time unless this state
+    /// animates, in which case the frames cycle on the animation timer. The images are
+    /// cached per state and frame, so this is a dictionary lookup on every poll.
+    var currentImage: NSImage {
+        WaffleIronIcon.image(state: iconState,
+                             fillCount: icon.fillCount(frame: animationFrame))
     }
 
     var presentation: MenuPresentation {
