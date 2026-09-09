@@ -8,8 +8,8 @@ compose config files, and a `manifest.json` with a sha256 for every file. **Noth
 depends on Homebrew, a system Node, or Docker at run time** — `verify` proves that by
 running every entry point with an empty environment and `PATH=/usr/bin:/bin`.
 
-`build.sh` here is the product-quality successor to the Phase 1 spike
-(`infra/native/spike/`, branch `native-spike`); the spike's README is where the "why" behind
+`build.sh` here is the product-quality successor to the Phase 1 spike; the retired spike's
+findings, kept at `docs/product/native-mac-spike-findings.md`, are where the "why" behind
 each choice was learned. Nothing under `out/` or in the cache is ever committed.
 
 ## Layout
@@ -64,9 +64,9 @@ infra/native/bundle/build.sh clean [--all]         # rm ./out (and the cache wit
   Node (and its npm/npx) for everything — symlink hydration, `npx pnpm@11.0.9`, `npm ci`,
   `npm run build` for api and web, and the manifest.
 - Env: `WAFFLED_BUNDLE_CACHE` (default `~/Library/Caches/WaffledBundle`),
-  `WAFFLED_BUNDLE_SEED` (default `~/Library/Caches/WaffledSpike` — when the Phase 1 spike's
-  cache exists its EDB tgz, Caddy tarball and built `powersync-service` clone are copied instead
-  of downloaded), `WAFFLED_BUNDLE_NO_NETWORK=1` (die instead of downloading),
+  `WAFFLED_BUNDLE_SEED` (default `~/Library/Caches/WaffledSpike` — an optional second cache
+  dir to copy downloads from, e.g. a previous machine's; unset or missing = no seeding),
+  `WAFFLED_BUNDLE_NO_NETWORK=1` (die instead of downloading),
   `WAFFLED_BUNDLE_NPM_CI=1` (force `npm ci` for api/web even if `node_modules` exists), and
   `WAFFLED_{NODE,PG_NPM,PG_CLIENT,CADDY,POWERSYNC}_VERSION` to override a pin.
 - Pins live at the top of `build.sh`: Node **24.19.0** (major must match `.nvmrc`), Postgres

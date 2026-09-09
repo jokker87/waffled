@@ -268,6 +268,8 @@ criterion is met — the whole point is to find out early if Postgres or PowerSy
 
 ### Phase 1 — Native spike: the whole stack on one Mac, no Docker *(done — PR #176)*
 
+*(Spike retired in PR #194; findings kept at `docs/product/native-mac-spike-findings.md`.)*
+
 **Result: both risks answered yes.** Postgres 16 ran from `@embedded-postgres/darwin-arm64`
 (EDB's signed universal binaries; hydrate its dylib symlinks, and it ships no `pg_dump`/`psql`),
 PowerSync ran from the `v1.22.0` tag under plain Node, the web first-run wizard created a
@@ -343,10 +345,16 @@ Throwaway bash under `infra/native/spike/`. Purpose: **learn**, not build.
    "changed from" by comparing the two versions. The whole loop is tested against two
    real bundles over one data directory, including re-installing the previous version onto
    rolled-back data — the half a person does, which nothing had exercised before.
-6. **Exit criterion:** `waffled-runtime start` on a fresh Mac user account reaches green in
-   under 60s and `stop`/`start` re-opens the same data.
+6. **Exit criterion, done.** `waffled-runtime start` on a fresh Mac user account reaches
+   green in under 60s and `stop`/`start` re-opens the same data. Cold start is **17.1 s**
+   via the CLI (14.9 s in-process) and warm restart **2.3 s**, both against the 60 s
+   criterion (`apps/runtime/README.md` timings table); `TestRestartReopensTheSameData`
+   proves stop/start re-opens the same data. **Phase 2 complete (2026-09-09).**
 
 ### Phase 3 — Menu-bar app
+
+Next. Nothing here has started; the notarization spike (item 5) was deliberately deferred
+by the user.
 
 1. `apps/mac/` SwiftUI `MenuBarExtra`, XcodeGen project like iOS, bundles the runtime and
    binaries under `Resources/runtime/`.
