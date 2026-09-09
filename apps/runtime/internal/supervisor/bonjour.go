@@ -13,7 +13,6 @@ package supervisor
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -69,20 +68,12 @@ type bonjourState struct {
 
 func writeBonjourState(path string, st bonjourState) error {
 	st.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
-	raw, err := json.MarshalIndent(st, "", "  ")
-	if err != nil {
-		return err
-	}
-	return atomicfile.WriteFile(path, append(raw, '\n'), 0o600)
+	return atomicfile.WriteJSON(path, st, 0o600)
 }
 
 func readBonjourState(path string) (bonjourState, bool) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return bonjourState{}, false
-	}
 	var st bonjourState
-	if err := json.Unmarshal(raw, &st); err != nil {
+	if err := atomicfile.ReadJSON(path, &st); err != nil {
 		return bonjourState{}, false
 	}
 	return st, true

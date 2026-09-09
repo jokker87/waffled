@@ -102,13 +102,7 @@ func Save(path string, s *State) error {
 	if s.Schema == 0 {
 		s.Schema = Schema
 	}
-	raw, err := json.MarshalIndent(s, "", "  ")
-	if err != nil {
-		return fmt.Errorf("write %s: %w", path, err)
-	}
-	raw = append(raw, '\n')
-
-	return atomicfile.WriteFile(path, raw, 0o644)
+	return atomicfile.WriteJSON(path, s, 0o644)
 }
 
 func randomID() (string, error) {
