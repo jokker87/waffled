@@ -612,6 +612,15 @@ loudly. `doctor` reports the same condition as a **FAIL**, starting Postgres for
 way `backup` does — a refused start leaves nothing running, so a check that needed a live
 server would be dead code in the one case it exists for.
 
+That postmaster is started **once**, above all of `doctor`'s database checks, and serves
+the schema comparison, `pg_isready`, `wal_level` and the collation check together. The
+alternative it replaces was worse than untidy: the schema check booted Postgres for itself
+and shut it down, and the "postgres is running" gate below it then stopped the rest — so
+the command someone runs *because* their server will not start answered fewer questions
+than the one they run when it is fine, having paid for the boot either way. `doctor` still
+leaves the machine as it found it: the temporary postmaster is stopped on the way out, and
+the report says plainly when it was one.
+
 The refusal names both versions, the migrations this build lacks, and the newest snapshot
 in `backups/` that **this** build could actually restore (checked with the same
 `CheckRestorable` `restore` uses, so it can never recommend a file that would then be
@@ -735,8 +744,10 @@ real bundle into a temp data directory **whose path contains a space**:
   its manifest re-scanned. The whole loop takes **about 55s**.
 - `TestStartRefusesADatabaseMigratedByANewerBuild` (there too, for the unexported helpers)
   is the guard on its own, at the cost of one start: a single `pgmigrations` row is all a
-  newer build would leave behind, and it is what the guard reads. It also asserts `doctor` reports the same thing with the stack
-  **down** and puts Postgres back afterwards.
+  newer build would leave behind, and it is what the guard reads. It also asserts `doctor`
+  reports the same thing with the stack **down**, answers its other Postgres checks
+  (`pg_isready`, `wal_level`, collation) in the same breath rather than skipping them, and
+  puts Postgres back afterwards.
 - `TestTheAdvertisementFollowsSetupBeingFinished` lives there for the same kind of reason:
   watching `setup=1` flip to the household's own name in seconds rather than a minute means
   shortening `bonjourSetupPoll`, which is unexported and never written in production.

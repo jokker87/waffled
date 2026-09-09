@@ -140,8 +140,10 @@ func TestStartRefusesADatabaseMigratedByANewerBuild(t *testing.T) {
 		t.Fatal("postgres is still up; this half of the test needs it down")
 	}
 
+	checks := s3.Doctor(ctx)
+
 	var found *Check
-	for _, c := range s3.Doctor(ctx) {
+	for _, c := range checks {
 		if strings.Contains(c.Detail, "9999_from_the_future") {
 			found = &c
 			break
@@ -153,6 +155,31 @@ func TestStartRefusesADatabaseMigratedByANewerBuild(t *testing.T) {
 	if found.Status != CheckFail {
 		t.Errorf("doctor reports the downgrade as %q, want %q", found.Status, CheckFail)
 	}
+
+	// And it answers the REST of its Postgres questions in the same breath. The schema
+	// check starts a postmaster of its own when the stack is down; it used to run above
+	// the "postgres is running" gate, which then bailed — so the one command someone runs
+	// precisely BECAUSE their server will not start reported fewer diagnostics than the
+	// one they run when it is up, having paid for the Postgres start either way. One
+	// temporary postmaster now serves all of them.
+	byName := map[string]Check{}
+	for _, c := range checks {
+		byName[c.Name] = c
+	}
+	for _, want := range []string{"database schema", "postgres connection", "wal_level", "collation"} {
+		c, ok := byName[want]
+		if !ok {
+			t.Errorf("doctor on a stopped install does not report %q at all", want)
+			continue
+		}
+		// "could not …" is how every one of these reports a question it was unable to
+		// ask — which, with a postmaster up, means something is genuinely wrong rather
+		// than merely stopped.
+		if strings.Contains(c.Detail, "could not") {
+			t.Errorf("%q went unanswered with the stack down: %s", want, c.Detail)
+		}
+	}
+
 	if _, running := s3.postgresPid(); running {
 		t.Error("doctor left postgres running after starting it for itself")
 	}
