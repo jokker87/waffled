@@ -194,7 +194,7 @@ uses bash because it is throwaway and the point is to learn, not to build.
   created, so installs predating this are repaired on their next start; `doctor` re-asks
   tmutil itself rather than trusting the memo. `backups/` *is* backed up. Same for iCloud
   Drive: `doctor` warns when the data dir sits under Desktop/Documents/iCloud.
-- **Rollback means restore, not reverse migrations.** *(done — PR #186, and PR #TBD across
+- **Rollback means restore, not reverse migrations.** *(done — PR #186, and PR #193 across
   two bundle versions)* → `start` takes a `pg_dump` snapshot before migrating, but only when
   migrations are genuinely pending, and a failed api health gate restores it automatically
   and refuses to come up, naming the file. A snapshot that cannot be taken stops the start
@@ -247,7 +247,7 @@ uses bash because it is throwaway and the point is to learn, not to build.
   step and no second copy of the old bundle on disk. That splits rollback in two: the
   runtime protects the data (snapshot → migrate → health gate → restore), and a person
   recovers availability by re-installing the previous DMG, which now starts cleanly on the
-  restored data or refuses with instructions. Proven end to end in PR #TBD.
+  restored data or refuses with instructions. Proven end to end in PR #193.
 - ~~Whether to bind Bonjour advertisement into the runtime (Go, cross-platform later) or the
   Swift app (`NWListener` is trivial).~~ **Resolved: the runtime**, by supervising
   `/usr/bin/dns-sd -R` as one more child rather than linking a responder. It registers
@@ -332,7 +332,7 @@ Throwaway bash under `infra/native/spike/`. Purpose: **learn**, not build.
    (macOS runner) and hits the same health endpoints as Phase 1. `.github/workflows/native-runtime.yml`
    runs `apps/runtime`'s Go checks on every PR, plus a `macos-15` job that builds the real
    bundle (`build.sh fetch|build|verify`) and runs the `-tags integration` suite against it.
-5. *(done — PR #TBD)* The update path, across two bundle versions. A `start` from a newer
+5. *(done — PR #193)* The update path, across two bundle versions. A `start` from a newer
    bundle is the update (§6), so the runtime's half is the data: snapshot named for the
    crossing → migrate → api health gate → automatic restore, then a **downgrade guard** that
    refuses to open data a newer build has already migrated and says how to get out of it —
