@@ -268,7 +268,7 @@ criterion is met — the whole point is to find out early if Postgres or PowerSy
 
 ### Phase 1 — Native spike: the whole stack on one Mac, no Docker *(done — PR #176)*
 
-*(Spike retired in PR #TBD; findings kept at `docs/product/native-mac-spike-findings.md`.)*
+*(Spike retired in PR #194; findings kept at `docs/product/native-mac-spike-findings.md`.)*
 
 **Result: both risks answered yes.** Postgres 16 ran from `@embedded-postgres/darwin-arm64`
 (EDB's signed universal binaries; hydrate its dylib symlinks, and it ships no `pg_dump`/`psql`),

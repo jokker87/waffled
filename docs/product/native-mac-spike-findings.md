@@ -3,7 +3,7 @@
 *This is the retired Phase 1 spike's write-up, kept for the reasoning behind the bundle
 (`infra/native/bundle/`) and runtime (`apps/runtime/`) choices in
 `docs/product/native-mac-plan.md`. The spike's throwaway scripts (`infra/native/spike/`)
-were removed in PR #TBD once `infra/native/bundle/build.sh` and `apps/runtime` covered
+were removed in PR #194 once `infra/native/bundle/build.sh` and `apps/runtime` covered
 everything they proved. The "How to run" section below is historical — the commands it
 describes no longer exist in the repo.*
 
