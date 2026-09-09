@@ -50,6 +50,13 @@ private struct MenuContent: View {
         Button("Open Waffled") { model.openWebApp() }
             .disabled(!menu.openEnabled)
 
+        // The way back from a stopped server or a start that refused. Auto-start is one
+        // attempt per launch by design, so the retry is a person's click, never a timer.
+        if menu.showStart {
+            Button("Start Waffled") { model.startServer() }
+                .disabled(!menu.startEnabled)
+        }
+
         Divider()
 
         Button(menu.addressLine) { model.copyServerAddress() }

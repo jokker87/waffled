@@ -59,6 +59,10 @@ struct MenuPresentation: Equatable {
     var addressLine: String
     var addressEnabled: Bool
     var backupEnabled: Bool
+    /// A way back. Auto-start is one attempt per launch, so a stopped server — or a start
+    /// that refused — has to be startable by hand.
+    var showStart: Bool
+    var startEnabled: Bool
     /// Appears only when there is something in `logs/` worth reading.
     var showLogs: Bool
     /// Present and inert until the Sparkle appcast (plan §7, Phase 3 item 6).
@@ -71,11 +75,14 @@ struct MenuPresentation: Equatable {
     ///     because a failed `start` leaves nothing running and `state` reads `stopped`.
     ///   - transient: "Backed up …", "Copied" — a few seconds of answer in the status line.
     ///   - busy: a start, stop or backup is in flight.
+    ///   - runtimeAvailable: false when no `waffled-runtime` could be located at all, in
+    ///     which case there is nothing for `Start Waffled` to run.
     static func make(
         status: RuntimeStatus?,
         failure: String? = nil,
         transient: String? = nil,
-        busy: Bool = false
+        busy: Bool = false,
+        runtimeAvailable: Bool = true
     ) -> MenuPresentation {
         let state = status?.state
         let address = status?.serverAddress
@@ -85,6 +92,9 @@ struct MenuPresentation: Equatable {
         // and either way `logs/` is the next place to look.
         let hasFailure = failure != nil
         let faulted = hasFailure || state == .unhealthy
+        // Something to start: a stack that is down, or one whose start refused — which
+        // leaves the document reading `stopped` with the reason held here.
+        let startable = runtimeAvailable && (state == .stopped || (hasFailure && state != .running))
 
         let baseLine: String
         let tint: StatusTint
@@ -119,6 +129,8 @@ struct MenuPresentation: Equatable {
             // Enabled while stopped on purpose: `backup` starts Postgres for itself, and
             // "am I protected?" is asked exactly when nothing is up.
             backupEnabled: status != nil && !busy,
+            showStart: startable,
+            startEnabled: startable && !busy,
             showLogs: faulted,
             checkForUpdatesEnabled: false)
     }
@@ -133,6 +145,31 @@ struct MenuPresentation: Equatable {
 
 /// The two rules that decide what the app does without being asked, plus how often it asks.
 enum Lifecycle {
+    /// What to do about starting the server, asked after every poll and answered once.
+    enum AutoStartDecision: Equatable {
+        /// Nothing has answered yet — `status` itself can fail before the runtime is
+        /// ready, and a poll that threw must not spend the single attempt.
+        case keepWaiting
+        /// The attempt, spent here.
+        case start
+        /// Spent, or never ours to make. The app does not start a server again for the
+        /// life of the process.
+        case standDown
+    }
+
+    /// The app gets exactly one auto-start per launch, and the first poll that actually
+    /// answers decides it.
+    ///
+    /// The alternative — re-checking forever — turns the menu bar into a second
+    /// supervisor: someone who runs `waffled-runtime stop` in Terminal would watch the
+    /// app start it straight back up. Deciding once means "I found it stopped when I
+    /// arrived", which is the only claim this app can honestly make.
+    static func autoStartDecision(state: RuntimeState?, alreadyDecided: Bool) -> AutoStartDecision {
+        guard !alreadyDecided else { return .standDown }
+        guard let state else { return .keepWaiting }
+        return shouldAutoStart(state) ? .start : .standDown
+    }
+
     /// Auto-start from `stopped` and from nowhere else.
     ///
     /// `unhealthy` is the case worth being explicit about: the runtime supervises its own

@@ -15,6 +15,31 @@ final class LifecycleTests: XCTestCase {
         XCTAssertFalse(Lifecycle.shouldAutoStart(.unhealthy))
     }
 
+    /// The one deferred attempt: the app is allowed to start the server exactly once per
+    /// launch, and the first poll that actually answers spends the decision — whatever it
+    /// answers. A poll that threw does not spend it (the status call itself can fail before
+    /// the runtime is ready), and nothing that happens afterwards revives it: a household
+    /// that stops the server from Terminal must find it still stopped.
+    func testAutoStartIsDecidedOnceByTheFirstPollThatAnswers() {
+        XCTAssertEqual(Lifecycle.autoStartDecision(state: nil, alreadyDecided: false),
+                       .keepWaiting,
+                       "status itself failed — keep polling rather than spending the attempt")
+        XCTAssertEqual(Lifecycle.autoStartDecision(state: .stopped, alreadyDecided: false), .start)
+
+        for state in [RuntimeState.running, .starting, .unhealthy] {
+            XCTAssertEqual(Lifecycle.autoStartDecision(state: state, alreadyDecided: false),
+                           .standDown,
+                           "\(state) is not ours to start")
+        }
+
+        for state in [RuntimeState.stopped, .running, .starting, .unhealthy] {
+            XCTAssertEqual(Lifecycle.autoStartDecision(state: state, alreadyDecided: true),
+                           .standDown,
+                           "once spent, never again — this app is not a second supervisor")
+        }
+        XCTAssertEqual(Lifecycle.autoStartDecision(state: nil, alreadyDecided: true), .standDown)
+    }
+
     /// Finding a server already running is a relaunch, not a first start: it re-opens the
     /// existing server (plan §2 step 6) without stealing the screen.
     func testBrowserOpensOnlyForAStartThisAppInitiated() {

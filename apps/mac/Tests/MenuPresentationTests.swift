@@ -117,6 +117,44 @@ final class MenuPresentationTests: XCTestCase {
         XCTAssertTrue(m.showLogs)
     }
 
+    /// The one thing the menu was missing: a way back. Auto-start gets a single attempt,
+    /// so a stopped server — or a start that refused — has to be startable by hand.
+    func testStartIsOfferedWheneverThereIsSomethingToStart() throws {
+        let stopped = try RuntimeStatus.decode(Fixtures.data(Fixtures.minimalStopped))
+        let running = try RuntimeStatus.decode(Fixtures.data(Fixtures.fullRunning))
+        let starting = try RuntimeStatus.decode(Fixtures.data(Fixtures.withUnknownFields))
+
+        let idle = MenuPresentation.make(status: stopped)
+        XCTAssertTrue(idle.showStart)
+        XCTAssertTrue(idle.startEnabled)
+
+        for status in [running, starting] {
+            XCTAssertFalse(MenuPresentation.make(status: status).showStart,
+                           "nothing to start")
+        }
+
+        // A `start` that refused leaves nothing running, so the document says `stopped`
+        // while the app holds the reason. That is exactly when Start has to be there.
+        let failed = MenuPresentation.make(status: stopped, failure: "port 8080 is in use")
+        XCTAssertTrue(failed.showStart)
+        XCTAssertTrue(failed.startEnabled)
+
+        // Offered but not clickable while an operation is already in flight.
+        let busy = MenuPresentation.make(status: stopped, busy: true)
+        XCTAssertTrue(busy.showStart)
+        XCTAssertFalse(busy.startEnabled)
+
+        // Before the first poll answers there is nothing to say about starting.
+        XCTAssertFalse(MenuPresentation.make(status: nil).showStart)
+
+        // No runtime to run: the menu already says so, and a Start button that cannot
+        // work is worse than no button.
+        let noRuntime = MenuPresentation.make(
+            status: nil, failure: "No Waffled runtime is bundled with this build",
+            runtimeAvailable: false)
+        XCTAssertFalse(noRuntime.showStart)
+    }
+
     /// A failed `start` is reported by the app, not by a status document: the runtime
     /// exited, so `state` may still read `stopped`.
     func testAFailureOverridesTheStatusLineAndRevealsTheLogs() throws {

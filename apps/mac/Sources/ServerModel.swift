@@ -35,6 +35,8 @@ final class ServerModel {
     /// correct rather than intrusive.
     private var startWasAppInitiated = false
     private var alreadyOpenedBrowser = false
+    /// Whether the one auto-start this process is allowed has been spent (or stood down).
+    private var autoStartDecided = false
     private var animationFrame = 0
 
     init(environment: [String: String] = ProcessInfo.processInfo.environment,
@@ -65,7 +67,8 @@ final class ServerModel {
     }
 
     var presentation: MenuPresentation {
-        MenuPresentation.make(status: status, failure: failure, transient: transient, busy: busy)
+        MenuPresentation.make(status: status, failure: failure, transient: transient,
+                              busy: busy, runtimeAvailable: client != nil)
     }
 
     var isDevMode: Bool { location?.isDevMode ?? false }
@@ -88,16 +91,23 @@ final class ServerModel {
     // MARK: lifecycle
 
     /// Poll once, start the server if nothing is running, then keep polling.
+    ///
+    /// The auto-start question is asked after *every* poll rather than only the first,
+    /// because the first `status` can fail — `supervisor.New` verifies the bundle
+    /// manifest and settles ports before it can answer — and a launch whose first poll
+    /// threw used to mean a server that was never started at all. `Lifecycle` still
+    /// allows only one attempt: the first poll that answers spends it, whatever it says.
     func begin() {
         loginItem.refresh()
         guard pollTask == nil else { return }
         pollTask = Task { [weak self] in
             await self?.refresh()
-            await self?.autoStartIfStopped()
+            self?.considerAutoStart()
             while !Task.isCancelled {
                 let interval = self?.pollInterval ?? 2
                 try? await Task.sleep(for: .seconds(interval))
                 await self?.refresh()
+                self?.considerAutoStart()
             }
         }
         animationTask = Task { [weak self] in
@@ -146,9 +156,16 @@ final class ServerModel {
         }
     }
 
-    private func autoStartIfStopped() async {
-        guard let state = status?.state, Lifecycle.shouldAutoStart(state) else { return }
-        startServer()
+    private func considerAutoStart() {
+        switch Lifecycle.autoStartDecision(state: status?.state, alreadyDecided: autoStartDecided) {
+        case .keepWaiting:
+            return
+        case .standDown:
+            autoStartDecided = true
+        case .start:
+            autoStartDecided = true
+            startServer()
+        }
     }
 
     private func openBrowserIfThisAppStartedIt(_ fresh: RuntimeStatus) {
