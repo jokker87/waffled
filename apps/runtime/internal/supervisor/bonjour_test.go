@@ -46,7 +46,7 @@ func TestBonjourStateRoundTrips(t *testing.T) {
 
 	want := bonjourState{
 		SupervisorPID: os.Getpid(), Name: "Kevin’s Home", Port: 8080,
-		URL: "http://192.168.1.5:8080", Setup: false, Error: "",
+		Setup: false, Error: "",
 	}
 	if err := writeBonjourState(path, want); err != nil {
 		t.Fatalf("write: %v", err)
@@ -55,8 +55,18 @@ func TestBonjourStateRoundTrips(t *testing.T) {
 	if !ok {
 		t.Fatal("the state file just written does not read back")
 	}
-	if got.Name != want.Name || got.Port != want.Port || got.URL != want.URL || got.SupervisorPID != want.SupervisorPID {
+	if got.Name != want.Name || got.Port != want.Port || got.SupervisorPID != want.SupervisorPID {
 		t.Errorf("round trip lost something: %+v", got)
+	}
+	// The URL belongs in the TXT record, which is where a client reads it. Recording it
+	// here as well gave it a second copy to keep correct on every write and no reader at
+	// all: `status` reports urls.lan, and the block has never had a url field.
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), `"url"`) {
+		t.Errorf("bonjour.json still records a url nothing reads back:\n%s", raw)
 	}
 	if got.UpdatedAt == "" {
 		t.Error("UpdatedAt is empty — a stale file must be recognisable as old")
@@ -119,7 +129,6 @@ func TestBonjourStatusReportsTheLiveAdvertisement(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "bonjour.json")
 	if err := writeBonjourState(path, bonjourState{
 		SupervisorPID: os.Getpid(), Name: "The Seinfelds", Port: 8080,
-		URL: "http://192.168.1.5:8080",
 	}); err != nil {
 		t.Fatal(err)
 	}

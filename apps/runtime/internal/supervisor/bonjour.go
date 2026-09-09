@@ -60,7 +60,6 @@ type bonjourState struct {
 	SupervisorPID int    `json:"supervisorPid"`
 	Name          string `json:"name"`
 	Port          int    `json:"port"`
-	URL           string `json:"url"`
 	Setup         bool   `json:"setup"`
 	Error         string `json:"error"`
 	UpdatedAt     string `json:"updatedAt"`
@@ -252,7 +251,7 @@ func (s *Supervisor) advertise(ctx context.Context, census bonjour.Census) adver
 		Version: s.waffledVersion(),
 		Setup:   a.setup,
 	}
-	st := bonjourState{Name: inst.Name, Port: inst.Port, URL: inst.URL, Setup: inst.Setup}
+	st := bonjourState{Name: inst.Name, Port: inst.Port, Setup: inst.Setup}
 
 	if err := s.startChild(ctx, s.plan.Bonjour(inst), 0); err != nil {
 		st.Error = err.Error()
