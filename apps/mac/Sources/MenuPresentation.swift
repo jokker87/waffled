@@ -1,23 +1,57 @@
 import Foundation
 
+/// What the menu-bar icon draws for a given state.
+///
+/// One SF Symbol family, varied by fill and slash, because a menu-bar icon is an 18 pt
+/// monochrome template: it has shape and nothing else. `house` is the family — Waffled is
+/// a household's server, and the shape reads at that size where a wordmark would not.
 struct IconAppearance: Equatable {
+    /// More than one frame means "cycle these on a timer" — the only animation here.
     var symbolNames: [String]
     var accessibilityLabel: String
+
     var isAnimated: Bool { symbolNames.count > 1 }
 
     static func forState(_ state: RuntimeState) -> IconAppearance {
-        fatalError("not implemented")
+        switch state {
+        case .stopped:
+            return IconAppearance(symbolNames: ["house"],
+                                  accessibilityLabel: "Waffled is stopped")
+        case .starting:
+            // The pulse between outline and fill: the server is on its way to being full.
+            return IconAppearance(symbolNames: ["house", "house.fill"],
+                                  accessibilityLabel: "Waffled is starting")
+        case .running:
+            return IconAppearance(symbolNames: ["house.fill"],
+                                  accessibilityLabel: "Waffled is running")
+        case .unhealthy:
+            return IconAppearance(symbolNames: ["house.slash"],
+                                  accessibilityLabel: "Waffled needs attention")
+        }
     }
 }
 
+/// The colour of the status line's dot.
+///
+/// Colour lives here rather than in the icon on purpose: macOS renders a menu-bar image as
+/// a template, recolouring it for light, dark, and the menu's own highlight, so a coloured
+/// icon is either ignored or wrong. The menu is ordinary content and can be as green as
+/// it likes.
 enum StatusTint: Equatable {
     case running, starting, idle, fault
 
     static func forState(_ state: RuntimeState) -> StatusTint {
-        fatalError("not implemented")
+        switch state {
+        case .running: return .running
+        case .starting: return .starting
+        case .stopped: return .idle
+        case .unhealthy: return .fault
+        }
     }
 }
 
+/// Everything the menu shows, as a value. The menu itself only renders this, so the whole
+/// enabled/disabled table is testable without a menu, a process, or a run loop.
 struct MenuPresentation: Equatable {
     var statusLine: String
     var statusTint: StatusTint
@@ -25,31 +59,104 @@ struct MenuPresentation: Equatable {
     var addressLine: String
     var addressEnabled: Bool
     var backupEnabled: Bool
+    /// Appears only when there is something in `logs/` worth reading.
     var showLogs: Bool
+    /// Present and inert until the Sparkle appcast (plan §7, Phase 3 item 6).
     var checkForUpdatesEnabled: Bool
 
+    /// - Parameters:
+    ///   - status: the last document that decoded, or nil before the first poll returns.
+    ///   - failure: an error the app itself is holding — a `start` that refused, or a
+    ///     runtime we could not run. It outlives the status document that caused it,
+    ///     because a failed `start` leaves nothing running and `state` reads `stopped`.
+    ///   - transient: "Backed up …", "Copied" — a few seconds of answer in the status line.
+    ///   - busy: a start, stop or backup is in flight.
     static func make(
         status: RuntimeStatus?,
         failure: String? = nil,
         transient: String? = nil,
         busy: Bool = false
     ) -> MenuPresentation {
-        fatalError("not implemented")
+        let state = status?.state
+        let address = status?.serverAddress
+        let running = state == .running
+
+        // A fault is a fault whether the runtime reported it or we caught it ourselves,
+        // and either way `logs/` is the next place to look.
+        let hasFailure = failure != nil
+        let faulted = hasFailure || state == .unhealthy
+
+        let baseLine: String
+        let tint: StatusTint
+        switch (hasFailure, state) {
+        case (true, _):
+            baseLine = Self.firstLine(failure) ?? "Waffled could not start"
+            tint = .fault
+        case (_, .running):
+            baseLine = "Waffled is running"
+            tint = .running
+        case (_, .starting):
+            baseLine = "Waffled is starting…"
+            tint = .starting
+        case (_, .stopped):
+            baseLine = "Waffled is stopped"
+            tint = .idle
+        case (_, .unhealthy):
+            // The runtime's own sentence beats any wording invented here.
+            baseLine = Self.firstLine(status?.lastError) ?? "Waffled needs attention"
+            tint = .fault
+        case (_, nil):
+            baseLine = "Checking…"
+            tint = .idle
+        }
+
+        return MenuPresentation(
+            statusLine: transient ?? baseLine,
+            statusTint: tint,
+            openEnabled: running && !(status?.urls.local.isEmpty ?? true),
+            addressLine: "Server address: \(address ?? "—")",
+            addressEnabled: running && address != nil,
+            // Enabled while stopped on purpose: `backup` starts Postgres for itself, and
+            // "am I protected?" is asked exactly when nothing is up.
+            backupEnabled: status != nil && !busy,
+            showLogs: faulted,
+            checkForUpdatesEnabled: false)
+    }
+
+    private static func firstLine(_ text: String?) -> String? {
+        guard let text else { return nil }
+        let line = text.split(separator: "\n").first.map(String.init)?
+            .trimmingCharacters(in: .whitespaces) ?? ""
+        return line.isEmpty ? nil : line
     }
 }
 
+/// The two rules that decide what the app does without being asked, plus how often it asks.
 enum Lifecycle {
+    /// Auto-start from `stopped` and from nowhere else.
+    ///
+    /// `unhealthy` is the case worth being explicit about: the runtime supervises its own
+    /// children and restarts what it can, so an app that also starts on `unhealthy` is a
+    /// second supervisor fighting the first — the restart loop plan §7 forbids. A stack
+    /// that has fallen over says so in the menu and waits for a person.
     static func shouldAutoStart(_ state: RuntimeState) -> Bool {
-        fatalError("not implemented")
+        state == .stopped
     }
 
+    /// Open the web app once, for a start this process began.
+    ///
+    /// Finding a server already running is the relaunch path (plan §2 step 6): re-open the
+    /// existing server, do not take over the screen of someone who just wanted the menu.
     static func shouldOpenBrowser(
         newState: RuntimeState, startWasAppInitiated: Bool, alreadyOpened: Bool
     ) -> Bool {
-        fatalError("not implemented")
+        newState == .running && startWasAppInitiated && !alreadyOpened
     }
 
+    /// Polling spawns a process, so it is deliberately unhurried once the answer has
+    /// settled — and quicker while it is still changing, which is the only time anyone is
+    /// watching the icon.
     static func pollInterval(for state: RuntimeState?) -> TimeInterval {
-        fatalError("not implemented")
+        state == .starting ? 1 : 2
     }
 }
