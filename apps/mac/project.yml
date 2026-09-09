@@ -22,9 +22,15 @@ settings:
     # Ad-hoc signing while the app is a dev skeleton. Developer ID signing and
     # notarization — of the app AND every binary in the embedded runtime bundle —
     # are Phase 3 item 5, deliberately deferred.
+    #
+    # CODE_SIGNING_ALLOWED must stay YES (the default). Setting it to NO skips the
+    # CodeSign phase outright, which silently overrides the "-" identity: the binary
+    # still gets a linker-applied signature, but the BUNDLE gets no CodeResources seal
+    # and its identifier is the product name rather than the bundle id. SMAppService
+    # validates the bundle, so "Start at login" behaves differently on the two — which
+    # is exactly the kind of difference a dev build must not hide.
     CODE_SIGN_IDENTITY: "-"
     CODE_SIGNING_REQUIRED: NO
-    CODE_SIGNING_ALLOWED: NO
 
 targets:
   Waffled:
