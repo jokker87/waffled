@@ -10,8 +10,8 @@
 //      argument had to be threaded through ~135 existing route registrations. That is a
 //      retrofit cost, not a library limit: lambda-api does support per-route middleware
 //      (`api.post(path, mw, handler)`) and path-scoped `api.use`, and declaring the scope
-//      at the route is the intended direction — see docs/product/roadmap.md, "API-key
-//      scopes declared per route", which also covers why the naive move is fail-open.
+//      at the route is the intended direction — see docs/product/api-key-scopes-plan.md,
+//      which also covers why the naive move is fail-OPEN and what to do instead.
 //   2. Capability — can the owner person actually do this? Unchanged: the in-route
 //      requireCapability/requireAdmin still run against the real person, so a teen's
 //      key can never exceed the teen's rights even with a broad scope.

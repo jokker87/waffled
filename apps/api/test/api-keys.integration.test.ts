@@ -300,8 +300,8 @@ describe('currency conversions answer to the rewards scope', () => {
 // Both gate identically at runtime — a prefix in neither API_SCOPES nor these lists is
 // 403 by absence, so this is fail-closed either way. The split is for the reader: a
 // single list makes a boundary and a backlog item look like the same considered call.
-// The standing fix for the debt is per-route scope declaration; see
-// docs/product/roadmap.md, "API-key scopes declared per route".
+// The standing fix for the debt is per-route scope declaration — findings, the
+// fail-open trap and the plan are in docs/product/api-key-scopes-plan.md.
 type NeverReachable = { why: string; prefixes: string[] }
 type UnscopedYet = NeverReachable & { tracked: string }
 
@@ -325,7 +325,7 @@ const UNSCOPED_YET: UnscopedYet[] = [
   // listed only to keep the guard green without duplicating that change — and the
   // staleness test below names this entry the moment #180 lands.
   { why: 'a lists route that the /api/lists prefix cannot match', prefixes: ['/api/list-items'], tracked: 'PR #180' },
-  { why: 'rhythms wants a whole new scope resource, not another prefix — nobody has designed it', prefixes: ['/api/rhythms'], tracked: 'docs/product/roadmap.md — API-key scopes declared per route' },
+  { why: 'rhythms wants a whole new scope resource, not another prefix — nobody has designed it', prefixes: ['/api/rhythms'], tracked: 'docs/product/api-key-scopes-plan.md' },
   // Debt rather than a boundary, and the distinction is the point. A planning session
   // WRITES THROUGH to other modules: it hands out chores, features goals, adds calendar
   // events, fills the meal plan. With one scope per prefix, a `weeklyPlanning` scope
@@ -333,7 +333,7 @@ const UNSCOPED_YET: UnscopedYet[] = [
   // is no correct scope to give this prefix today. That bypass is an artifact of the
   // prefix model, not of planning: declared per route, each of these routes asks for the
   // downstream scope it actually needs and the problem disappears.
-  { why: 'no correct scope exists under one-scope-per-prefix — a session writes through to chores/goals/events/meals', prefixes: ['/api/weekly-planning'], tracked: 'docs/product/roadmap.md — API-key scopes declared per route' },
+  { why: 'no correct scope exists under one-scope-per-prefix — a session writes through to chores/goals/events/meals', prefixes: ['/api/weekly-planning'], tracked: 'docs/product/api-key-scopes-plan.md' },
 ]
 
 // Checked as one list: the buckets differ in what they claim, not in how they gate.

@@ -612,7 +612,8 @@ Legend: ✅ done · 🟡 partial / in progress · 🚧 planned · ⛔ dropped (s
   Apple-Speech dictation against the same `/api/recipes/ingest/*` endpoints, with the two
   import buttons gated on the household's provider. Still planned: **instruction-driven edits**
   ("make it vegetarian", "double it").
-- **API-key scopes declared per route, not by path prefix.** Today `API_SCOPES` maps a
+- **API-key scopes declared per route, not by path prefix.** Findings, measurements and
+  the plan in [`api-key-scopes-plan.md`](./api-key-scopes-plan.md). Today `API_SCOPES` maps a
   path *prefix* to a resource and one global gate enforces it (`scopeForRequest` +
   `enforceApiKeyScope`), which has two costs. It is **fragile**: the scope lives far from
   the route, and a hyphenated sibling silently belongs to nobody — `/api/chore-instances`
