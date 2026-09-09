@@ -102,19 +102,35 @@ func TestDowngradeMessageNamesTheVersionsTheSnapshotAndBothWaysOut(t *testing.T)
 	}
 	msg := d.Error()
 	for _, want := range []string{
-		"newer",                    // what happened
-		"0.15.0",                   // the version that wrote the data
-		"0.14.3",                   // the version refusing
-		"0100_update_probe",        // the migration this build does not have
-		"re-install",               // way out 1
-		"waffled-runtime restore",  // way out 2
-		"--yes",                    // …in a form that can be pasted
-		d.Snapshot,                 // …naming the file
-		"2026-09-05T03:00:00Z",     // what restoring would cost
-		"Nothing has been changed", // the reassurance that makes it safe to think
+		"newer",                      // what happened
+		"0.15.0",                     // the version that wrote the data
+		"0.14.3",                     // the version refusing
+		"0100_update_probe",          // the migration this build does not have
+		"re-install",                 // way out 1
+		"waffled-runtime restore",    // way out 2
+		"--yes",                      // …in a form that can be pasted
+		d.Snapshot,                   // …naming the file
+		"2026-09-05T03:00:00Z",       // what restoring would cost
+		"no migration has been run",  // the reassurance that makes it safe to think…
+		"no backup has been deleted", // …in the two terms that actually matter
 	} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("the refusal does not mention %q:\n%s", want, msg)
+		}
+	}
+	// The reassurance has to be TRUE, and the old wording was not: by the time this
+	// refusal is built, Start has rewritten the managed blocks in postgresql.conf and
+	// pg_hba.conf, started the postmaster and run the create-if-not-exists bootstrap.
+	// Those steps are how the question gets asked at all — the schema cannot be compared
+	// with the cluster shut — so the message is what has to change, not the order. A
+	// person reads this line while deciding whether to restore, which is the one
+	// irreversible option on offer; it must not overstate what it knows.
+	for _, wrong := range []string{
+		"before touching the database",
+		"Nothing has been changed",
+	} {
+		if strings.Contains(msg, wrong) {
+			t.Errorf("the refusal still claims %q, which is not true by the time it is shown:\n%s", wrong, msg)
 		}
 	}
 	// It must NOT restore anything by itself: the data the newer version wrote is only

@@ -128,8 +128,20 @@ func (d *Downgrade) Error() string {
 			"`waffled-runtime restore <file> --yes` — no snapshot in %s is old enough for this "+
 			"build to serve, so it would have to be one of your own.\n", d.BackupsDir)
 	}
-	b.WriteString("\nNothing has been changed and no backup has been removed — this stopped before " +
-		"touching the database, and restoring is the one step here that discards anything.")
+	// Precisely what it can promise, and no more. Getting far enough to ASK this question
+	// means Start has already rewritten the managed blocks in postgresql.conf and
+	// pg_hba.conf, started the postmaster and run the create-if-not-exists bootstrap —
+	// the schema cannot be compared with the cluster shut. None of that changes what is
+	// stored, which is the thing being asked about, so the reassurance stands; the older
+	// wording ("this stopped before touching the database") simply was not true, and this
+	// line is read at the moment someone is deciding whether to restore, which is the one
+	// irreversible option on the page.
+	b.WriteString("\nYour data is intact: no migration has been run, nothing in the database has " +
+		"been rewritten or removed, and no backup has been deleted. Starting did get as far as " +
+		"opening the cluster — the managed blocks in postgresql.conf and pg_hba.conf were brought " +
+		"up to date, and the create-if-not-exists bootstrap ran with nothing to do — but it stopped " +
+		"before anything could change what is stored. Restoring is the one step here that discards " +
+		"anything.")
 	return b.String()
 }
 
