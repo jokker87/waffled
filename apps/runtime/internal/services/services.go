@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"strconv"
 
+	"github.com/kevinpsites/waffled/apps/runtime/internal/bonjour"
 	"github.com/kevinpsites/waffled/apps/runtime/internal/caddyconf"
 	"github.com/kevinpsites/waffled/apps/runtime/internal/configenv"
 	"github.com/kevinpsites/waffled/apps/runtime/internal/datadir"
@@ -32,10 +33,14 @@ const (
 	API       = "api"
 	PowerSync = "powersync"
 	Caddy     = "caddy"
+	// Bonjour is the advisory child that advertises the server on the local network.
+	// It is NOT a member of the server: see Plan.Bonjour.
+	Bonjour = "bonjour"
 )
 
 // Order is the dependency order Compose expresses with depends_on + healthchecks.
-// Stopping walks it backwards.
+// Stopping walks it backwards. Bonjour is not here: it is advertised after the server is
+// up and withdrawn before it comes down, but it is not a step of the sequence.
 var Order = []string{Postgres, API, PowerSync, Caddy}
 
 // StorageDatabase is PowerSync's own bucket-storage database, created by 00-init.sql.
@@ -98,6 +103,27 @@ func (p Plan) PortChecks() []PortCheck {
 // immediate crash and restart-loop forever; it is driven through pg_ctl instead.
 func (p Plan) Children() []Spec {
 	return []Spec{p.API(), p.PowerSync(), p.Caddy()}
+}
+
+// Bonjour advertises the running server on the local network through the system DNS-SD
+// client, which registers with mDNSResponder and withdraws the moment it is killed —
+// which is why it is supervised as a child rather than called as a library.
+//
+// It is an ADVISORY child: deliberately not in Children(), not in Order, and not in
+// PortChecks. `status`'s services array is what the menu-bar app renders as rows and
+// what DeriveState summarises into the icon, and a household whose Bonjour registration
+// failed still has a completely working server. It gets its own status block instead.
+func (p Plan) Bonjour(inst bonjour.Instance) Spec {
+	tool := bonjour.Tool()
+	return Spec{
+		Name: Bonjour,
+		Path: tool,
+		Args: inst.Args(tool),
+		Env:  p.baseEnv(),
+		// Port stays 0 on purpose: dns-sd binds nothing. The port being advertised is
+		// Caddy's, and it belongs to the instance and the status block, not here, where
+		// it would look like a port to check.
+	}
 }
 
 // Plan holds everything the specs are derived from.
@@ -165,8 +191,14 @@ func (p Plan) API() Spec {
 		"POWERSYNC_PORT="+strconv.Itoa(p.Ports.PowerSyncPublic),
 		"LOG_FORMAT=json",
 		"LOG_LEVEL=info",
-		// No backup sidecar and no update notifier natively: the Mac app owns both.
-		"BACKUP_ENABLED=false",
+		// There is no backup SIDECAR natively — but there are backups, and the runtime
+		// writes the same backup_runs rows the sidecar does. BACKUP_ENABLED=false makes
+		// the api's health check short-circuit to "backups are turned off", which would
+		// hide those rows and leave Settings → System Health silent about a nightly
+		// backup that had been failing for a week. True is the honest answer: this
+		// install does back up, just not from a container.
+		"BACKUP_ENABLED=true",
+		// The update notifier stays off: the Mac app owns updates (plan §7 Phase 3).
 		"UPDATE_CHECK_ENABLED=false",
 	)
 	env = append(env, p.provenance()...)
@@ -326,20 +358,17 @@ host    replication  all   ::1/128        scram-sha-256
 // alongside -tAc, and break every caller of PsqlCommand at runtime with no compile error.
 func (p Plan) psqlSpec(database string, verb ...string) Spec {
 	psql := p.PostgresBin("psql")
-	args := []string{
-		psql,
-		"-h", "127.0.0.1",
-		"-p", strconv.Itoa(p.Ports.Postgres),
-		"-U", p.Env.PostgresUser(),
+	args := append([]string{psql}, p.pgConnArgs()...)
+	args = append(args,
 		"-d", database,
 		"-v", "ON_ERROR_STOP=1",
 		"--no-psqlrc",
-	}
+	)
 	return Spec{
 		Name:    "psql",
 		Path:    psql,
 		Args:    append(args, verb...),
-		Env:     append(p.baseEnv(), "PGPASSWORD="+p.Env.Get(configenv.KeyPostgresPassword)),
+		Env:     p.pgEnv(),
 		OneShot: true,
 	}
 }

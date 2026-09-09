@@ -1,0 +1,12 @@
+# XcodeGen generates the project from project.yml — don't commit it. Unlike iOS
+# (whose shared scheme is committed so Xcode Cloud can discover it), nothing here is
+# built by CI yet, so the whole generated project is ignored.
+Waffled.xcodeproj/
+Waffled-Info.plist
+
+# Xcode / build artifacts
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+.DS_Store
