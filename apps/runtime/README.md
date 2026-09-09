@@ -289,7 +289,9 @@ Sonoma and later) the Local Network privacy permission.
 `doctor` browses with `dns-sd -t <seconds>` rather than killing the command on a deadline.
 That is load-bearing, not tidiness: dns-sd block-buffers its stdout down a pipe, so a
 browse that ends by being killed comes back empty and would report an empty network on a
-Mac that is advertising perfectly well.
+Mac that is advertising perfectly well. If dns-sd ignores its own deadline and the context
+does have to kill it, that is reported as a browse that **did not finish** — an empty
+result nobody heard is not evidence about the firewall.
 
 A registration that mDNSResponder renamed on a collision (`The Seinfelds (2)`, because a
 neighbour advertised first) still counts as ours.

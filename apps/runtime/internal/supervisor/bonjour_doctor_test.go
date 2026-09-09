@@ -2,6 +2,8 @@ package supervisor
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -56,5 +58,28 @@ func TestBrowseIsBoundedAndReturnsWhatItHeard(t *testing.T) {
 	}
 	if !strings.Contains(out, "_waffled._tcp") {
 		t.Errorf("the browse output was not captured before the deadline killed it:\n%s", out)
+	}
+}
+
+// A browse we had to kill tells us nothing about the network, and must not be reported as
+// one that heard nothing: `doctor` turns an empty result into "check your firewall and the
+// Local Network permission", which is the wrong thing to send someone chasing when the
+// truth is that the subprocess hung.
+func TestABrowseThatRanOutOfTimeIsAnError(t *testing.T) {
+	dir := t.TempDir()
+	tool := filepath.Join(dir, "dns-sd")
+	if err := os.WriteFile(tool, []byte("#!/bin/sh\nexec sleep 30\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	restore := browseTool
+	browseTool = func() string { return tool }
+	t.Cleanup(func() { browseTool = restore })
+
+	out, err := browseBonjour(context.Background(), time.Second)
+	if err == nil {
+		t.Fatalf("a browse that had to be killed was reported as a clean, empty network (out %q)", out)
+	}
+	if !strings.Contains(err.Error(), "did not finish") {
+		t.Errorf("error = %v, want one that says the browse did not finish", err)
 	}
 }

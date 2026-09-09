@@ -419,7 +419,9 @@ const householdCensusSQL = `select count(*) || '|' || coalesce(max(name), '') fr
 // registration almost immediately; this is generous, and it is spent only on `doctor`.
 const browseTimeout = 3 * time.Second
 
-func browseTool() string { return bonjour.Tool() }
+// browseTool is a var so a test can point the browse at a subprocess that behaves badly
+// on purpose. Always the real client in production; nothing outside a test reassigns it.
+var browseTool = func() string { return bonjour.Tool() }
 
 // browseBonjour asks what is on the network and returns whatever it heard.
 //
@@ -438,15 +440,26 @@ func browseBonjour(ctx context.Context, timeout time.Duration) (string, error) {
 	if seconds < 1 {
 		seconds = 1
 	}
-	ctx, cancel := context.WithTimeout(ctx, timeout+2*time.Second)
+	budget := timeout + browseSlack
+	ctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, tool, "-t", strconv.Itoa(seconds), "-B", bonjour.ServiceType, ".").Output()
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		// We had to kill it, so its block-buffered stdout is lost and what came back says
+		// nothing about the network. Reporting it as a clean empty result would send the
+		// operator off to check a firewall that is not the problem.
+		return string(out), fmt.Errorf("the browse did not finish within %s", budget)
+	}
 	if err != nil && ctx.Err() == nil {
 		// It failed for its own reasons rather than because we stopped it.
 		return string(out), err
 	}
 	return string(out), nil
 }
+
+// browseSlack is how much longer than its own `-t` deadline dns-sd is given before the
+// context kills it — for the case where it ignores that deadline.
+const browseSlack = 2 * time.Second
 
 var errNoDNSSD = errors.New("this platform has no dns-sd client")
 
