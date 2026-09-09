@@ -364,19 +364,24 @@ deliberately deferred by the user, so nothing is embedded yet and the app is run
    **embedding** is the half that waits on item 5's signing pipeline, since every binary
    inside `Resources/runtime/` has to be signed with the app.
 2. Icon states (stopped / starting / running / error), the menu from §2, "Open Waffled".
-   *(done — PR #195; the first-run sheet is item 3)* → One SF Symbol family varied by fill
-   and slash (a menu-bar image is a monochrome template, so state cannot be colour),
-   `starting` animated, and the §2 menu including the address-copy, backup and quit-stops-
-   the-server confirmation. On launch it polls once, starts a stopped server, and opens the
-   web app in the browser exactly once — for a start *it* began, so a relaunch re-opens the
-   existing server without stealing the screen.
+   *(done — PR #195; the first-run sheet is item 3)* → The Waffled mark itself — the closed
+   waffle iron from the logo, drawn in CoreGraphics as a template image (a menu-bar image is
+   monochrome, so state cannot be colour): outlined stopped, its six holes cooking one at a
+   time while `starting`, solid running, slashed when it needs a person. The §2 menu is
+   there including the address-copy, backup, `Start Waffled` and the quit-stops-the-server
+   confirmation. On launch it starts a stopped server **once** — the first poll that answers
+   spends the attempt, so a server stopped from Terminal later is left alone — and opens the
+   web app in the browser exactly once, for a start *it* began, so a relaunch re-opens the
+   existing server without stealing the screen. A `stop` that refuses during quit keeps the
+   app alive to say so rather than exiting on a server that is still running.
 3. First-run sheet (welcome → starting → "your server is ready, opening…") and the MacBook
    warning.
 4. Login item via `SMAppService`. *(done — PR #195)* → Wired to `SMAppService.mainApp`, and
    it works in an **unsigned** build: measured on macOS 15.7, an ad-hoc-signed `LSUIElement`
-   app registers from a `DerivedData` path, contrary to the common assumption. The item
-   disables itself with the reason in its own label when the service is unavailable
-   (typically `requiresApproval`, which only System Settings can undo).
+   app registers from a `DerivedData` path, contrary to the common assumption. The status is
+   re-read on every poll, since System Settings can change it behind the app's back; a failed
+   attempt annotates the label and leaves the toggle usable, and only `requiresApproval`
+   (which becomes a button that opens Login Items) and `notFound` stop being a toggle.
 5. Signing + notarization pipeline (every embedded binary), DMG build, Sparkle appcast.
 6. Updater: the Sparkle appcast, swapping `Waffled.app` and relaunching. The **data** half —
    snapshot → migrate → health gate → restore on failure, plus the downgrade guard — is done

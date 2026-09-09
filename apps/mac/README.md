@@ -19,6 +19,8 @@ apps/mac/
     RuntimeClient.swift  # locating waffled-runtime and running its four subcommands
     RuntimeStatus.swift  # decoding `status --json`
     MenuPresentation.swift # icon + menu as pure functions of the last status
+    WaffleIronIcon.swift # the Waffled mark, drawn in CoreGraphics as a template
+    FirstLine.swift      # the one-line-for-the-menu rule, shared
     LoginItem.swift      # SMAppService.mainApp
   Tests/                 # XCTest; no test spawns a process
 ```
@@ -88,6 +90,7 @@ and the menu says so rather than reporting a stopped server.
 ```text
  ● Waffled is running          status only, disabled
    Open Waffled                opens urls.local; needs a running server
+   Start Waffled               appears when it is stopped, or a start refused
    ─────────
    Server address: host:port   click to copy; urls.lan, else the Bonjour host
    Start at login              SMAppService.mainApp
@@ -98,9 +101,18 @@ and the menu says so rather than reporting a stopped server.
    Quit Waffled                confirms, stops the server, then quits
 ```
 
-The icon is one SF Symbol family (`house`, `house.fill`, `house.slash`) because a menu-bar
-image is a monochrome template — macOS recolours it, so state has to be carried by shape.
-`starting` cycles outline and fill on a timer. Colour lives in the status line's dot.
+The app starts the server by itself **once** per launch: the first poll that answers spends
+the attempt, whatever it answers. That is deliberately not "start it whenever it is down" —
+the runtime supervises its own children, and an app that restarted a server somebody had
+just stopped from Terminal would be a second supervisor fighting the first. Everything after
+that one attempt is `Start Waffled`, a click.
+
+The icon is the Waffled mark: the closed waffle iron from the logo — knob, lid, base — drawn
+in CoreGraphics (`WaffleIronIcon.swift`) rather than shipped as an asset, because a menu-bar
+image is a monochrome template that macOS recolours, so state has to be carried by shape.
+Outlined while it is stopped; the lid's six holes fill one at a time while it starts, like a
+waffle cooking; solid when it is running; slashed when it needs a person. Frames are drawn
+once and cached. Colour lives in the status line's dot.
 
 **Start at login** is wired to `SMAppService.mainApp`, and it **works in an unsigned dev
 build**: measured on macOS 15.7, an ad-hoc-signed `LSUIElement` app registers successfully
@@ -110,12 +122,20 @@ adopting it, which is worth knowing because the opposite is widely assumed.
 
 It can still be unavailable — most often `requiresApproval`, meaning someone switched
 Waffled off in System Settings → General → Login Items and no amount of registering from
-here overrides that. When it is unavailable the item is disabled with the reason **in its
-own label**, because `.help(_:)` tooltips do not render on items in a `.menu`-style
-`MenuBarExtra`, and a disabled toggle with no explanation is worse than no toggle.
+here overrides that. Any reason appears **in the item's own label**, because `.help(_:)`
+tooltips do not render on items in a `.menu`-style `MenuBarExtra`.
+
+The status is re-read on every status poll: it is not the app's alone to change. A
+register that *fails* leaves a working toggle with the reason beside it — one refusal from
+launchd is very often transient, and a control you cannot touch cannot be retried. Only two
+statuses stop being a toggle: `requiresApproval`, which becomes a button that opens Login
+Items, and `notFound`, which is the one disabled case.
 
 **Quit** uses an `NSAlert`, not a sheet: an `LSUIElement` app has no window to present one
-from.
+from. It stops the server first — `Stopping…`, with the actions disabled, for as long as
+that takes — and if the stop *refuses*, the app stays where it is, says why, and turns the
+quit item into the second question: **Quit anyway (server keeps running)**. Exiting on a
+failed stop would leave the household's server up with no icon left to explain it.
 
 ## What is not here yet
 
