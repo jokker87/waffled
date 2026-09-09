@@ -93,7 +93,8 @@ Two new pieces, both small:
    Terminal and run `waffled-runtime status`". The menu-bar app shells out to it; nothing the
    GUI does is unavailable from the CLI.
 2. **Menu-bar app** (`apps/mac/`, SwiftUI `MenuBarExtra`, `LSUIElement=true` so there is no
-   Dock icon, macOS 14+ — `MenuBarExtra` needs 13, `@Observable` needs 14). Bundles the runtime and the four service binaries inside
+   Dock icon, macOS 14+ — `MenuBarExtra` needs 13, `@Observable` needs 14). Bundles the
+   runtime and the four service binaries inside
    `Waffled.app/Contents/Resources/runtime/`. Responsibilities: start the runtime on launch,
    poll `status`, render the icon + menu, open the browser, register itself as a login item
    via `SMAppService`, and drive updates with Sparkle.
@@ -358,12 +359,12 @@ deliberately deferred by the user, so nothing is embedded yet and the app is run
 (three environment variables, `apps/mac/README.md`).
 
 1. `apps/mac/` SwiftUI `MenuBarExtra`, XcodeGen project like iOS, bundles the runtime and
-   binaries under `Resources/runtime/`. *(done — PR #TBD)* → The XcodeGen project, the
+   binaries under `Resources/runtime/`. *(done — PR #195)* → The XcodeGen project, the
    `status --json` client and the app are in place, verified against a real bundle; the
    **embedding** is the half that waits on item 5's signing pipeline, since every binary
    inside `Resources/runtime/` has to be signed with the app.
 2. Icon states (stopped / starting / running / error), the menu from §2, "Open Waffled".
-   *(done — PR #TBD; the first-run sheet is item 3)* → One SF Symbol family varied by fill
+   *(done — PR #195; the first-run sheet is item 3)* → One SF Symbol family varied by fill
    and slash (a menu-bar image is a monochrome template, so state cannot be colour),
    `starting` animated, and the §2 menu including the address-copy, backup and quit-stops-
    the-server confirmation. On launch it polls once, starts a stopped server, and opens the
@@ -371,7 +372,7 @@ deliberately deferred by the user, so nothing is embedded yet and the app is run
    existing server without stealing the screen.
 3. First-run sheet (welcome → starting → "your server is ready, opening…") and the MacBook
    warning.
-4. Login item via `SMAppService`. *(done — PR #TBD)* → Wired to `SMAppService.mainApp`, and
+4. Login item via `SMAppService`. *(done — PR #195)* → Wired to `SMAppService.mainApp`, and
    it works in an **unsigned** build: measured on macOS 15.7, an ad-hoc-signed `LSUIElement`
    app registers from a `DerivedData` path, contrary to the common assumption. The item
    disables itself with the reason in its own label when the service is unavailable
