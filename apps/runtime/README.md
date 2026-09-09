@@ -82,6 +82,15 @@ Crashed services come back with an exponential backoff capped at 30s — Compose
 healthy once, so a service that has never worked fails the start instead of looping over
 the same misconfiguration.
 
+"Healthy once" needs a definition for the one child with nothing to poll (the Bonjour
+advertiser): it is given half a second to prove it means to stay, and a process gone
+inside that window is a **start failure** returned to the caller, not a started service.
+The advertiser is also the only child whose restarts are capped — five immediate deaths in
+a row and supervision gives up, records why in `bonjour.json` and logs it once, because a
+dns-sd mDNSResponder has refused will not start working on the fiftieth attempt. Giving up
+is safe precisely because that child is advisory. Every other service still retries
+forever: a database that keeps dying should keep trying to come back.
+
 ## Data directory
 
 Default `~/Library/Application Support/Waffled` — note the space in that path, which is

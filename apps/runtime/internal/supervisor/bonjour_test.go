@@ -4,11 +4,14 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/kevinpsites/waffled/apps/runtime/internal/bonjour"
+	"github.com/kevinpsites/waffled/apps/runtime/internal/datadir"
+	"github.com/kevinpsites/waffled/apps/runtime/internal/services"
 )
 
 func TestParseCensusReadsWhatPsqlPrints(t *testing.T) {
@@ -261,5 +264,39 @@ func TestATransientAdvertiseFailureIsRetried(t *testing.T) {
 	defer mu.Unlock()
 	if attempts != 2 {
 		t.Errorf("%d attempts, want 2 — polling must stop once the household is on the network", attempts)
+	}
+}
+
+// The advertiser has no health URL, so startChild used to report success the moment exec
+// returned. A dns-sd that mDNSResponder refuses exits immediately, and the caller was
+// handed a "started" service that was already gone — leaving `bonjour.json` with no error
+// at all while the restart loop flapped.
+func TestAHealthlessChildThatExitsAtOnceIsAStartFailure(t *testing.T) {
+	s := &Supervisor{
+		log: testLogger(t), runner: newTestRunner(t), children: map[string]*child{},
+		plan: services.Plan{Layout: datadir.At(t.TempDir())},
+	}
+	err := s.startChild(context.Background(), shell(services.Bonjour, "exit 7"), 0)
+	if err == nil {
+		t.Fatal("a child that exited immediately was reported as started")
+	}
+	if !strings.Contains(err.Error(), "7") {
+		t.Errorf("error = %v, want the exit status the caller has to record", err)
+	}
+}
+
+// The same window must not turn an ordinary start into a failure.
+func TestAHealthlessChildThatStaysUpStartsCleanly(t *testing.T) {
+	s := &Supervisor{
+		log: testLogger(t), runner: newTestRunner(t), children: map[string]*child{},
+		plan: services.Plan{Layout: datadir.At(t.TempDir())},
+	}
+	spec := shell(services.Bonjour, "exec sleep 30")
+	if err := s.startChild(context.Background(), spec, 0); err != nil {
+		t.Fatalf("a healthy long-running child was refused: %v", err)
+	}
+	t.Cleanup(func() { s.stopBonjourChild() })
+	if !s.serviceRunning(services.Bonjour) {
+		t.Error("the child is not running after a successful start")
 	}
 }

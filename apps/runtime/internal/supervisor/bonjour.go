@@ -270,7 +270,53 @@ func (s *Supervisor) advertise(ctx context.Context, census bonjour.Census) adver
 	return a
 }
 
+// bonjourMaxQuickFailures is how many immediate deaths in a row the advertiser gets
+// before supervision stops restarting it. Unlike a server service, a dns-sd that cannot
+// register is not going to start working on the fiftieth attempt — mDNSResponder has
+// refused it — and a flap nobody caps is a loop with no one watching. Giving up is safe
+// precisely because this child is advisory: the server keeps serving.
+const bonjourMaxQuickFailures = 5
+
+// supervise arms restart supervision, with the advertiser's own policy attached.
+//
+// It is the one child whose failures another process has to learn about second-hand: the
+// menu-bar app and `status` read bonjour.json, not this process's memory, so an exit that
+// is only recorded in a *child struct is an exit nobody can see.
+func (s *Supervisor) supervise(c *child, spec services.Spec) {
+	if spec.Name == services.Bonjour {
+		c.maxQuickFailures = bonjourMaxQuickFailures
+		c.report = s.reportBonjourExit
+	}
+	c.superviseRestarts()
+}
+
+// reportBonjourExit keeps bonjour.json honest about a dns-sd that is flapping or has been
+// given up on — and clears the reason once it is running again, because `status` reads
+// "advertised" as "the child is running AND nothing was recorded against it".
+func (s *Supervisor) reportBonjourExit(reason string, gaveUp bool) {
+	if gaveUp {
+		reason += " — not advertising any more; restart the server to try again"
+	}
+	s.bonjourMu.Lock()
+	defer s.bonjourMu.Unlock()
+	st, ok := readBonjourState(s.plan.Layout.BonjourState)
+	if !ok {
+		return
+	}
+	st.Error = reason
+	s.writeBonjour(st)
+}
+
 func (s *Supervisor) recordBonjour(st bonjourState) {
+	s.bonjourMu.Lock()
+	defer s.bonjourMu.Unlock()
+	s.writeBonjour(st)
+}
+
+// writeBonjour records the state; the caller holds bonjourMu. Two goroutines write this
+// file — the refresh poll and the restart supervisor's report — and atomicfile prevents a
+// torn file, not a lost update.
+func (s *Supervisor) writeBonjour(st bonjourState) {
 	st.SupervisorPID = os.Getpid()
 	if err := writeBonjourState(s.plan.Layout.BonjourState, st); err != nil {
 		s.log.Warnf("could not record the Bonjour advertisement: %v", err)

@@ -93,6 +93,9 @@ type Supervisor struct {
 	bonjourStop chan struct{}
 	bonjourOnce sync.Once
 	bonjourWait sync.WaitGroup
+	// bonjourMu serialises the read-modify-write of bonjour.json, which the refresh poll
+	// and the advertiser's restart supervisor both touch.
+	bonjourMu sync.Mutex
 
 	// waitHealthy gates a service on its health URL. It is a field, always set to
 	// waitHTTP in production, purely so the rollback test can make the api's gate fail
@@ -415,10 +418,18 @@ func (s *Supervisor) startChild(ctx context.Context, spec services.Spec, timeout
 	s.children[spec.Name] = c
 	s.mu.Unlock()
 
-	if spec.HealthURL == "" {
-		// Nothing to poll (the Bonjour advertiser). Claiming it is "healthy" would be a
-		// health check nobody ran.
-		c.superviseRestarts()
+	if spec.HealthURL == "" && !spec.OneShot {
+		// Nothing to poll — the Bonjour advertiser is the only such child today (api,
+		// PowerSync and Caddy all have a health URL, and one-shots never come through
+		// here). Claiming it is "healthy" would be a health check nobody ran, but exec
+		// returning is not a start either: a dns-sd that mDNSResponder refuses is gone
+		// before this line, and reporting success handed the caller a service that was
+		// already dead and about to flap.
+		if reason, exited := c.exitedWithin(quickExitWindow); exited {
+			return fmt.Errorf("%s did not stay running: %s\nsee %s",
+				spec.Name, reason, s.plan.Layout.LogPath(spec.Name))
+		}
+		s.supervise(c, spec)
 		s.log.Infof("%s started (pid %d)", spec.Name, c.currentPid())
 		return nil
 	}
@@ -426,7 +437,7 @@ func (s *Supervisor) startChild(ctx context.Context, spec services.Spec, timeout
 		return fmt.Errorf("%s did not become healthy: %w\nsee %s",
 			spec.Name, err, s.plan.Layout.LogPath(spec.Name))
 	}
-	c.superviseRestarts()
+	s.supervise(c, spec)
 	s.log.Infof("%s healthy (pid %d)", spec.Name, c.currentPid())
 	return nil
 }
