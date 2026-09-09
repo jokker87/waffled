@@ -34,9 +34,9 @@ func TestRoundTrip(t *testing.T) {
 		// just live in the process that wrote it: `status` runs as a separate command
 		// and the menu-bar app polls it, so "updated to X from Y" is only answerable
 		// from disk.
-		BundleVersion:         "0.15.0",
-		PreviousBundleVersion: "0.14.3",
-		BundleUpdatedAt:       "2026-09-08T03:00:00Z",
+		BundleVersion:          "0.15.0",
+		PreviousBundleVersion:  "0.14.3",
+		BundleVersionChangedAt: "2026-09-08T03:00:00Z",
 	}
 	if err := Save(path, want); err != nil {
 		t.Fatal(err)

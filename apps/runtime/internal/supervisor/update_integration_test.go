@@ -164,7 +164,7 @@ func TestUpdateAcrossTwoBundleVersions(t *testing.T) {
 	if rep.Bundle.PreviousVersion != versionA {
 		t.Errorf("status reports bundle.previousVersion %q, want %q", rep.Bundle.PreviousVersion, versionA)
 	}
-	if rep.Bundle.UpdatedAt == "" {
+	if rep.Bundle.VersionChangedAt == "" {
 		t.Error("status reports no bundle.updatedAt, so the menu bar cannot say when the update happened")
 	}
 	if rep.State != status.StateRunning {

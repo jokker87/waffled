@@ -438,7 +438,7 @@ func (s *Supervisor) recordBundleVersion() {
 			// against, and calling that an update would have the menu bar greet every
 			// new install with "Updated to 0.15.0".
 			s.state.PreviousBundleVersion = previous
-			s.state.BundleUpdatedAt = time.Now().UTC().Format(time.RFC3339)
+			s.state.BundleVersionChangedAt = time.Now().UTC().Format(time.RFC3339)
 			s.log.Infof("this data directory was last served by %s; it is now on %s", previous, version)
 		}
 		s.state.BundleVersion = version
@@ -644,7 +644,7 @@ func (s *Supervisor) Status(ctx context.Context) *status.Report {
 	// place "what was this before?" can come from is the file the start wrote it to.
 	if s.state != nil {
 		r.Bundle.PreviousVersion = s.state.PreviousBundleVersion
-		r.Bundle.UpdatedAt = s.state.BundleUpdatedAt
+		r.Bundle.VersionChangedAt = s.state.BundleVersionChangedAt
 	}
 	if pid, err := readPidfile(s.runner.pidPath(SupervisorPidName)); err == nil {
 		r.Supervisor = status.Supervisor{PID: pid, Running: processAlive(pid)}

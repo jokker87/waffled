@@ -338,7 +338,9 @@ Throwaway bash under `infra/native/spike/`. Purpose: **learn**, not build.
    refuses to open data a newer build has already migrated and says how to get out of it —
    re-install the newer version, or restore the newest snapshot this build can actually
    serve. `status --json` grows `bundle.version`, `bundle.previousVersion` and
-   `bundle.updatedAt` for the menu bar's "Updated to X". The whole loop is tested against two
+   `bundle.versionChangedAt` — direction-neutral, because re-installing an older build is the
+   documented recovery here, so `status` derives "updated from" / "rolled back from" /
+   "changed from" by comparing the two versions. The whole loop is tested against two
    real bundles over one data directory, including re-installing the previous version onto
    rolled-back data — the half a person does, which nothing had exercised before.
 6. **Exit criterion:** `waffled-runtime start` on a fresh Mac user account reaches green in

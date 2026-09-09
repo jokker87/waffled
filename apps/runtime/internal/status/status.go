@@ -60,13 +60,20 @@ type Bundle struct {
 	// and a reader comparing "which version, from which version" should not have to
 	// join two objects to do it.
 	Version string `json:"version"`
-	// PreviousVersion and UpdatedAt describe the last version CROSSING this data went
-	// through: what it was served by before, and when the change happened. Both are
+	// PreviousVersion and VersionChangedAt describe the last version CROSSING this data
+	// went through: what it was served by before, and when the change happened. Both are
 	// read from runtime.json rather than computed, so they survive restarts and are the
-	// same whether the stack is up or down — they are what the menu-bar app turns into
-	// "Updated to 0.15.0". Empty on data that has only ever known one version.
-	PreviousVersion string `json:"previousVersion"`
-	UpdatedAt       string `json:"updatedAt"`
+	// same whether the stack is up or down. Empty on data that has only ever known one
+	// version.
+	//
+	// Both names are direction-NEUTRAL on purpose. A crossing is two endpoints and a
+	// moment; which way it went is a comparison of the two versions (see crossingPhrase),
+	// and a reader that wants to say "Updated to 0.15.0" has to make that comparison
+	// rather than assume it. Assuming it is how the text rendering came to greet the
+	// documented downgrade recovery — re-install the older build, restore the snapshot —
+	// with "updated from 0.15.0".
+	PreviousVersion  string `json:"previousVersion"`
+	VersionChangedAt string `json:"versionChangedAt"`
 }
 
 // URLs are the addresses to hand a person. Local works on this Mac; LAN is what a phone
@@ -222,7 +229,8 @@ func (r *Report) Text() string {
 	fmt.Fprintf(&b, "  data:   %s\n", r.DataDir)
 	fmt.Fprintf(&b, "  bundle: %s\n", r.BundleDir)
 	if r.Bundle.PreviousVersion != "" {
-		fmt.Fprintf(&b, "  updated from %s on %s\n", r.Bundle.PreviousVersion, r.Bundle.UpdatedAt)
+		fmt.Fprintf(&b, "  %s %s on %s\n",
+			r.Bundle.crossingPhrase(), r.Bundle.PreviousVersion, r.Bundle.VersionChangedAt)
 	}
 	if r.URLs.Local != "" {
 		fmt.Fprintf(&b, "  open:   %s\n", r.URLs.Local)

@@ -637,10 +637,29 @@ it, and a start that fails must leave that record intact. It is the `from` half 
 snapshot's name and of the guard's message.
 
 A start that finds a different version than the file remembered also writes
-`previousBundleVersion` and `bundleUpdatedAt`, which surface additively in `status --json`
-as `bundle.version`, `bundle.previousVersion` and `bundle.updatedAt` — what the menu-bar
-app turns into "Updated to 0.15.0". They come from the file rather than from the process
-that did the updating, because `status` is a separate command run seconds later.
+`previousBundleVersion` and `bundleVersionChangedAt`, which surface additively in
+`status --json` as `bundle.version`, `bundle.previousVersion` and
+`bundle.versionChangedAt`. They come from the file rather than from the process that did
+the changing, because `status` is a separate command run seconds later.
+
+Every one of those names is **direction-neutral**, and that is the point. A crossing is
+two endpoints and a moment; it has no direction of its own. Re-installing an **older**
+build is the documented recovery from the downgrade guard, so a rollback is exactly as
+ordinary as an update here, and a field called `updatedAt` invites a reader to assume
+otherwise — which is how `status` came to greet that recovery with "updated from 0.15.0".
+
+Which way it went is **derived** from the two versions, by comparing the `MAJOR.MINOR.PATCH`
+prefix numerically (`+build` metadata is ignored: it says which build, never which is
+newer). `status` prints one of three lines, and anything rendering these fields should make
+the same comparison rather than assume:
+
+| what happened | the line |
+|---|---|
+| the new version sorts **after** the old | `updated from 0.14.3 on 2026-09-08T03:00:00Z` |
+| the new version sorts **before** the old | `rolled back from 0.15.0 on 2026-09-08T03:00:00Z` |
+| the two cannot be ordered — a dev build, a pre-release, or the same version rebuilt | `changed from main-abc1234 on 2026-09-08T03:00:00Z` |
+
+Data that has only ever known one version has no crossing and gets no line at all.
 
 ## Tests
 
