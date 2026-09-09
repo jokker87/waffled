@@ -294,7 +294,10 @@ does have to kill it, that is reported as a browse that **did not finish** — a
 result nobody heard is not evidence about the firewall.
 
 A registration that mDNSResponder renamed on a collision (`The Seinfelds (2)`, because a
-neighbour advertised first) still counts as ours.
+neighbour advertised first) still counts as ours. Nothing else does: the match is the name
+exactly, or the name followed by `" ("`, so a neighbour's `Smith Family` is not read as the
+household `Smith` — a stranger's advertisement counted as ours would turn a registration
+the firewall is blocking into a clean bill of health.
 
 ## The bundle contract
 

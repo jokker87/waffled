@@ -32,6 +32,16 @@ func TestBrowseOutputFindsOurInstance(t *testing.T) {
 	if !instanceSeen(renamed, "The Seinfelds") {
 		t.Error("an instance renamed by mDNSResponder on a collision was not recognised")
 	}
+	// But a neighbour whose household name merely STARTS with ours is somebody else's
+	// advertisement, and counting it would report "discoverable" while this Mac's own
+	// registration is blocked — a false pass hiding the real fault.
+	neighbour := strings.ReplaceAll(browseOutput, "The Seinfelds", "The Seinfelds Next Door")
+	if instanceSeen(neighbour, "The Seinfelds") {
+		t.Error("a different household whose name starts with ours was matched")
+	}
+	if instanceSeen(strings.ReplaceAll(browseOutput, "The Seinfelds", "Smith Family"), "Smith") {
+		t.Error(`"Smith Family" was matched for the household "Smith"`)
+	}
 	// A browse that saw nothing, and a removal, are both "not there".
 	if instanceSeen("Browsing for _waffled._tcp\n...STARTING...\n", "The Seinfelds") {
 		t.Error("an empty browse reported an instance")

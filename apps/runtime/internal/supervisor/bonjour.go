@@ -465,9 +465,11 @@ var errNoDNSSD = errors.New("this platform has no dns-sd client")
 
 // instanceSeen reads dns-sd's browse table for one of our own registrations.
 //
-// The name is matched as a PREFIX of the instance column: mDNSResponder appends " (2)"
-// when another Mac on the network already advertises the same household name, and that
-// renamed instance is still ours.
+// The match is the name exactly, or the name followed by " (" — mDNSResponder appends
+// " (2)" when another Mac on the network already advertises the same household name, and
+// that renamed instance is still ours. A bare prefix match would also swallow a
+// neighbour's "Smith Family" for a household called "Smith", and reporting a stranger's
+// advertisement as ours turns a blocked registration into a clean bill of health.
 func instanceSeen(out, name string) bool {
 	if strings.TrimSpace(name) == "" {
 		return false
@@ -480,7 +482,7 @@ func instanceSeen(out, name string) bool {
 			continue
 		}
 		instance := strings.Join(fields[6:], " ")
-		if strings.HasPrefix(instance, name) {
+		if instance == name || strings.HasPrefix(instance, name+" (") {
 			return true
 		}
 	}
